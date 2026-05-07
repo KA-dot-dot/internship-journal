@@ -1078,38 +1078,40 @@ async function bindStudent() {
 async function batchBindStudents() {
   const raw = document.getElementById('batch-bind-data').value.trim();
   if (!raw) return toast('請貼上資料', 'error');
-  const lines = raw.split('
-').filter(l => l.trim());
+  const lines = raw.split('\n').filter(l => l.trim());
   const { doc, setDoc, getDoc } = firebase_funcs;
   const resultEl = document.getElementById('batch-bind-result');
   resultEl.textContent = '處理中...';
   let ok = 0, errors = [];
   for (const line of lines) {
-    const sep = line.includes('	') ? '	' : (line.includes(',') ? ',' : ' ');
-    const parts = line.split(sep).map(s => s.trim()).filter(Boolean);
-    if (parts.length < 2) { errors.push(`格式錯誤：${line}`); continue; }
-    // 自動判斷哪個是座號哪個是 email
+    const parts = line.split(/[\t,\s]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length < 2) { errors.push('格式錯誤：' + line); continue; }
     let seat, email;
     if (parts[0].includes('@')) { email = parts[0]; seat = parts[1]; }
     else { seat = parts[0]; email = parts[1]; }
-    seat = seat.replace(/^0*/, '').padStart(2, '0');
+    seat = String(parseInt(seat) || 0).padStart(2, '0');
     email = email.toLowerCase();
-    if (!email.includes('@')) { errors.push(`Email 格式錯誤：${line}`); continue; }
+    if (!email.includes('@')) { errors.push('Email錯誤：' + line); continue; }
     try {
       const stuSnap = await getDoc(doc(db, 'students', seat));
-      const studentName = stuSnap.exists() ? stuSnap.data().name || '' : '';
+      const studentName = stuSnap.exists() ? (stuSnap.data().name || '') : '';
       await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
         email, seatNo: seat, studentName,
         boundAt: new Date().toISOString(), boundBy: currentUser.email
       });
       ok++;
-    } catch(e) { errors.push(`${seat} ${email}：${e.message}`); }
+    } catch(e) { errors.push(seat + ' ' + email + ': ' + e.message); }
   }
-  resultEl.innerHTML = `<span style="color:var(--accent-green)">✅ 成功 ${ok} 筆</span>` +
-    (errors.length ? `<span style="color:var(--accent-red);margin-left:8px">❌ 失敗 ${errors.length} 筆</span>` : '');
-  if (ok > 0) { document.getElementById('batch-bind-data').value = ''; loadBindingList(); toast(`批次綁定完成：${ok} 筆`, 'success'); }
-  if (errors.length) console.warn('批次綁定錯誤:', errors);
+  resultEl.innerHTML = '<span style="color:var(--accent-green)">✅ 成功 ' + ok + ' 筆</span>' +
+    (errors.length ? '<span style="color:var(--accent-red);margin-left:8px">❌ 失敗 ' + errors.length + ' 筆</span>' : '');
+  if (ok > 0) {
+    document.getElementById('batch-bind-data').value = '';
+    loadBindingList();
+    toast('批次綁定完成：' + ok + ' 筆', 'success');
+  }
+  if (errors.length) console.warn('錯誤:', errors);
 }
+
 
 async function loadBindingList() {
   const { collection, getDocs } = firebase_funcs;
