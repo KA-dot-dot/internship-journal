@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -16,14 +17,14 @@
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
- const firebaseConfig = {
-  apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
-  authDomain: "project-4256549712592005708.firebaseapp.com",
-  projectId: "project-4256549712592005708",
-  storageBucket: "project-4256549712592005708.firebasestorage.app",
-  messagingSenderId: "501835005211",
-  appId: "1:501835005211:web:4a415978a06b860d4727be"
-};
+  const firebaseConfig = {
+    apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
+    authDomain: "project-4256549712592005708.firebaseapp.com",
+    projectId: "project-4256549712592005708",
+    storageBucket: "project-4256549712592005708.appspot.com",
+    messagingSenderId: "590183508052211",
+    appId: "1:590183508052211:web:4a415978a06b060d04737be"
+  };
 
   const app = initializeApp(firebaseConfig);
   const db = initializeFirestore(app, { localCache: { kind: 'memory' } });
@@ -582,17 +583,31 @@ tr:last-child td { border-bottom: none; }
           <div style="font-size:15px;font-weight:700;margin-bottom:6px">🔗 學生 Google 帳號綁定</div>
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">將學生的學校 Google email 對應到座號，完成後學生才能用 Google 帳號登入</p>
 
-          <!-- 快速綁定（單筆）-->
+          <!-- 單筆綁定 -->
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px">✏️ 單筆綁定</div>
           <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end">
             <div style="flex:1;min-width:200px">
               <label>學生 Email</label>
-              <input type="text" id="bind-email" placeholder="例：s1234@tcivs.tc.edu.tw">
+              <input type="text" id="bind-email" placeholder="例：u333101@tcivs.tc.edu.tw">
             </div>
             <div style="width:100px">
               <label>座號</label>
               <input type="text" id="bind-seat" placeholder="例：03" maxlength="4">
             </div>
             <button class="btn btn-primary" onclick="bindStudent()">🔗 綁定</button>
+          </div>
+
+          <!-- 批次匯入 -->
+          <div style="font-size:14px;font-weight:600;margin-bottom:8px">📥 批次匯入</div>
+          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
+            格式：每行一筆，<code style="color:var(--accent)">座號　Email</code>（Tab 或逗號分隔）<br>
+            範例：<code style="color:var(--accent)">01　u333101@tcivs.tc.edu.tw</code><br>
+            可從 Excel 複製後直接貼上
+          </div>
+          <textarea id="batch-bind-data" rows="6" placeholder="01&#9;u333101@tcivs.tc.edu.tw&#10;02&#9;u333102@tcivs.tc.edu.tw" style="margin-bottom:10px;font-family:monospace;font-size:13px"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="batchBindStudents()">📥 批次綁定</button>
+            <span id="batch-bind-result" style="font-size:13px"></span>
           </div>
 
           <!-- 現有綁定清單 -->
@@ -1058,6 +1073,42 @@ async function bindStudent() {
     hideLoading();
     toast('綁定失敗：' + e.message, 'error');
   }
+}
+
+async function batchBindStudents() {
+  const raw = document.getElementById('batch-bind-data').value.trim();
+  if (!raw) return toast('請貼上資料', 'error');
+  const lines = raw.split('
+').filter(l => l.trim());
+  const { doc, setDoc, getDoc } = firebase_funcs;
+  const resultEl = document.getElementById('batch-bind-result');
+  resultEl.textContent = '處理中...';
+  let ok = 0, errors = [];
+  for (const line of lines) {
+    const sep = line.includes('	') ? '	' : (line.includes(',') ? ',' : ' ');
+    const parts = line.split(sep).map(s => s.trim()).filter(Boolean);
+    if (parts.length < 2) { errors.push(`格式錯誤：${line}`); continue; }
+    // 自動判斷哪個是座號哪個是 email
+    let seat, email;
+    if (parts[0].includes('@')) { email = parts[0]; seat = parts[1]; }
+    else { seat = parts[0]; email = parts[1]; }
+    seat = seat.replace(/^0*/, '').padStart(2, '0');
+    email = email.toLowerCase();
+    if (!email.includes('@')) { errors.push(`Email 格式錯誤：${line}`); continue; }
+    try {
+      const stuSnap = await getDoc(doc(db, 'students', seat));
+      const studentName = stuSnap.exists() ? stuSnap.data().name || '' : '';
+      await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
+        email, seatNo: seat, studentName,
+        boundAt: new Date().toISOString(), boundBy: currentUser.email
+      });
+      ok++;
+    } catch(e) { errors.push(`${seat} ${email}：${e.message}`); }
+  }
+  resultEl.innerHTML = `<span style="color:var(--accent-green)">✅ 成功 ${ok} 筆</span>` +
+    (errors.length ? `<span style="color:var(--accent-red);margin-left:8px">❌ 失敗 ${errors.length} 筆</span>` : '');
+  if (ok > 0) { document.getElementById('batch-bind-data').value = ''; loadBindingList(); toast(`批次綁定完成：${ok} 筆`, 'success'); }
+  if (errors.length) console.warn('批次綁定錯誤:', errors);
 }
 
 async function loadBindingList() {
