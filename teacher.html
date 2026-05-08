@@ -1313,18 +1313,35 @@ async function importStudents() {
   const lines = raw.split('\n').filter(l => l.trim());
   const { doc, setDoc } = firebase_funcs;
   const firstLine = lines[0];
+  // 優先用 Tab 分隔（Excel 複製預設是 Tab）
   const sep = firstLine.includes('\t') ? '\t' : ',';
-  const HEADER_KEYWORDS = ['姓名','座號','學號','性別','生日','名稱','公司'];
-  const dataLines = lines.filter(l => { const first = l.split(sep)[0].trim(); return !HEADER_KEYWORDS.some(k => first.includes(k)); });
+  // 排除標題行（第一欄包含任一關鍵字）
+  const HEADER_KEYWORDS = ['姓名','座號','學號','性別','生日','名稱','公司','錄取','實習'];
+  const dataLines = lines.filter(l => {
+    const first = l.split(sep)[0].trim();
+    return !HEADER_KEYWORDS.some(k => first.includes(k));
+  });
   showLoading();
   let ok = 0, errors = [];
   for (const line of dataLines) {
+    // Tab 分隔時用 split(\t)，保留公司名稱中的逗號
     const cols = line.split(sep).map(s => s.trim());
-    const [name, seat, sid, gender, bdayRaw, company] = cols;
-    if (!seat || !name) { errors.push(`跳過（資料不足）：${line}`); continue; }
-    const bday = normalizeBirthday(bdayRaw || '');
-    const seatNo = seat.padStart(2,'0');
-    await setDoc(doc(db, 'students', seatNo), { seatNo, studentId: sid||'', name, gender: gender||'', birthday: bday||bdayRaw||'', company: company||'', updatedAt: new Date().toISOString() });
+    // 欄位：姓名、座號、學號、性別、生日、公司（第6欄起合併，防止公司名含分隔符）
+    const name = cols[0] || '';
+    const seat = cols[1] || '';
+    const sid = cols[2] || '';
+    const gender = cols[3] || '';
+    const bdayRaw = cols[4] || '';
+    // 公司名稱：取第6欄之後所有內容合併（防止被分割）
+    const company = cols.slice(5).join(sep === '\t' ? '' : ',').trim();
+    if (!seat || !name) { errors.push('跳過（資料不足）：' + line.slice(0,30)); continue; }
+    const bday = normalizeBirthday(bdayRaw);
+    const seatNo = String(parseInt(seat) || 0).padStart(2,'0');
+    await setDoc(doc(db, 'students', seatNo), {
+      seatNo, studentId: sid, name, gender,
+      birthday: bday || bdayRaw, company,
+      updatedAt: new Date().toISOString()
+    });
     ok++;
   }
   hideLoading();
