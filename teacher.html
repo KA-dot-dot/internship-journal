@@ -1193,9 +1193,9 @@ async function loadStudentsTable() {
 
     let googleCell;
     if (binding) {
-      googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap">
-        <span class="badge badge-green" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1;height:26px;display:inline-flex;align-items:center" title="${binding.email}">✅ ${binding.email}</span>
-        <button class="btn btn-danger btn-sm" style="flex-shrink:0;height:26px;line-height:1;display:inline-flex;align-items:center" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
+      googleCell = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${binding.email}">✅ ${binding.email}</span>
+        <button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
       </div>`;
     } else {
       googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
