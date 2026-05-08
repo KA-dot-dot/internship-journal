@@ -345,6 +345,11 @@ tr:last-child td { border-bottom: none; }
       <button class="nav-item" onclick="showPage('t-settings')" data-page="t-settings">
         <span class="icon">⚙️</span> 系統設定
       </button>
+      <div style="padding:12px;margin-top:auto">
+        <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="switchToStudentMode()">
+          🎓 切換學生模式測試
+        </button>
+      </div>
     </div>
 
     <!-- Main Content -->
@@ -529,13 +534,14 @@ tr:last-child td { border-bottom: none; }
       <!-- ========== 老師：月記總覽 ========== -->
       <div id="page-t-journals" class="hidden fade-in">
         <div class="page-title">📖 月記總覽</div>
-        <div class="page-subtitle">瀏覽所有學生的月記內容</div>
+        <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
           <input type="date" id="t-journals-date-start" style="min-width:150px">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
           <input type="date" id="t-journals-date-end" style="min-width:150px">
           <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals()">🔄 重新整理</button>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
         </div>
         <div id="t-journals-list"></div>
@@ -685,6 +691,24 @@ tr:last-child td { border-bottom: none; }
           <a href="https://console.cloudinary.com/settings/billing/plans" target="_blank" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:var(--bg3);color:var(--text1);border:1px solid var(--border)">🔗 前往 Cloudinary 查看用量</a>
         </div>
         </div>
+      </div>
+
+      <!-- ========== 學生模式模擬 ========== -->
+      <div id="page-s-sim" class="hidden fade-in">
+        <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><span style="color:var(--accent-yellow);font-weight:700">🎓 學生模式測試中</span><span style="color:var(--text2);font-size:13px;margin-left:8px">以學生身份操作，資料會真實寫入</span></div>
+          <button class="btn btn-secondary btn-sm" onclick="exitStudentMode()">↩ 返回老師模式</button>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">模擬學生</div><div style="font-size:15px;font-weight:700;margin-top:6px" id="sim-student-name">-</div></div>
+          <div class="stat-card"><div class="stat-label">實習公司</div><div style="font-size:15px;font-weight:700;margin-top:6px" id="sim-company">-</div></div>
+          <div class="stat-card"><div class="stat-label">已繳月份</div><div class="stat-value" style="color:var(--accent-green)" id="sim-count">-</div></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="simShowWrite()">✏️ 填寫月記</button>
+          <button class="btn btn-secondary" onclick="simLoadHistory()">📚 查看歷史</button>
+        </div>
+        <div id="sim-content"></div>
       </div>
 
     </div><!-- end main-content -->
@@ -1505,7 +1529,8 @@ async function loadLocationStats() {
   const cityMap = {};
   journals.forEach(j => {
     (j.entries||[]).forEach(e => {
-      const city = (e.address||'').match(/^(.+?[縣市])/)?.[1] || '未知';
+      const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
+      const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
     });
   });
@@ -1813,6 +1838,84 @@ function printJournalsPDF(journals, title) {
 function toggleLocDetail(subId) {
   const el = document.getElementById(subId);
   if (el) el.classList.toggle('hidden');
+}
+
+// ============================================================
+// ===== 學生模式模擬 ==========================================
+// ============================================================
+
+let simStudent = null; // 模擬的學生資料
+
+async function switchToStudentMode() {
+  await waitForFirebaseAsync();
+  const { doc, getDoc, getDocs, collection, query, where } = firebase_funcs;
+
+  // 找老師帳號對應的學生綁定
+  const emailKey = currentUser.email.replace(/[@.]/g, '_');
+  const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
+
+  if (!bindSnap.exists()) {
+    toast('❌ 請先在帳號管理中將你的 email 綁定到一個測試座號（如 00）', 'error');
+    showPage('t-admin');
+    return;
+  }
+
+  const binding = bindSnap.data();
+  const seatNo = binding.seatNo;
+  const stuSnap = await getDoc(doc(db, 'students', seatNo));
+
+  if (!stuSnap.exists()) {
+    toast('❌ 請先在學生管理新增測試學生資料（座號：' + seatNo + '）', 'error');
+    showPage('t-students');
+    return;
+  }
+
+  const stuData = stuSnap.data();
+  simStudent = {
+    seatNo,
+    name: stuData.name || '測試學生',
+    company: stuData.company || '-',
+    studentId: stuData.studentId || '',
+    email: currentUser.email
+  };
+
+  document.getElementById('sim-student-name').textContent = simStudent.seatNo + ' ' + simStudent.name;
+  document.getElementById('sim-company').textContent = simStudent.company;
+
+  // 載入已繳數量
+  const jSnap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',seatNo)));
+  document.getElementById('sim-count').textContent = jSnap.size;
+
+  showPage('s-sim');
+  toast('已切換為學生模式：' + simStudent.name, 'success');
+}
+
+function exitStudentMode() {
+  simStudent = null;
+  showPage('t-dashboard');
+  toast('已返回老師模式', 'info');
+}
+
+async function simLoadHistory() {
+  if (!simStudent) return;
+  const { collection, getDocs, query, where } = firebase_funcs;
+  showLoading();
+  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',simStudent.seatNo)));
+  hideLoading();
+  const journals = snap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  document.getElementById('sim-content').innerHTML = journals.length
+    ? journals.map(j => renderJournalCard(j, false)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記</p></div>';
+}
+
+function simShowWrite() {
+  if (!simStudent) return;
+  document.getElementById('sim-content').innerHTML = `
+    <div class="card">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">⚠️ 學生模式填寫的月記會真實儲存，請確認後再操作</p>
+      <button class="btn btn-primary" onclick="window.open('student.html','_blank')">🔗 在新分頁開啟學生端測試</button>
+      <p style="font-size:12px;color:var(--text3);margin-top:8px">用你的學校帳號登入學生端即可完整測試</p>
+    </div>`;
 }
 
 // ============ 初始化 ============
