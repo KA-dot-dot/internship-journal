@@ -547,9 +547,17 @@ async function googleStudentLogin() {
     const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
 
     if (!bindSnap.exists()) {
+      // 檢查是否為老師帳號
+      const { getDocs, collection: col } = firebase_funcs;
+      const adminSnap = await getDocs(col(db, 'admins'));
+      const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
       await window._auth.signOut(auth);
       hideLoading();
-      toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+      if (isTeacher) {
+        toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
+      } else {
+        toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+      }
       return;
     }
 
