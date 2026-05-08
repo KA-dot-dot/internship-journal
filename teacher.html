@@ -1484,7 +1484,10 @@ function journalMonthInRange(j, start8, end8) {
   const adBase = y + 1911;
   const month = j.month || 0;
   let year = adBase;
+  // 第1學期：8-12月是當年，1月是隔年
   if (half === 1 && month < 8) year = adBase + 1;
+  // 第2學期：2-7月都是隔年（如114學年第2學期是2026年）
+  if (half === 2) year = adBase + 1;
   const dateStr = `${year}${String(month).padStart(2,'0')}01`;
   return (!start8 || dateStr >= start8) && (!end8 || dateStr <= end8);
 }
