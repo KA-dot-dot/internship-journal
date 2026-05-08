@@ -346,8 +346,8 @@ tr:last-child td { border-bottom: none; }
         <span class="icon">⚙️</span> 系統設定
       </button>
       <div style="padding:12px;margin-top:auto">
-        <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="switchToStudentMode()">
-          🎓 切換學生模式測試
+        <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="window.open('student.html','_blank')">
+          🎓 開啟學生端測試
         </button>
       </div>
     </div>
@@ -403,11 +403,11 @@ tr:last-child td { border-bottom: none; }
             <table>
               <thead>
                 <tr>
-                  <th>座號</th><th>姓名</th><th>學號</th><th>性別</th><th>生日</th><th>實習公司</th><th>操作</th>
+                  <th>座號</th><th>姓名</th><th>實習公司</th><th>Google 帳號綁定</th><th>操作</th>
                 </tr>
               </thead>
               <tbody id="students-table-body">
-                <tr><td colspan="7" style="text-align:center;color:var(--text2);padding:30px">載入中...</td></tr>
+                <tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">載入中...</td></tr>
               </tbody>
             </table>
           </div>
@@ -571,10 +571,10 @@ tr:last-child td { border-bottom: none; }
       <!-- ========== 老師：帳號管理 ========== -->
       <div id="page-t-admin" class="hidden fade-in">
         <div class="page-title">🔑 帳號管理</div>
-        <div class="page-subtitle">管理老師帳號與學生 Google 帳號綁定</div>
+        <div class="page-subtitle">管理老師帳號（學生 Google 帳號綁定請在「學生管理」頁面操作）</div>
 
         <!-- 老師帳號管理 -->
-        <div class="card" style="margin-bottom:20px">
+        <div class="card">
           <div style="font-size:15px;font-weight:700;margin-bottom:14px">👨‍🏫 老師帳號清單</div>
           <div id="admin-list" style="margin-bottom:16px">載入中...</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -582,43 +582,6 @@ tr:last-child td { border-bottom: none; }
             <button class="btn btn-primary" onclick="addAdmin()">➕ 新增老師</button>
           </div>
           <p style="font-size:12px;color:var(--text3);margin-top:8px">⚠️ 只能新增，不能刪除自己的帳號</p>
-        </div>
-
-        <!-- 學生 Google 帳號綁定 -->
-        <div class="card">
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px">🔗 學生 Google 帳號綁定</div>
-          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">將學生的學校 Google email 對應到座號，完成後學生才能用 Google 帳號登入</p>
-
-          <!-- 單筆綁定 -->
-          <div style="font-size:14px;font-weight:600;margin-bottom:8px">✏️ 單筆綁定</div>
-          <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end">
-            <div style="flex:1;min-width:200px">
-              <label>學生 Email</label>
-              <input type="text" id="bind-email" placeholder="例：u333101@tcivs.tc.edu.tw">
-            </div>
-            <div style="width:100px">
-              <label>座號</label>
-              <input type="text" id="bind-seat" placeholder="例：03" maxlength="4">
-            </div>
-            <button class="btn btn-primary" onclick="bindStudent()">🔗 綁定</button>
-          </div>
-
-          <!-- 批次匯入 -->
-          <div style="font-size:14px;font-weight:600;margin-bottom:8px">📥 批次匯入</div>
-          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.8">
-            格式：每行一筆，<code style="color:var(--accent)">座號　Email</code>（Tab 或逗號分隔）<br>
-            範例：<code style="color:var(--accent)">01　u333101@tcivs.tc.edu.tw</code><br>
-            可從 Excel 複製後直接貼上
-          </div>
-          <textarea id="batch-bind-data" rows="6" placeholder="01&#9;u333101@tcivs.tc.edu.tw&#10;02&#9;u333102@tcivs.tc.edu.tw" style="margin-bottom:10px;font-family:monospace;font-size:13px"></textarea>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="batchBindStudents()">📥 批次綁定</button>
-            <span id="batch-bind-result" style="font-size:13px"></span>
-          </div>
-
-          <!-- 現有綁定清單 -->
-          <div style="font-size:14px;font-weight:600;margin-bottom:10px">已綁定清單</div>
-          <div id="binding-list">載入中...</div>
         </div>
       </div>
 
@@ -693,23 +656,6 @@ tr:last-child td { border-bottom: none; }
         </div>
       </div>
 
-      <!-- ========== 學生模式模擬 ========== -->
-      <div id="page-s-sim" class="hidden fade-in">
-        <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><span style="color:var(--accent-yellow);font-weight:700">🎓 學生模式測試中</span><span style="color:var(--text2);font-size:13px;margin-left:8px">以學生身份操作，資料會真實寫入</span></div>
-          <button class="btn btn-secondary btn-sm" onclick="exitStudentMode()">↩ 返回老師模式</button>
-        </div>
-        <div class="stats-grid">
-          <div class="stat-card"><div class="stat-label">模擬學生</div><div style="font-size:15px;font-weight:700;margin-top:6px" id="sim-student-name">-</div></div>
-          <div class="stat-card"><div class="stat-label">實習公司</div><div style="font-size:15px;font-weight:700;margin-top:6px" id="sim-company">-</div></div>
-          <div class="stat-card"><div class="stat-label">已繳月份</div><div class="stat-value" style="color:var(--accent-green)" id="sim-count">-</div></div>
-        </div>
-        <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="simShowWrite()">✏️ 填寫月記</button>
-          <button class="btn btn-secondary" onclick="simLoadHistory()">📚 查看歷史</button>
-        </div>
-        <div id="sim-content"></div>
-      </div>
 
     </div><!-- end main-content -->
   </div><!-- end app-body -->
@@ -1005,7 +951,7 @@ function showPage(pageId) {
 
 async function loadAdminPage() {
   await waitForFirebaseAsync();
-  const { collection, getDocs, doc, getDoc } = firebase_funcs;
+  const { collection, getDocs } = firebase_funcs;
 
   // 載入老師清單
   const adminSnap = await getDocs(collection(db, 'admins'));
@@ -1022,9 +968,6 @@ async function loadAdminPage() {
       </span>`;
     }).join('');
   }
-
-  // 載入學生綁定清單
-  await loadBindingList();
 }
 
 async function addAdmin() {
@@ -1229,22 +1172,86 @@ function viewStudentJournals(seatNo, name) {
 async function loadStudentsTable() {
   showLoading();
   const { collection, getDocs } = firebase_funcs;
-  const snap = await getDocs(collection(db, 'students'));
+  const [stuSnap, bindSnap] = await Promise.all([
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'studentBindings'))
+  ]);
   hideLoading();
-  const rows = snap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
+
+  // 建立 seatNo → binding 對應表
+  const bindMap = {};
+  bindSnap.docs.forEach(d => {
+    const b = d.data();
+    if (b.seatNo) bindMap[b.seatNo] = { docId: d.id, email: b.email };
+  });
+
+  const rows = stuSnap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
     const s = d.data();
+    const seatNo = d.id;
+    const binding = bindMap[seatNo];
+    const safeName = (s.name||'').replace(/'/g, "\\'");
+
+    let googleCell;
+    if (binding) {
+      googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="badge badge-green" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${binding.email}">✅ ${binding.email}</span>
+        <button class="btn btn-danger btn-sm" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
+      </div>`;
+    } else {
+      googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="color:var(--text3);font-size:12px">未綁定</span>
+        <input type="text" id="bind-inline-${seatNo}" placeholder="輸入 Google email" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text)">
+        <button class="btn btn-primary btn-sm" onclick="bindStudentInline('${seatNo}','${safeName}')">綁定</button>
+      </div>`;
+    }
+
     return `<tr>
-      <td><strong>${s.seatNo}</strong></td><td>${s.name}</td>
-      <td style="font-family:'Space Mono',monospace;font-size:12px">${s.studentId||'-'}</td>
-      <td>${s.gender||'-'}</td><td>${s.birthday||'-'}</td><td>${s.company||'-'}</td>
+      <td><strong>${s.seatNo}</strong></td>
+      <td>${s.name}</td>
+      <td>${s.company||'-'}</td>
+      <td>${googleCell}</td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="editStudent('${d.id}')">編輯</button>
-        <button class="btn btn-secondary btn-sm" onclick="viewStudentJournals('${d.id}','${s.name}')">📖 月記</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteStudent('${d.id}','${s.name}')">刪除</button>
+        <button class="btn btn-secondary btn-sm" onclick="editStudent('${seatNo}')">編輯</button>
+        <button class="btn btn-secondary btn-sm" onclick="window.open('student.html','_blank')">🎓 月記</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteStudent('${seatNo}','${s.name}')">刪除</button>
       </td>
     </tr>`;
   }).join('');
-  document.getElementById('students-table-body').innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:30px">尚無學生資料</td></tr>';
+  document.getElementById('students-table-body').innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">尚無學生資料</td></tr>';
+}
+
+async function bindStudentInline(seatNo, name) {
+  const emailEl = document.getElementById('bind-inline-' + seatNo);
+  if (!emailEl) return;
+  const email = emailEl.value.trim().toLowerCase();
+  if (!email) return toast('請輸入學生 email', 'error');
+  if (!email.endsWith('@' + SCHOOL_DOMAIN)) return toast(`學生 email 須為 @${SCHOOL_DOMAIN}`, 'error');
+  showLoading();
+  try {
+    const { doc, setDoc } = firebase_funcs;
+    await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
+      email, seatNo,
+      studentName: name,
+      boundAt: new Date().toISOString(),
+      boundBy: currentUser.email
+    });
+    hideLoading();
+    toast(`✅ 已綁定 ${name}（${seatNo}）→ ${email}`, 'success');
+    loadStudentsTable();
+  } catch(e) {
+    hideLoading();
+    toast('綁定失敗：' + e.message, 'error');
+  }
+}
+
+async function removeBindingInline(docId, email) {
+  if (!confirm(`確定要解除綁定「${email}」嗎？解除後該學生無法用 Google 帳號登入`)) return;
+  const { doc, deleteDoc } = firebase_funcs;
+  showLoading();
+  await deleteDoc(doc(db, 'studentBindings', docId));
+  hideLoading();
+  toast('已解除綁定', 'success');
+  loadStudentsTable();
 }
 
 function openAddStudentModal() {
@@ -1547,9 +1554,12 @@ async function loadLocationStats() {
   hideLoading();
   const journals = snap.docs.map(d => d.data());
 
-  // 建立公司清單
+  // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
+  const stuCompSnap = await getDocs(collection(db, 'students'));
   const companySet = new Set();
-  journals.forEach(j => { if (j.company) companySet.add(j.company); });
+  stuCompSnap.docs.forEach(d => { if (d.data().company) companySet.add(d.data().company); });
+  // 補上月記中出現但學生資料已沒有的舊公司（降級處理）
+  journals.forEach(j => { if (j.company && !companySet.has(j.company)) {} });
   const companies = [...companySet].sort();
 
   // 填入公司勾選清單
@@ -1909,79 +1919,8 @@ function toggleLocDetail(subId) {
 // ===== 學生模式模擬 ==========================================
 // ============================================================
 
-let simStudent = null; // 模擬的學生資料
-
-async function switchToStudentMode() {
-  await waitForFirebaseAsync();
-  const { doc, getDoc, getDocs, collection, query, where } = firebase_funcs;
-
-  // 找老師帳號對應的學生綁定
-  const emailKey = currentUser.email.replace(/[@.]/g, '_');
-  const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
-
-  if (!bindSnap.exists()) {
-    toast('❌ 請先在帳號管理中將你的 email 綁定到一個測試座號（如 00）', 'error');
-    showPage('t-admin');
-    return;
-  }
-
-  const binding = bindSnap.data();
-  const seatNo = binding.seatNo;
-  const stuSnap = await getDoc(doc(db, 'students', seatNo));
-
-  if (!stuSnap.exists()) {
-    toast('❌ 請先在學生管理新增測試學生資料（座號：' + seatNo + '）', 'error');
-    showPage('t-students');
-    return;
-  }
-
-  const stuData = stuSnap.data();
-  simStudent = {
-    seatNo,
-    name: stuData.name || '測試學生',
-    company: stuData.company || '-',
-    studentId: stuData.studentId || '',
-    email: currentUser.email
-  };
-
-  document.getElementById('sim-student-name').textContent = simStudent.seatNo + ' ' + simStudent.name;
-  document.getElementById('sim-company').textContent = simStudent.company;
-
-  // 載入已繳數量
-  const jSnap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',seatNo)));
-  document.getElementById('sim-count').textContent = jSnap.size;
-
-  showPage('s-sim');
-  toast('已切換為學生模式：' + simStudent.name, 'success');
-}
-
-function exitStudentMode() {
-  simStudent = null;
-  showPage('t-dashboard');
-  toast('已返回老師模式', 'info');
-}
-
-async function simLoadHistory() {
-  if (!simStudent) return;
-  const { collection, getDocs, query, where } = firebase_funcs;
-  showLoading();
-  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',simStudent.seatNo)));
-  hideLoading();
-  const journals = snap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  document.getElementById('sim-content').innerHTML = journals.length
-    ? journals.map(j => renderJournalCard(j, false)).join('')
-    : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記</p></div>';
-}
-
-function simShowWrite() {
-  if (!simStudent) return;
-  document.getElementById('sim-content').innerHTML = `
-    <div class="card">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">⚠️ 學生模式填寫的月記會真實儲存，請確認後再操作</p>
-      <button class="btn btn-primary" onclick="window.open('student.html','_blank')">🔗 在新分頁開啟學生端測試</button>
-      <p style="font-size:12px;color:var(--text3);margin-top:8px">用你的學校帳號登入學生端即可完整測試</p>
-    </div>`;
-}
+// 學生端模式：直接開新分頁（不需要中間頁）
+// 老師若需測試，請至「學生管理」將自己的 email 綁定到一個測試座號，再開啟 student.html
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
