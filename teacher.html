@@ -403,7 +403,7 @@ tr:last-child td { border-bottom: none; }
             <table>
               <thead>
                 <tr>
-                  <th>座號</th><th>姓名</th><th>實習公司</th><th>Google 帳號綁定</th><th>操作</th>
+                  <th>座號</th><th>姓名</th><th>實習公司</th><th style="width:320px">Google 帳號綁定</th><th>操作</th>
                 </tr>
               </thead>
               <tbody id="students-table-body">
@@ -1526,10 +1526,7 @@ function switchStatsTab(tab) {
 }
 
 async function loadAllStats() {
-  const tab = document.querySelector('.stats-tab.active')?.id?.replace('stats-tab-','') || 'submit';
-  if (tab === 'submit') await loadSubmitStats();
-  else if (tab === 'location') await loadLocationStats();
-  else if (tab === 'salary') await loadSalaryStats();
+  await Promise.all([loadSubmitStats(), loadLocationStats(), loadSalaryStats()]);
 }
 
 async function exportAllStatsExcel() {
