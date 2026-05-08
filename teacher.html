@@ -1733,9 +1733,13 @@ async function exportSemesterPDF() {
   const endStr = endVal.replace(/-/g,'');
   const { collection, getDocsFromServer } = firebase_funcs;
   showLoading();
-  const snap = await getDocsFromServer(collection(db, 'journals'));
+  const [jSnap, stuSnap] = await Promise.all([
+    getDocsFromServer(collection(db, 'journals')),
+    getDocsFromServer(collection(db, 'students'))
+  ]);
   hideLoading();
-  let journals = snap.docs.map(d => d.data());
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+  let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   if (!journals.length) return toast('無月記資料可匯出', 'error');
@@ -1747,9 +1751,14 @@ async function exportStudentPDF() {
   if (!seat) return toast('請先選擇學生', 'error');
   const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo', '==', seat)));
+  const [jSnap, stuSnap] = await Promise.all([
+    getDocsFromServer(query(collection(db, 'journals'), where('seatNo', '==', seat))),
+    getDocsFromServer(collection(db, 'students'))
+  ]);
   hideLoading();
-  const journals = snap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+  if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
+  const journals = jSnap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
   if (!journals.length) return toast('該學生尚無月記', 'error');
   const name = journals[0].studentName || seat;
   printJournalsPDF(journals, `${name}實習月記`);
