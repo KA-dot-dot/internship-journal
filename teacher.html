@@ -1658,10 +1658,13 @@ async function loadSalaryStats() {
   const stuCompanyMap = {};
   stuSnap.docs.forEach(d => { stuCompanyMap[d.id] = d.data().company || ''; });
 
-  let journals = snap.docs.map(d => d.data()).filter(j => j.salary != null);
+  // 只統計目前學生名單中的學生（過濾掉已刪除學生的舊月記）
+  let journals = snap.docs.map(d => d.data()).filter(j =>
+    j.salary != null && stuCompanyMap.hasOwnProperty(j.seatNo)
+  );
   const studentMap = {};
   journals.forEach(j => {
-    // 優先使用學生資料的最新公司名，fallback 到月記內的公司名
+    // 使用學生資料的最新公司名
     const currentCompany = stuCompanyMap[j.seatNo] || j.company;
     if (!studentMap[j.seatNo]) studentMap[j.seatNo] = { seatNo: j.seatNo, name: j.studentName, company: currentCompany, salaries: [] };
     studentMap[j.seatNo].salaries.push(j.salary);
