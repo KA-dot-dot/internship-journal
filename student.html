@@ -687,10 +687,9 @@ async function initWriteForm() {
     writeSemSel.value = sems[0];
   }
   initWriteMonths();
-  const container = document.getElementById('work-entries-container');
-  if (!container.children.length) addWorkEntry();
-  checkMonthDeadline();
   document.getElementById('write-company').value = currentUser.company || '';
+  // checkMonthDeadline 會自動載入或清空該月份資料
+  checkMonthDeadline();
 }
 
 async function checkMonthDeadline() {
@@ -698,16 +697,69 @@ async function checkMonthDeadline() {
   const month = parseInt(document.getElementById('write-month').value);
   if (!sem || !month) return;
   const { doc, getDoc } = firebase_funcs;
-  const snap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
+
+  // 1. 檢查截止日期
+  const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
   const el = document.getElementById('write-deadline-status');
-  if (!snap.exists()) { el.innerHTML = '<span class="badge badge-yellow">⚠️ 此月份尚未設定截止日期，仍可填寫</span>'; return; }
-  const d = snap.data();
-  const now = new Date();
-  const open = new Date(d.openDate);
-  const close = new Date(d.closeDate);
-  if (now < open) el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${d.openDate}（尚未開放）</span>`;
-  else if (now > close) el.innerHTML = `<span class="badge badge-red">🔒 已截止（${d.closeDate}）</span>`;
-  else el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${d.closeDate}</span>`;
+  if (!deadlineSnap.exists()) {
+    el.innerHTML = '<span class="badge badge-yellow">⚠️ 此月份尚未設定截止日期，仍可填寫</span>';
+  } else {
+    const d = deadlineSnap.data();
+    const now = new Date();
+    const open = new Date(d.openDate);
+    const close = new Date(d.closeDate);
+    if (now < open) el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${d.openDate}（尚未開放）</span>`;
+    else if (now > close) el.innerHTML = `<span class="badge badge-red">🔒 已截止（${d.closeDate}）</span>`;
+    else el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${d.closeDate}</span>`;
+  }
+
+  // 2. 載入此月份已有的資料（有就填入，沒有就清空）
+  const journalSnap = await getDoc(doc(db, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
+  if (journalSnap.exists()) {
+    const j = journalSnap.data();
+    document.getElementById('write-salary').value = j.salary ?? '';
+    document.getElementById('write-mentor').value = j.mentor || '';
+    document.getElementById('write-reflection').value = j.reflection || '';
+    // 薪資單照片
+    const preview = document.getElementById('salary-photo-preview');
+    if (j.salaryPhoto) {
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${resolveImgSrc(j.salaryPhoto)}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
+    } else { preview.innerHTML = ''; }
+    // 工作摘要
+    const container = document.getElementById('work-entries-container');
+    container.innerHTML = ''; entryCount = 0;
+    (j.entries || []).forEach(e => {
+      addWorkEntry();
+      const id = `entry-${entryCount}`;
+      document.getElementById(`${id}-date`).value = toDateVal(e.date || '');
+      const typeEl = document.getElementById(`${id}-type`); if (typeEl) typeEl.value = e.type || '';
+      document.getElementById(`${id}-address`).value = e.address || '';
+      document.getElementById(`${id}-content`).value = e.content || '';
+      if (e.distance != null) { const m = document.getElementById(`${id}-dist-manual`); if (m) m.value = e.distance; }
+      if (e.noPhoto) { document.getElementById(`${id}-nophoto`).checked = true; toggleNoPhoto(id); }
+      if (e.photos?.length) {
+        const photoGrid = document.getElementById(`${id}-photos`);
+        e.photos.forEach(p => {
+          const wrap = document.createElement('div'); wrap.className = 'photo-thumb-wrap';
+          const _ps = resolveImgSrc(p);
+          wrap.innerHTML = `<img src="${_ps}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove()">×</button>`;
+          wrap.querySelector('img').dataset.base64 = p;
+          photoGrid.appendChild(wrap);
+        });
+      }
+    });
+    if (!j.entries?.length) addWorkEntry();
+    el.innerHTML += ' <span class="badge badge-blue">📝 已有資料，修改後儲存即覆蓋</span>';
+  } else {
+    // 清空所有欄位
+    document.getElementById('write-salary').value = '';
+    document.getElementById('write-mentor').value = '';
+    document.getElementById('write-reflection').value = '';
+    document.getElementById('salary-photo-preview').innerHTML = '';
+    const container = document.getElementById('work-entries-container');
+    container.innerHTML = ''; entryCount = 0;
+    addWorkEntry();
+  }
 }
 
 // ---- 工作摘要 ----
@@ -1184,7 +1236,10 @@ function journalMonthInRange(j, start8, end8) {
   const adBase = y + 1911;
   const month = j.month || 0;
   let year = adBase;
+  // 第1學期：8-12月是當年，1月是隔年
   if (half === 1 && month < 8) year = adBase + 1;
+  // 第2學期：2-7月都是隔年（如114學年第2學期是2026年）
+  if (half === 2) year = adBase + 1;
   const dateStr = `${year}${String(month).padStart(2,'0')}01`;
   return (!start8 || dateStr >= start8) && (!end8 || dateStr <= end8);
 }
