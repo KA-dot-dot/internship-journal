@@ -1193,9 +1193,9 @@ async function loadStudentsTable() {
 
     let googleCell;
     if (binding) {
-      googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span class="badge badge-green" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${binding.email}">✅ ${binding.email}</span>
-        <button class="btn btn-danger btn-sm" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
+      googleCell = `<div style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">
+        <span class="badge badge-green" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.6;vertical-align:middle" title="${binding.email}">✅ ${binding.email}</span>
+        <button class="btn btn-danger btn-sm" style="vertical-align:middle;flex-shrink:0" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
       </div>`;
     } else {
       googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -1649,12 +1649,21 @@ function toggleAllCompanyFilter(checked) {
 async function loadSalaryStats() {
   const { collection, getDocs } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(collection(db, 'journals'));
+  const [snap, stuSnap] = await Promise.all([
+    getDocs(collection(db, 'journals')),
+    getDocs(collection(db, 'students'))
+  ]);
   hideLoading();
+  // 建立 seatNo → 最新公司名對應表
+  const stuCompanyMap = {};
+  stuSnap.docs.forEach(d => { stuCompanyMap[d.id] = d.data().company || ''; });
+
   let journals = snap.docs.map(d => d.data()).filter(j => j.salary != null);
   const studentMap = {};
   journals.forEach(j => {
-    if (!studentMap[j.seatNo]) studentMap[j.seatNo] = { seatNo: j.seatNo, name: j.studentName, company: j.company, salaries: [] };
+    // 優先使用學生資料的最新公司名，fallback 到月記內的公司名
+    const currentCompany = stuCompanyMap[j.seatNo] || j.company;
+    if (!studentMap[j.seatNo]) studentMap[j.seatNo] = { seatNo: j.seatNo, name: j.studentName, company: currentCompany, salaries: [] };
     studentMap[j.seatNo].salaries.push(j.salary);
   });
   const studentList = Object.values(studentMap).sort((a,b) => a.seatNo?.localeCompare(b.seatNo));
@@ -1670,7 +1679,8 @@ async function loadSalaryStats() {
   }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無薪資資料</td></tr>';
   const companyMap = {};
   journals.forEach(j => {
-    const c = j.company || '未填寫';
+    // 使用學生最新公司名，避免舊月記的舊公司名汙染統計
+    const c = stuCompanyMap[j.seatNo] || j.company || '未填寫';
     if (!companyMap[c]) companyMap[c] = { studentSet: new Set(), salaries: [] };
     companyMap[c].studentSet.add(j.seatNo);
     companyMap[c].salaries.push(j.salary);
@@ -1680,7 +1690,7 @@ async function loadSalaryStats() {
     return `<tr><td>${name}</td><td>${d.studentSet.size}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
   document.getElementById('salary-detail-table').innerHTML = journals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j =>
-    `<tr><td>${j.seatNo}</td><td>${j.studentName||'-'}</td><td>${j.company||'-'}</td><td>${j.month}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary||0).toLocaleString()}</td><td>${j.mentor||'-'}</td></tr>`
+    `<tr><td>${j.seatNo}</td><td>${j.studentName||'-'}</td><td>${stuCompanyMap[j.seatNo]||j.company||'-'}</td><td>${j.month}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary||0).toLocaleString()}</td><td>${j.mentor||'-'}</td></tr>`
   ).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 }
 
