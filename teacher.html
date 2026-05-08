@@ -14,7 +14,7 @@
 <!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
   const firebaseConfig = {
@@ -31,7 +31,7 @@
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
 
-  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
+  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
 </script>
 
@@ -1701,9 +1701,9 @@ async function loadTeacherJournals() {
   const search = (document.getElementById('t-journals-search')?.value || '').toLowerCase();
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, getDocsFromServer } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(collection(db, 'journals'));
+  const snap = await getDocsFromServer(collection(db, 'journals'));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
@@ -1731,9 +1731,9 @@ async function exportSemesterPDF() {
   const endVal = document.getElementById('export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, getDocsFromServer } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(collection(db, 'journals'));
+  const snap = await getDocsFromServer(collection(db, 'journals'));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
@@ -1745,9 +1745,9 @@ async function exportSemesterPDF() {
 async function exportStudentPDF() {
   const seat = document.getElementById('export-student-select')?.value;
   if (!seat) return toast('請先選擇學生', 'error');
-  const { collection, getDocs, query, where } = firebase_funcs;
+  const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo', '==', seat)));
+  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo', '==', seat)));
   hideLoading();
   const journals = snap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
   if (!journals.length) return toast('該學生尚無月記', 'error');
