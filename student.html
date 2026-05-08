@@ -617,7 +617,7 @@ function showPage(pageId) {
   const loaders = {
     's-dashboard': loadStudentDashboard,
     's-write': initWriteForm,
-    's-history': () => { initStatsDateSelects(); },
+    's-history': () => { initStatsDateSelects(); loadStudentHistory(); },
   };
   if (loaders[pageId]) loaders[pageId]();
 }
@@ -842,29 +842,40 @@ async function geocodeTaiwanAddress(addr) {
   const p = parseTaiwanAddress(addr);
   const localPoint = localKnownTaiwanPoint(p.clean);
   if (localPoint) return localPoint;
-  const queries = [];
-  const addNominatimText = (q) => { const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '1', q, 'accept-language': 'zh-TW' }); queries.push({ url: `https://nominatim.openstreetmap.org/search?${qs}`, kind: 'nominatim' }); };
-  const addPhoton = (q) => { queries.push({ url: `https://photon.komoot.io/api/?q=${encodeURIComponent(q + ' 台灣')}&limit=1&lang=zh&bbox=119.0,21.5,122.5,25.5`, kind: 'photon' }); };
-  addNominatimText(p.clean);
-  if (p.city && p.district && p.street) addNominatimText(`${p.city}${p.district}${p.street}`);
-  addPhoton(p.clean);
-  for (const q of queries) {
+
+  // 建立多種查詢變體，從精確到模糊
+  const variants = [];
+  if (p.city && p.district && p.street) variants.push(`${p.city}${p.district}${p.street}`);
+  if (p.city && p.district) variants.push(`${p.city}${p.district}`);
+  variants.push(p.clean);
+  if (p.city) variants.push(p.city);
+
+  // Nominatim 查詢
+  for (const q of variants) {
     try {
-      const res = await fetch(q.url);
+      const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '3', q, 'accept-language': 'zh-TW', addressdetails: '1' });
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs}`);
       if (!res.ok) continue;
       const data = await res.json();
-      let point;
-      if (q.kind === 'photon') {
-        const first = data.features?.[0];
-        if (!first) continue;
-        const [lng, lat] = first.geometry.coordinates;
-        point = { lat: Number(lat), lng: Number(lng) };
-      } else {
-        const first = data?.[0];
-        if (!first) continue;
-        point = { lat: Number(first.lat), lng: Number(first.lon) };
+      for (const item of (data || [])) {
+        const point = { lat: Number(item.lat), lng: Number(item.lon) };
+        if (isTaiwanCoord(point.lat, point.lng)) return point;
       }
-      if (point && isTaiwanCoord(point.lat, point.lng)) return point;
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, 300)); // 避免頻率限制
+  }
+
+  // Photon 備用查詢
+  for (const q of variants.slice(0,2)) {
+    try {
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q + ' 台灣')}&limit=3&lang=zh&bbox=119.0,21.5,122.5,25.5`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const feat of (data.features || [])) {
+        const [lng, lat] = feat.geometry.coordinates;
+        const point = { lat: Number(lat), lng: Number(lng) };
+        if (isTaiwanCoord(point.lat, point.lng)) return point;
+      }
     } catch(e) {}
   }
   return null;
@@ -1074,9 +1085,12 @@ async function loadStudentHistory() {
   const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
-  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+  // 有填日期才過濾，沒填就顯示全部
+  if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  document.getElementById('s-history-list').innerHTML = journals.length ? journals.map(j => renderJournalCard(j, false)).join('') : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
+  document.getElementById('s-history-list').innerHTML = journals.length
+    ? journals.map(j => renderJournalCard(j, false)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
 }
 
 async function exportMyPDF() {
@@ -1089,7 +1103,7 @@ async function exportMyPDF() {
   const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
-  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+  if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
   if (!journals.length) return toast('無月記資料可下載', 'error');
   printJournalsPDF(journals, `${currentUser.name}實習月記`);
