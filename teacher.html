@@ -1546,25 +1546,66 @@ async function loadLocationStats() {
   const snap = await getDocs(collection(db, 'journals'));
   hideLoading();
   const journals = snap.docs.map(d => d.data());
+
+  // 建立公司清單
+  const companySet = new Set();
+  journals.forEach(j => { if (j.company) companySet.add(j.company); });
+  const companies = [...companySet].sort();
+
+  // 填入公司勾選清單
+  const cbList = document.getElementById('company-checkbox-list');
+  if (cbList) {
+    cbList.innerHTML = companies.map(c =>
+      `<label style="display:flex;align-items:center;gap:8px;padding:6px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)">
+        <input type="checkbox" class="company-cb" value="${c}" checked onchange="renderFilteredCity(journals_cache)"> ${c}
+      </label>`
+    ).join('');
+  }
+  // 把 journals 存到全域供篩選用
+  window.journals_cache = journals;
+  renderFilteredCity(journals);
+}
+
+function renderFilteredCity(journals) {
+  if (!journals) return;
+  // 取得勾選的公司
+  const checkedCbs = document.querySelectorAll('.company-cb:checked');
+  const selectedCompanies = new Set([...checkedCbs].map(cb => cb.value));
+
+  // 更新全選狀態
+  const allCbs = document.querySelectorAll('.company-cb');
+  const allCheck = document.getElementById('company-all-check');
+  if (allCheck) allCheck.checked = checkedCbs.length === allCbs.length;
+  const labelEl = document.getElementById('company-filter-label');
+  if (labelEl) labelEl.textContent = checkedCbs.length === allCbs.length ? '🏭 全選所有公司' : `🏭 已選 ${checkedCbs.length}/${allCbs.length} 間公司`;
+
+  // 縣市統計（只計算勾選公司的月記）
   const cityMap = {};
   journals.forEach(j => {
+    if (!selectedCompanies.has(j.company)) return;
     (j.entries||[]).forEach(e => {
       const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
       const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
     });
   });
+
   const sorted = Object.entries(cityMap).sort((a,b) => b[1]-a[1]);
-  const total = sorted.reduce((s,x) => s+x[1],0);
+  const total = sorted.reduce((s,x) => s+x[1], 0);
   const cityEl = document.getElementById('city-chart-filtered');
-  cityEl.innerHTML = sorted.length ? sorted.slice(0,10).map(([city,cnt]) => {
-    const pct = total ? Math.round(cnt/total*100) : 0;
-    return `<div class="chart-bar-item"><div class="chart-bar-label">${city}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
-  }).join('') : '<div class="empty-state"><div class="icon">📍</div><p>無地點資料</p></div>';
+  if (cityEl) {
+    cityEl.innerHTML = sorted.length ? sorted.slice(0,10).map(([city,cnt]) => {
+      const pct = total ? Math.round(cnt/total*100) : 0;
+      return `<div class="chart-bar-item"><div class="chart-bar-label">${city}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
+    }).join('') : '<div class="empty-state"><div class="icon">📍</div><p>無地點資料</p></div>';
+  }
+  const summaryEl = document.getElementById('city-filter-summary');
+  if (summaryEl) summaryEl.textContent = `共 ${total} 筆工作記錄，${sorted.length} 個縣市`;
 
   // 距離統計
   const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20km+': 0 };
   journals.forEach(j => {
+    if (!selectedCompanies.has(j.company)) return;
     (j.entries||[]).forEach(e => {
       const d = e.distance;
       if (d == null) return;
@@ -1574,21 +1615,25 @@ async function loadLocationStats() {
       else distBuckets['20km+']++;
     });
   });
-  const distTotal = Object.values(distBuckets).reduce((s,x) => s+x,0);
-  document.getElementById('distance-chart').innerHTML = distTotal ? Object.entries(distBuckets).map(([label,cnt]) => {
-    const pct = distTotal ? Math.round(cnt/distTotal*100) : 0;
-    return `<div class="chart-bar-item"><div class="chart-bar-label">${label}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent2)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
-  }).join('') : '<div class="empty-state"><div class="icon">📏</div><p>無距離資料</p></div>';
+  const distTotal = Object.values(distBuckets).reduce((s,x) => s+x, 0);
+  const distEl = document.getElementById('distance-chart');
+  if (distEl) {
+    distEl.innerHTML = distTotal ? Object.entries(distBuckets).map(([label,cnt]) => {
+      const pct = distTotal ? Math.round(cnt/distTotal*100) : 0;
+      return `<div class="chart-bar-item"><div class="chart-bar-label">${label}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent2)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
+    }).join('') : '<div class="empty-state"><div class="icon">📏</div><p>無距離資料</p></div>';
+  }
 }
+
 
 function toggleCompanyFilter(e) {
   e.stopPropagation();
   document.getElementById('company-filter-panel').classList.toggle('hidden');
 }
 function toggleAllCompanyFilter(checked) {
-  document.querySelectorAll('#company-checkbox-list input[type=checkbox]').forEach(cb => cb.checked = checked);
+  document.querySelectorAll('.company-cb').forEach(cb => cb.checked = checked);
+  if (window.journals_cache) renderFilteredCity(window.journals_cache);
 }
-function renderFilteredCityChart() {}
 
 // 薪資統計
 async function loadSalaryStats() {
