@@ -848,24 +848,12 @@ async function googleTeacherLogin() {
       return;
     }
 
-    // 2. 檢查 admins 集合
+    // 2. 檢查 admins 集合，不允許前端自我升級
     const { doc, getDoc, getDocs, collection, setDoc } = firebase_funcs;
-
-    // 先看 admins 是否有任何人
     const adminSnap = await getDocs(collection(db, 'admins'));
     let isAdmin = false;
 
-    if (adminSnap.empty) {
-      // 第一個登入的人自動成為管理員
-      await setDoc(doc(db, 'admins', user.uid), {
-        email,
-        name: user.displayName || email,
-        addedAt: new Date().toISOString(),
-        isFirstAdmin: true
-      });
-      isAdmin = true;
-      toast('🎉 您是第一位管理員，已自動取得老師權限！', 'success');
-    } else {
+    if (!adminSnap.empty) {
       // 檢查此人是否在 admins 清單中（by uid 或 email）
       const byUid = await getDoc(doc(db, 'admins', user.uid));
       if (byUid.exists()) {
@@ -884,7 +872,7 @@ async function googleTeacherLogin() {
     if (!isAdmin) {
       await window._auth.signOut(auth);
       hideLoading();
-      toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
+      toast(adminSnap.empty ? '❌ 尚未建立管理員，請由資料庫或既有管理流程先建立第一位管理員' : '❌ 您沒有老師權限，請聯絡系統管理員', 'error');
       return;
     }
 
@@ -973,6 +961,17 @@ async function loadAdminPage() {
   }
 }
 
+async function verifyCurrentAdmin() {
+  if (!currentUser?.email || !currentUser?.uid) return false;
+  const { doc, getDoc } = firebase_funcs;
+  const emailKey = currentUser.email.replace(/[@.]/g, '_');
+  const [uidSnap, emailSnap] = await Promise.all([
+    getDoc(doc(db, 'admins', currentUser.uid)),
+    getDoc(doc(db, 'admins', emailKey))
+  ]);
+  return uidSnap.exists() || emailSnap.exists();
+}
+
 async function addAdmin() {
   const email = document.getElementById('new-admin-email').value.trim().toLowerCase();
   if (!email) return toast('請輸入 email', 'error');
@@ -981,6 +980,13 @@ async function addAdmin() {
   showLoading();
   try {
     const { collection, getDocs, doc, setDoc } = firebase_funcs;
+    const stillAdmin = await verifyCurrentAdmin();
+    if (!stillAdmin) {
+      hideLoading();
+      await window._auth.signOut(window._auth.auth);
+      toast('新增老師失敗：目前帳號已不是管理員', 'error');
+      return;
+    }
     // 找是否已存在
     const snap = await getDocs(collection(db, 'admins'));
     const existing = snap.docs.find(d => d.data().email === email);
@@ -1750,8 +1756,26 @@ async function loadTeacherJournals() {
     getDocsFromServer(collection(db, 'students'))
   ]);
   hideLoading();
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  let journals = snap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  const studentMap = {};
+  stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
+  let journals = snap.docs.map(d => {
+    const j = d.data();
+    if (studentMap[j.seatNo]) return j;
+    return {
+      seatNo: j.seatNo || '',
+      semester: j.semester || '',
+      month: j.month || 0,
+      submittedAt: j.submittedAt || '',
+      studentName: '已刪除學生',
+      company: '已刪除學生',
+      reflection: '',
+      entries: [],
+      salary: null,
+      mentor: '',
+      salaryPhoto: '',
+      isDeletedStudent: true
+    };
+  });
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
@@ -1910,6 +1934,16 @@ function resolveImgSrc(src) {
 }
 
 function renderJournalCard(j, isTeacher) {
+  if (isTeacher && j.isDeletedStudent) {
+    const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'已刪除學生',true)">🗑️ 刪除</button>`;
+    return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div><span style="color:var(--accent-red);font-size:12px">${j.seatNo} 已刪除學生</span><br><span style="font-size:15px;font-weight:700">${j.month}月份月記</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span><span class="badge badge-blue">${j.semester?.replace('-1','第1學期').replace('-2','第2學期') || ''}</span>${deleteBtn}</div>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${j.submittedAt?.slice(0,10)||'-'}</div>
+    </div>`;
+  }
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${e.date || ''} ${e.type ? '｜'+e.type : ''}</div>
