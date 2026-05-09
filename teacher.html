@@ -1261,9 +1261,44 @@ async function saveStudent() {
     updatedAt: new Date().toISOString()
   };
   showLoading();
-  const { collection, doc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
-  await setDoc(doc(db, 'students', seat), data);
+  const { collection, doc, getDoc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
+  const existingStudentSnap = await getDoc(doc(db, 'students', seat));
   const bindingSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seat)));
+  const oldEmails = bindingSnap.docs.map(d => (d.data().email || '').toLowerCase()).filter(Boolean);
+  let clearOldJournals = false;
+
+  if (existingStudentSnap.exists()) {
+    const old = existingStudentSnap.data();
+    const oldStudentId = (old.studentId || '').trim();
+    const newStudentId = (data.studentId || '').trim();
+    const oldName = (old.name || '').trim();
+    const isDifferentPerson =
+      (oldName && oldName !== name) ||
+      (oldStudentId && newStudentId && oldStudentId !== newStudentId) ||
+      (googleEmail && oldEmails.length && !oldEmails.includes(googleEmail));
+
+    if (isDifferentPerson) {
+      const journalSnap = await getDocs(query(collection(db, 'journals'), where('seatNo', '==', seat)));
+      hideLoading();
+      if (journalSnap.size > 0) {
+        const ok = confirm(
+          '座號 ' + seat + ' 原本是「' + (oldName || '舊學生') + '」，現在要改成「' + name + '」。\n\n' +
+          '系統找到此座號還有 ' + journalSnap.size + ' 筆舊月記。為避免舊月記出現在新學生帳號下，建議刪除舊月記後再儲存。\n\n' +
+          '按「確定」：刪除舊月記並儲存新學生\n按「取消」：不儲存，先返回檢查'
+        );
+        if (!ok) return toast('已取消儲存，舊月記未刪除', 'info');
+        clearOldJournals = true;
+      }
+      showLoading();
+    }
+  }
+
+  if (clearOldJournals) {
+    const journalSnap = await getDocs(query(collection(db, 'journals'), where('seatNo', '==', seat)));
+    await Promise.all(journalSnap.docs.map(d => deleteDoc(d.ref)));
+  }
+
+  await setDoc(doc(db, 'students', seat), data);
   const staleDeletes = bindingSnap.docs
     .filter(d => d.data().email !== googleEmail)
     .map(d => deleteDoc(d.ref));
@@ -1279,7 +1314,6 @@ async function saveStudent() {
   toast('學生資料已儲存', 'success');
   loadStudentsTable();
 }
-
 async function deleteStudent(seatNo, name) {
   if (!confirm(`確定要刪除學生「${name}」嗎？`)) return;
   const { collection, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
