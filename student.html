@@ -759,6 +759,13 @@ async function checkMonthDeadline() {
     });
     if (!j.entries?.length) addWorkEntry();
     el.innerHTML += ' <span class="badge badge-blue">📝 已有資料，修改後儲存即覆蓋</span>';
+    // 檢查所有工作摘要日期是否符合所選月份
+    setTimeout(() => {
+      document.querySelectorAll('#work-entries-container .entry-item').forEach(entryDiv => {
+        const entryId = entryDiv.id;
+        if (entryId) checkEntryDateMismatch(entryId);
+      });
+    }, 100);
   } else {
     // 清空所有欄位
     document.getElementById('write-salary').value = '';
@@ -768,6 +775,33 @@ async function checkMonthDeadline() {
     const container = document.getElementById('work-entries-container');
     container.innerHTML = ''; entryCount = 0;
     addWorkEntry();
+  }
+}
+
+// ---- 工作摘要日期輔助 ----
+function getSelectedCEYearMonth() {
+  const sem = document.getElementById('write-semester')?.value || '';
+  const month = parseInt(document.getElementById('write-month')?.value || '0');
+  if (!sem || !month) return null;
+  const twYear = parseInt(sem.split('-')[0]);
+  const semType = parseInt(sem.split('-')[1]);
+  let ceYear = twYear + 1911;
+  // 第1學期：8~12月屬當年，1月屬下一個西元年
+  if (semType === 1 && month === 1) ceYear += 1;
+  // 第2學期：2~7月屬下一個西元年
+  if (semType === 2) ceYear += 1;
+  return { year: ceYear, month };
+}
+
+function checkEntryDateMismatch(id) {
+  const dateInput = document.getElementById(`${id}-date`);
+  if (!dateInput || !dateInput.value) return;
+  const sel = getSelectedCEYearMonth();
+  if (!sel) return;
+  const parts = dateInput.value.split('-').map(Number);
+  const inputYear = parts[0], inputMonth = parts[1];
+  if (inputYear !== sel.year || inputMonth !== sel.month) {
+    toast(`⚠️ 工作摘要日期（${inputYear}年${inputMonth}月）與所選月份（${sel.year}年${sel.month}月）不吻合，請確認是否有誤`, 'error');
   }
 }
 
@@ -804,7 +838,7 @@ function addWorkEntry() {
       <button class="btn btn-danger btn-sm" onclick="removeEntry('${id}')">移除</button>
     </div>
     <div class="form-row" style="margin-bottom:8px">
-      <div class="form-group"><label>日期</label><input type="date" id="${id}-date"></div>
+      <div class="form-group"><label>日期</label><input type="date" id="${id}-date" onchange="checkEntryDateMismatch('${id}')"></div>
       <div class="form-group">
         <label>工作類型</label>
         <select id="${id}-type" onchange="showWorkTypeExample('${id}')">
@@ -852,6 +886,15 @@ function addWorkEntry() {
     </div>
   `;
   document.getElementById('work-entries-container').appendChild(div);
+
+  // 自動引導日期到所選月份
+  const sel = getSelectedCEYearMonth();
+  if (sel) {
+    const dateEl = document.getElementById(`${id}-date`);
+    if (dateEl && !dateEl.value) {
+      dateEl.value = `${sel.year}-${String(sel.month).padStart(2,'0')}-01`;
+    }
+  }
 }
 
 function showWorkTypeExample(id) {
