@@ -950,12 +950,23 @@ async function loadAdminPage() {
   if (adminSnap.empty) {
     adminList.innerHTML = '<div style="color:var(--text2);font-size:13px">尚無管理員</div>';
   } else {
-    adminList.innerHTML = adminSnap.docs.map(d => {
+    const adminMap = new Map();
+    adminSnap.docs.forEach(d => {
       const a = d.data();
-      const isSelf = currentUser && (d.id === currentUser.uid || a.email === currentUser.email);
+      const email = (a.email || '').toLowerCase();
+      const key = email || d.id;
+      if (!adminMap.has(key)) adminMap.set(key, { ids: [], email, label: a.email || a.name || d.id, isSelf: false });
+      const item = adminMap.get(key);
+      item.ids.push(d.id);
+      if (currentUser && (d.id === currentUser.uid || email === currentUser.email)) item.isSelf = true;
+      if (email) item.label = a.email;
+    });
+    adminList.innerHTML = Array.from(adminMap.values()).map(a => {
+      const ids = a.ids.join('|').replace(/'/g, "\\'");
+      const safeEmail = (a.email || '').replace(/'/g, "\\'");
       return `<span class="admin-tag">
-        👨‍🏫 ${a.email || a.name || d.id}
-        ${!isSelf ? `<button onclick="removeAdmin('${d.id}','${a.email||''}')" title="移除">×</button>` : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
+        👨‍🏫 ${a.label}
+        ${!a.isSelf ? `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>` : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
       </span>`;
     }).join('');
   }
@@ -1014,7 +1025,8 @@ async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'admins', docId));
+  const ids = String(docId || '').split('|').filter(Boolean);
+  await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
   hideLoading();
   toast('已移除', 'success');
   loadAdminPage();
