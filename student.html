@@ -448,7 +448,8 @@ let db, firebase_funcs;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
-const CLOUDINARY_UPLOAD_PRESET = 'nhnw3vi7';
+const CLOUDINARY_SIGNED_UPLOAD_PRESET = 'tcivs_signed';
+const CLOUDINARY_SIGNATURE_ENDPOINT = '';
 
 // ============ 深色/淺色切換 ============
 function toggleTheme() {
@@ -1038,13 +1039,30 @@ function triggerPhotoUpload(id) { document.getElementById(`${id}-file`).click();
 
 // ---- Cloudinary 上傳 ----
 async function uploadToCloudinary(blob, folder) {
-  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) return null;
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_SIGNATURE_ENDPOINT) return null;
   try {
+    const timestamp = Math.round(Date.now() / 1000);
+    const signRes = await fetch(CLOUDINARY_SIGNATURE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        folder,
+        timestamp,
+        upload_preset: CLOUDINARY_SIGNED_UPLOAD_PRESET
+      })
+    });
+    if (!signRes.ok) throw new Error('簽章失敗 ' + signRes.status);
+    const signed = await signRes.json();
+    if (!signed.signature || !signed.apiKey) throw new Error('簽章資料不完整');
     const formData = new FormData();
     formData.append('file', blob);
-    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    formData.append('api_key', signed.apiKey);
+    formData.append('timestamp', signed.timestamp || timestamp);
+    formData.append('signature', signed.signature);
+    formData.append('upload_preset', signed.uploadPreset || CLOUDINARY_SIGNED_UPLOAD_PRESET);
     if (folder) formData.append('folder', folder);
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
+    const cloudName = signed.cloudName || CLOUDINARY_CLOUD_NAME;
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('上傳失敗 ' + res.status);
     const data = await res.json();
     return data.secure_url;
@@ -1053,6 +1071,21 @@ async function uploadToCloudinary(blob, folder) {
     toast('⚠️ 圖片上傳失敗（改用本地儲存）', 'error');
     return null;
   }
+}
+
+function disableStudentAutocomplete(root = document) {
+  if (root.matches && root.matches('input, textarea, select')) {
+    root.setAttribute('autocomplete', 'off');
+    root.setAttribute('autocorrect', 'off');
+    root.setAttribute('autocapitalize', 'off');
+    root.setAttribute('spellcheck', 'false');
+  }
+  root.querySelectorAll('input, textarea, select').forEach(el => {
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('autocorrect', 'off');
+    el.setAttribute('autocapitalize', 'off');
+    el.setAttribute('spellcheck', 'false');
+  });
 }
 
 function canvasToBlob(canvas, quality = 0.75) {
@@ -1385,6 +1418,13 @@ function printJournalsPDF(journals, title) {
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
+  disableStudentAutocomplete();
+  const autocompleteObserver = new MutationObserver(muts => {
+    muts.forEach(m => m.addedNodes.forEach(node => {
+      if (node.nodeType === 1) disableStudentAutocomplete(node);
+    }));
+  });
+  autocompleteObserver.observe(document.body, { childList: true, subtree: true });
   waitForFirebase(() => {
     console.log('✅ Firebase 連線成功');
     // 自動恢復登入狀態
