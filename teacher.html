@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -1122,12 +1123,13 @@ async function loadTeacherDashboard() {
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
   const { collection, getDocs, query, where } = firebase_funcs;
   const stuSnap = await getDocs(collection(db, 'students'));
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   const total = stuSnap.size;
   document.getElementById('stat-total-students').textContent = total;
   const now = new Date();
   const thisMonth = now.getMonth() + 1;
   const jSnap = await getDocs(query(collection(db, 'journals'), where('semester', '==', sem), where('month', '==', thisMonth)));
-  const submitted = jSnap.size;
+  const submitted = jSnap.docs.filter(d => activeSeatNos.has(d.data().seatNo)).length;
   const missing = total - submitted;
   document.getElementById('stat-submitted').textContent = submitted;
   document.getElementById('stat-missing').textContent = missing;
@@ -1300,11 +1302,19 @@ async function saveStudent() {
 
 async function deleteStudent(seatNo, name) {
   if (!confirm(`確定要刪除學生「${name}」嗎？`)) return;
-  const { doc, deleteDoc } = firebase_funcs;
+  const { collection, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'students', seatNo));
+  const [journalSnap, bindingSnap] = await Promise.all([
+    getDocs(query(collection(db, 'journals'), where('seatNo', '==', seatNo))),
+    getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)))
+  ]);
+  await Promise.all([
+    ...journalSnap.docs.map(d => deleteDoc(d.ref)),
+    ...bindingSnap.docs.map(d => deleteDoc(d.ref)),
+    deleteDoc(doc(db, 'students', seatNo))
+  ]);
   hideLoading();
-  toast('已刪除', 'success');
+  toast(`Deleted student, ${journalSnap.size} journals, and ${bindingSnap.size} bindings`, 'success');
   loadStudentsTable();
 }
 
@@ -1470,7 +1480,8 @@ async function loadSubmitStats() {
   const [stuSnap, jSnap] = await Promise.all([getDocs(collection(db, 'students')), getDocs(collection(db, 'journals'))]);
   hideLoading();
   const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
-  let journals = jSnap.docs.map(d => d.data());
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+  let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
   if (start && end) journals = journals.filter(j => journalInRange(j, start, end));
   const sems = [...new Set(journals.map(j => j.semester))].sort();
   if (!sems.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>此期間無月記資料</p></div>'; return; }
@@ -1534,7 +1545,8 @@ async function exportAllStatsExcel() {
   showLoading();
   const [stuSnap, jSnap] = await Promise.all([getDocs(collection(db, 'students')), getDocs(collection(db, 'journals'))]);
   hideLoading();
-  const journals = jSnap.docs.map(d => d.data()).sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+  const journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo)).sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
   const rows = journals.map(j => ({ 座號: j.seatNo, 姓名: j.studentName, 公司: j.company, 學期: j.semester, 月份: j.month, 薪資: j.salary||'', 繳交日: j.submittedAt?.slice(0,10)||'' }));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1547,12 +1559,15 @@ async function exportAllStatsExcel() {
 async function loadLocationStats() {
   const { collection, getDocs } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(collection(db, 'journals'));
+  const [snap, stuCompSnap] = await Promise.all([
+    getDocs(collection(db, 'journals')),
+    getDocs(collection(db, 'students'))
+  ]);
   hideLoading();
-  const journals = snap.docs.map(d => d.data());
+  const activeSeatNos = new Set(stuCompSnap.docs.map(d => d.id));
+  const journals = snap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
 
   // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
-  const stuCompSnap = await getDocs(collection(db, 'students'));
   const companySet = new Set();
   stuCompSnap.docs.forEach(d => { if (d.data().company) companySet.add(d.data().company); });
   // 補上月記中出現但學生資料已沒有的舊公司（降級處理）
@@ -1703,9 +1718,13 @@ async function loadTeacherJournals() {
   const endStr = endVal.replace(/-/g,'');
   const { collection, getDocsFromServer } = firebase_funcs;
   showLoading();
-  const snap = await getDocsFromServer(collection(db, 'journals'));
+  const [snap, stuSnap] = await Promise.all([
+    getDocsFromServer(collection(db, 'journals')),
+    getDocsFromServer(collection(db, 'students'))
+  ]);
   hideLoading();
-  let journals = snap.docs.map(d => d.data());
+  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+  let journals = snap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
