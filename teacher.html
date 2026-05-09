@@ -707,10 +707,10 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　性別　生日　公司</code></p>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　性別　生日　公司　Google帳號</code>（Google帳號可留空）</p>
       <div class="config-code" style="margin-bottom:12px;font-size:12px">
-        王小明　01　1130001　男　2009/5/10　XX科技股份有限公司<br>
-        李小華　02　1130002　女　2008/3/20　OO工業有限公司
+        王小明　01　1130001　男　2009/5/10　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
+        李小華　02　1130002　女　2008/3/20　OO工業有限公司　u333102@tcivs.tc.edu.tw
       </div>
       <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
       <div style="display:flex;gap:10px">
@@ -1377,18 +1377,20 @@ async function importStudents() {
     return !HEADER_KEYWORDS.some(k => first.includes(k));
   });
   showLoading();
-  let ok = 0, errors = [];
+  let ok = 0, bindOk = 0, errors = [];
   for (const line of dataLines) {
     // Tab 分隔時用 split(\t)，保留公司名稱中的逗號
     const cols = line.split(sep).map(s => s.trim());
-    // 欄位：姓名、座號、學號、性別、生日、公司（第6欄起合併，防止公司名含分隔符）
+    // 欄位：姓名、座號、學號、性別、生日、公司、Google帳號（Google帳號可留空）
     const name = cols[0] || '';
     const seat = cols[1] || '';
     const sid = cols[2] || '';
     const gender = cols[3] || '';
     const bdayRaw = cols[4] || '';
-    // 公司名稱：取第6欄之後所有內容合併（防止被分割）
-    const company = cols.slice(5).join(sep === '\t' ? '' : ',').trim();
+    const emailIdx = cols.findIndex((v, idx) => idx >= 5 && v.includes('@'));
+    const email = emailIdx >= 0 ? cols[emailIdx].toLowerCase() : '';
+    const companyCols = emailIdx >= 0 ? cols.slice(5, emailIdx) : cols.slice(5);
+    const company = companyCols.join(sep === '\t' ? '' : ',').trim();
     if (!seat || !name) { errors.push('跳過（資料不足）：' + line.slice(0,30)); continue; }
     const bday = normalizeBirthday(bdayRaw);
     const seatNo = String(parseInt(seat) || 0).padStart(2,'0');
@@ -1397,15 +1399,26 @@ async function importStudents() {
       birthday: bday || bdayRaw, company,
       updatedAt: new Date().toISOString()
     });
+    if (email) {
+      if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
+        errors.push(`${seatNo} ${name} 帳號非學校網域：${email}`);
+      } else {
+        await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
+          email, seatNo, studentName: name,
+          boundAt: new Date().toISOString(), boundBy: currentUser.email
+        });
+        bindOk++;
+      }
+    }
     ok++;
   }
   hideLoading();
   const resultEl = document.getElementById('import-result');
   if (resultEl) {
-    resultEl.innerHTML = `<div style="color:var(--accent-green)">✅ 成功匯入 ${ok} 筆</div>` +
+    resultEl.innerHTML = `<div style="color:var(--accent-green)">✅ 成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}</div>` +
       (errors.length ? `<div style="color:var(--accent-red);margin-top:4px">${errors.map(e=>`⚠️ ${e}`).join('<br>')}</div>` : '');
   }
-  if (ok > 0) { toast(`成功匯入 ${ok} 筆學生資料`, 'success'); loadStudentsTable(); }
+  if (ok > 0) { toast(`成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}`, 'success'); loadStudentsTable(); }
   else toast('匯入失敗，請確認格式', 'error');
 }
 
