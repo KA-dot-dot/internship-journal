@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -9,7 +10,7 @@
 <!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
   const firebaseConfig = {
@@ -26,7 +27,7 @@
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
 
-  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
+  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
 </script>
 
@@ -639,8 +640,8 @@ async function loadStudentDashboard() {
   const [y, t] = sem.split('-').map(Number);
   document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
   document.getElementById('s-company-name').textContent = currentUser.company || '-';
-  const { collection, getDocs, query, where } = firebase_funcs;
-  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const { collection, getDocsFromServer, query, where } = firebase_funcs;
+  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   const journals = snap.docs.map(d => d.data());
   document.getElementById('s-submitted-count').textContent = journals.length;
   const now = new Date();
@@ -1140,9 +1141,9 @@ async function loadStudentHistory() {
   const endVal = document.getElementById('s-history-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocs, query, where } = firebase_funcs;
+  const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   // 有填日期才過濾，沒填就顯示全部
@@ -1158,9 +1159,9 @@ async function exportMyPDF() {
   const endVal = document.getElementById('s-export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocs, query, where } = firebase_funcs;
+  const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocs(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
@@ -1171,6 +1172,7 @@ async function exportMyPDF() {
 
 // ---- 編輯月記 ----
 async function editJournal(seatNo, sem, month) {
+  if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
   const { doc, getDoc } = firebase_funcs;
   showLoading();
   const snap = await getDoc(doc(db, 'journals', `${seatNo}-${sem}-${month}`));
@@ -1307,6 +1309,7 @@ function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
 }
 
 async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
+  if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能刪除自己的月記', 'error');
   const { doc, deleteDoc } = firebase_funcs;
   try {
     await deleteDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`));
