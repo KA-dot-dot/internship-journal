@@ -1516,8 +1516,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (w) w.style.display = '';
     if (n) n.style.display = 'none';
   }
-  // 接收手機 redirect 登入結果
-  handleRedirectResult();
   disableStudentAutocomplete();
   const autocompleteObserver = new MutationObserver(muts => {
     muts.forEach(m => m.addedNodes.forEach(node => {
@@ -1531,8 +1529,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
+        showLoading();
         const email = user.email || '';
-        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
+        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
         const { doc, getDoc } = firebase_funcs;
         const emailKey = email.replace(/[@.]/g, '_');
         try {
@@ -1544,7 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const stuData = stuSnap.data();
           currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
           enterApp();
-        } catch(e) { console.error('自動登入失敗', e); }
+        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試'), 'error'); }
       }
     });
   });
