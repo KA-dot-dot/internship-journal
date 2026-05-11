@@ -235,7 +235,18 @@ tr:last-child td { border-bottom: none; }
       <p>台中高工｜學生端</p>
     </div>
 
-    <div class="card fade-in">
+    <!-- WebView 警告（JS 偵測到才顯示） -->
+    <div id="webview-warning" class="card fade-in" style="display:none;border:2px solid #f59e0b;background:rgba(245,158,11,0.08)">
+      <div style="text-align:center;font-size:32px;margin-bottom:12px">⚠️</div>
+      <p style="font-size:15px;font-weight:600;color:#f59e0b;text-align:center;margin-bottom:10px">請用瀏覽器開啟</p>
+      <p style="font-size:13px;color:var(--text2);text-align:center;line-height:1.8;margin-bottom:18px">
+        您目前在 App 內建瀏覽器中，<br>Google 登入在此環境會被封鎖。<br><br>
+        請複製網址，改用 <strong>Safari</strong> 或 <strong>Chrome</strong> 開啟。
+      </p>
+      <button onclick="copyPageUrl()" style="width:100%;padding:12px;background:#f59e0b;color:#000;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">📋 複製網址</button>
+    </div>
+
+    <div id="normal-login" class="card fade-in">
       <p style="font-size:13px;color:var(--text2);margin-bottom:20px;text-align:center">
         請使用學校 Google 帳號登入
       </p>
@@ -252,7 +263,7 @@ tr:last-child td { border-bottom: none; }
         ⚠️ 僅限 @tcivs.tc.edu.tw 學校帳號<br>
         帳號須由老師完成綁定才能登入
       </p>
-    </div>
+    </div><!-- end normal-login -->
   </div>
 </div>
 
@@ -525,53 +536,44 @@ function hideLoading() { document.getElementById('loading-overlay').classList.ad
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-// ============ Google 學生登入 ============
-async function handleRedirectResult() {
-  try {
-    await waitForFirebaseAsync();
-    const { auth, getRedirectResult } = window._auth;
-    const result = await getRedirectResult(auth);
-    if (!result) return;
-    const user = result.user;
-    const email = user.email || '';
-    showLoading();
-    await processStudentLogin(user, email);
-  } catch(e) {
-    if (e.code === 'auth/popup-closed-by-user') return;
-    console.error('Redirect 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
-  }
+// ============ WebView / mobile detection ============
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
 function isWebView() {
   const ua = navigator.userAgent || '';
-  return /Instagram|FBAN|FBAV|Line\/|KAKAOTALK|MicroMessenger|webview/i.test(ua)
-    || ((/iPhone|iPod|iPad/.test(ua)) && !/Safari\//.test(ua));
+  if (/Instagram|FBAN|FBAV|Line\/|KAKAOTALK|MicroMessenger/i.test(ua)) return true;
+  if (/iPhone|iPod|iPad/.test(ua) && !/Safari\//.test(ua) && !/CriOS\//.test(ua)) return true;
+  return false;
 }
 
+function copyPageUrl() {
+  const url = location.href;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => toast('✅ 網址已複製，請貼到 Safari 或 Chrome 開啟', 'success'));
+  } else {
+    const el = document.createElement('textarea');
+    el.value = url; document.body.appendChild(el); el.select();
+    document.execCommand('copy'); document.body.removeChild(el);
+    toast('✅ 網址已複製，請貼到 Safari 或 Chrome 開啟', 'success');
+  }
+}
+
+// ============ Google 學生登入 ============
 async function googleStudentLogin() {
   showLoading();
   try {
     await waitForFirebaseAsync();
     const { auth, provider, signInWithPopup, signInWithRedirect } = window._auth;
-    if (isWebView()) {
+    // 手機瀏覽器用 redirect（popup 會被封鎖），桌機用 popup
+    if (isMobile()) {
       await signInWithRedirect(auth, provider);
-      return;
+      return; // 頁面會跳走，後續由 handleRedirectResult 接手
     }
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
     const email = user.email || '';
-    await processStudentLogin(user, email);
-  } catch(e) {
-    hideLoading();
-    if (e.code === 'auth/popup-closed-by-user') return;
-    console.error('Google 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
-  }
-}
-
-async function processStudentLogin(user, email) {
-  try {
 
     // 1. 驗證學校網域
     if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
@@ -632,6 +634,57 @@ async function processStudentLogin(user, email) {
     if (e.code === 'auth/popup-closed-by-user') return;
     console.error('Google 登入失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
+  }
+}
+
+// ============ Redirect 登入結果處理 ============
+async function handleRedirectResult() {
+  try {
+    await waitForFirebaseAsync();
+    const { auth, getRedirectResult } = window._auth;
+    const result = await getRedirectResult(auth);
+    if (!result || !result.user) return;
+    showLoading();
+    const user = result.user;
+    const email = user.email || '';
+
+    if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
+      await window._auth.signOut(auth);
+      hideLoading();
+      toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
+      return;
+    }
+    const { doc, getDoc, getDocs, collection } = firebase_funcs;
+    const emailKey = email.replace(/[@.]/g, '_');
+    const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
+    if (!bindSnap.exists()) {
+      const adminSnap = await getDocs(collection(db, 'admins'));
+      const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
+      await window._auth.signOut(auth);
+      hideLoading();
+      toast(isTeacher ? '👨‍🏫 您是老師帳號，請使用老師端' : '❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+      return;
+    }
+    const binding = bindSnap.data();
+    const stuSnap = await getDoc(doc(db, 'students', binding.seatNo));
+    if (!stuSnap.exists()) {
+      await window._auth.signOut(auth);
+      hideLoading();
+      toast('❌ 找不到學生資料，請聯絡老師', 'error');
+      return;
+    }
+    const stuData = stuSnap.data();
+    currentUser = {
+      role: 'student', uid: user.uid, email,
+      seatNo: binding.seatNo, name: stuData.name,
+      studentId: stuData.studentId || '', company: stuData.company || '',
+      gender: stuData.gender || '', city: stuData.city || ''
+    };
+    enterApp();
+  } catch(e) {
+    hideLoading();
+    console.error('Redirect 登入失敗', e);
+    if (e.message) toast('登入失敗：' + e.message, 'error');
   }
 }
 
@@ -1456,6 +1509,14 @@ function printJournalsPDF(journals, title) {
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
+  // WebView 偵測
+  if (isWebView()) {
+    const w = document.getElementById('webview-warning');
+    const n = document.getElementById('normal-login');
+    if (w) w.style.display = '';
+    if (n) n.style.display = 'none';
+  }
+  // 接收手機 redirect 登入結果
   handleRedirectResult();
   disableStudentAutocomplete();
   const autocompleteObserver = new MutationObserver(muts => {
