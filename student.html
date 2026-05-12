@@ -402,6 +402,11 @@ tr:last-child td { border-bottom: none; }
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">您只能下載自己的月記資料</p>
           <div class="form-group"><label>起始日期（留空匯出全部）</label><input type="date" id="s-export-date-start"></div>
           <div class="form-group"><label>結束日期</label><input type="date" id="s-export-date-end"></div>
+          <div id="safari-hint" style="display:none;background:rgba(245,158,11,0.12);border:1.5px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--text);line-height:1.8;">
+            ⚠️ <b>Chrome 不支援此功能</b><br>
+            請用 <b>Safari</b> 開啟此頁面再下載：<br>
+            點底部 <b>分享（□↑）</b> → <b>在 Safari 中開啟</b>
+          </div>
           <button class="btn btn-purple btn-lg" onclick="exportMyPDF()">📥 列印/另存PDF</button>
         </div>
       </div>
@@ -1230,7 +1235,17 @@ async function loadStudentHistory() {
     : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
 }
 
+function checkBrowserForExport() {
+  const ua = navigator.userAgent;
+  const isIOS = /iPhone|iPad|iPod/.test(ua);
+  const isChrome = /CriOS/.test(ua);
+  const hint = document.getElementById('safari-hint');
+  if (hint) hint.style.display = (isIOS && isChrome) ? '' : 'none';
+  return !(isIOS && isChrome);
+}
+
 async function exportMyPDF() {
+  if (!checkBrowserForExport()) return;
   const startVal = document.getElementById('s-export-date-start')?.value || '';
   const endVal = document.getElementById('s-export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
