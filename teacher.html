@@ -1538,7 +1538,7 @@ async function loadSubmitStats() {
   const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
-  if (start && end) journals = journals.filter(j => journalInRange(j, start, end));
+  if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   if (!monthSlots.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>請選擇日期區間後查詢</p></div>'; return; }
   const deadlineMap = buildDeadlineMap(deadlineSnap);
@@ -1670,7 +1670,7 @@ async function exportAllStatsExcel() {
   const studentMap = {};
   students.forEach(s => { studentMap[s.id] = s; });
   let journals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
-  if (start && end) journals = journals.filter(j => journalInRange(j, start, end));
+  if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   journals.sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   const deadlineMap = buildDeadlineMap(deadlineSnap);
@@ -1744,6 +1744,7 @@ async function exportAllStatsExcel() {
 // 地點統計（簡化版）
 async function loadLocationStats() {
   const { collection, getDocs } = firebase_funcs;
+  const { start, end } = getStatsDateRange('location-stats');
   showLoading();
   const [snap, stuCompSnap] = await Promise.all([
     getDocs(collection(db, 'journals')),
@@ -1753,7 +1754,7 @@ async function loadLocationStats() {
   const studentMap = {};
   stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
   const activeSeatNos = new Set(Object.keys(studentMap));
-  const journals = snap.docs.map(d => {
+  let journals = snap.docs.map(d => {
     const data = d.data();
     const s = studentMap[data.seatNo] || {};
     return {
@@ -1762,6 +1763,7 @@ async function loadLocationStats() {
       company: s.company || data.company || '未填寫'
     };
   }).filter(j => activeSeatNos.has(j.seatNo));
+  if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
 
   // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
   const companySet = new Set();
@@ -1903,6 +1905,7 @@ function toggleAllCompanyFilter(checked) {
 // 薪資統計
 async function loadSalaryStats() {
   const { collection, getDocs } = firebase_funcs;
+  const { start, end } = getStatsDateRange('salary-stats');
   showLoading();
   const [snap, stuSnap] = await Promise.all([
     getDocs(collection(db, 'journals')),
@@ -1917,6 +1920,7 @@ async function loadSalaryStats() {
   let journals = snap.docs.map(d => d.data()).filter(j =>
     j.salary != null && stuCompanyMap.hasOwnProperty(j.seatNo)
   );
+  if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   const studentMap = {};
   journals.forEach(j => {
     // 使用學生資料的最新公司名
@@ -1987,7 +1991,7 @@ async function loadTeacherJournals() {
     };
   });
   journals = journals.filter(j => !j.isDeletedStudent);
-  if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
+  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   document.getElementById('t-journals-list').innerHTML = journals.length ? journals.map(j => renderJournalCard(j, true)).join('') : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
@@ -2021,7 +2025,7 @@ async function exportSemesterPDF() {
   hideLoading();
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
-  if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
+  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   if (!journals.length) return toast('無月記資料可匯出', 'error');
   printJournalsPDF(journals, '實習月記總覽');
