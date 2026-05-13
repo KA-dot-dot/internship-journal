@@ -1527,26 +1527,34 @@ async function deleteDeadline(id) {
 // ---- 統計 ----
 async function loadSubmitStats() {
   const { start, end } = getStatsDateRange('submit-stats');
-  const { collection, getDocs, query, where } = firebase_funcs;
+  const { collection, getDocs } = firebase_funcs;
   showLoading();
-  const [stuSnap, jSnap] = await Promise.all([getDocs(collection(db, 'students')), getDocs(collection(db, 'journals'))]);
+  const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'journals')),
+    getDocs(collection(db, 'deadlines'))
+  ]);
   hideLoading();
   const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
   if (start && end) journals = journals.filter(j => journalInRange(j, start, end));
-  const sems = [...new Set(journals.map(j => j.semester))].sort();
-  if (!sems.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>此期間無月記資料</p></div>'; return; }
-  const journalSet = new Set(journals.map(j => `${j.seatNo}-${j.semester}-${j.month}`));
+  const monthSlots = getStatsMonthSlots(start, end, journals);
+  if (!monthSlots.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>請選擇日期區間後查詢</p></div>'; return; }
+  const deadlineMap = buildDeadlineMap(deadlineSnap);
+  const journalMap = {};
+  journals.forEach(j => { journalMap[`${j.seatNo}-${j.semester}-${j.month}`] = j; });
   let html = `<div class="submit-grid">
+    <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
     <div class="submit-grid-header">姓名</div>
-    ${sems.flatMap(s => getSemesterMonths(s).map(m => `<div class="submit-grid-header">${s.split('-').join('/')} ${m}月</div>`)).join('')}
+    ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
   </div>`;
   html += students.map(s => {
-    const cells = sems.flatMap(sem => getSemesterMonths(sem).map(m => {
-      const key = `${s.id}-${sem}-${m}`;
-      return journalSet.has(key) ? '<div class="submit-cell done">✅</div>' : '<div class="submit-cell miss">✗</div>';
-    })).join('');
+    const cells = monthSlots.map(slot => {
+      const j = journalMap[`${s.id}-${slot.sem}-${slot.month}`];
+      if (!j) return '<div class="submit-cell miss">✗</div>';
+      return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
+    }).join('');
     return `<div class="submit-grid"><div class="submit-grid-header" style="text-align:left;color:var(--text)">${s.seatNo} ${s.name}</div>${cells}</div>`;
   }).join('');
   document.getElementById('submit-stats-content').innerHTML = html;
@@ -1581,6 +1589,62 @@ function journalMonthInRange(j, start8, end8) {
 
 function parse8digit(s) { return s && s.length === 8 && /^\d+$/.test(s); }
 
+function dateToSemMonth(date) {
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  if (m >= 8) return { sem: `${y - 1911}-1`, month: m, label: `${y}/${String(m).padStart(2, '0')}` };
+  if (m === 1) return { sem: `${y - 1912}-1`, month: m, label: `${y}/${String(m).padStart(2, '0')}` };
+  return { sem: `${y - 1912}-2`, month: m, label: `${y}/${String(m).padStart(2, '0')}` };
+}
+
+function getStatsMonthSlots(start8, end8, journals = []) {
+  const slots = [];
+  if (parse8digit(start8) && parse8digit(end8)) {
+    const sy = parseInt(start8.slice(0, 4), 10);
+    const sm = parseInt(start8.slice(4, 6), 10);
+    const ey = parseInt(end8.slice(0, 4), 10);
+    const em = parseInt(end8.slice(4, 6), 10);
+    const d = new Date(sy, sm - 1, 1);
+    const endDate = new Date(ey, em - 1, 1);
+    while (d <= endDate) {
+      slots.push(dateToSemMonth(d));
+      d.setMonth(d.getMonth() + 1);
+    }
+    return slots;
+  }
+  const seen = new Set();
+  journals.forEach(j => {
+    const key = `${j.semester}-${j.month}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    if (!roc || !half || !j.month) return;
+    let y = roc + 1911;
+    if (half === 1 && j.month === 1) y = roc + 1912;
+    if (half === 2) y = roc + 1912;
+    slots.push({ sem: j.semester, month: j.month, label: `${y}/${String(j.month).padStart(2, '0')}` });
+  });
+  return slots.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildDeadlineMap(deadlineSnap) {
+  const map = {};
+  deadlineSnap.docs.forEach(d => { map[d.id] = d.data(); });
+  return map;
+}
+
+function isJournalLate(j, deadlineMap) {
+  if (!j) return false;
+  const closeDate = deadlineMap[`${j.semester}-${j.month}`]?.closeDate || '';
+  const submittedDate = j.submittedAt?.slice(0, 10) || '';
+  return !!(closeDate && submittedDate && submittedDate > closeDate);
+}
+
+function statusSymbolForJournal(j, deadlineMap) {
+  if (!j) return '✗';
+  return isJournalLate(j, deadlineMap) ? '▲' : '✓';
+}
+
 function switchStatsTab(tab) {
   ['submit','location','salary'].forEach(t => {
     document.getElementById(`stats-tab-${t}`).classList.toggle('active', t===tab);
@@ -1594,16 +1658,86 @@ async function loadAllStats() {
 
 async function exportAllStatsExcel() {
   const { collection, getDocs } = firebase_funcs;
+  const { start, end } = getStatsDateRange('export-stats');
   showLoading();
-  const [stuSnap, jSnap] = await Promise.all([getDocs(collection(db, 'students')), getDocs(collection(db, 'journals'))]);
+  const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'journals')),
+    getDocs(collection(db, 'deadlines'))
+  ]);
   hideLoading();
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  const journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo)).sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
-  const rows = journals.map(j => ({ 座號: j.seatNo, 姓名: j.studentName, 公司: j.company, 學期: j.semester, 月份: j.month, 薪資: j.salary||'', 繳交日: j.submittedAt?.slice(0,10)||'' }));
+  const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
+  const studentMap = {};
+  students.forEach(s => { studentMap[s.id] = s; });
+  let journals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
+  if (start && end) journals = journals.filter(j => journalInRange(j, start, end));
+  journals.sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
+  const monthSlots = getStatsMonthSlots(start, end, journals);
+  const deadlineMap = buildDeadlineMap(deadlineSnap);
+  const journalMap = {};
+  journals.forEach(j => { journalMap[`${j.seatNo}-${j.semester}-${j.month}`] = j; });
+
+  const submitAoA = [
+    ['符號說明', '✓：已繳', '▲：遲繳', '✗：未繳'],
+    [],
+    ['座號', '姓名', ...monthSlots.map(s => s.label), '已繳/合計']
+  ];
+  students.forEach(s => {
+    let submitted = 0;
+    const cells = monthSlots.map(slot => {
+      const j = journalMap[`${s.id}-${slot.sem}-${slot.month}`];
+      if (j) submitted++;
+      return statusSymbolForJournal(j, deadlineMap);
+    });
+    submitAoA.push([s.seatNo || s.id, s.name || '', ...cells, `${submitted}/${monthSlots.length}`]);
+  });
+
+  const locationRows = [];
+  journals.forEach(j => {
+    const s = studentMap[j.seatNo] || {};
+    (j.entries || []).forEach(e => {
+      const address = (e.address || '').trim();
+      if (!address) return;
+      const rawAddr = address.replace(/^\d{3,6}\s*/, '');
+      const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '';
+      locationRows.push({
+        公司: s.company || j.company || '',
+        座號: j.seatNo || '',
+        姓名: s.name || j.studentName || '',
+        日期: e.date || '',
+        縣市: city,
+        工作地址: address,
+        '距學校(km)': e.distance ?? ''
+      });
+    });
+  });
+
+  const salaryRows = journals
+    .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
+    .map(j => {
+      const s = studentMap[j.seatNo] || {};
+      return {
+        座號: j.seatNo || '',
+        姓名: s.name || j.studentName || '',
+        公司: s.company || j.company || '',
+        月份: `${j.month}月`,
+        '薪資(元)': j.salary,
+        '師傅/學長姐': j.mentor || ''
+      };
+    });
+
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, '月記統計');
-  XLSX.writeFile(wb, '月記統計.xlsx');
+  const submitWs = XLSX.utils.aoa_to_sheet(submitAoA);
+  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
+  const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
+  submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
+  locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
+  salaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, submitWs, '總交狀況');
+  XLSX.utils.book_append_sheet(wb, locationWs, '地點統計');
+  XLSX.utils.book_append_sheet(wb, salaryWs, '薪資統計');
+  const suffix = start && end ? `_${start}-${end}` : '';
+  XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
   toast('✅ 已下載 Excel', 'success');
 }
 
