@@ -334,7 +334,7 @@ tr:last-child td { border-bottom: none; }
           <div class="form-row">
             <div class="form-group">
               <label>學期</label>
-              <select id="write-semester" onchange="checkMonthDeadline()"></select>
+              <select id="write-semester" onchange="initWriteMonths(); checkMonthDeadline()"></select>
             </div>
             <div class="form-group">
               <label>月份</label>
@@ -453,6 +453,7 @@ tr:last-child td { border-bottom: none; }
 <script>
 // ============ 全域狀態 ============
 let currentUser = null; // { role:'student', uid, seatNo, name, email, studentId, company, gender }
+let writeDeadlineDocs = [];
 let db, firebase_funcs;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
@@ -502,7 +503,13 @@ function getCurrentSemester() {
   const twYear = now.getFullYear() - 1911;
   const month = now.getMonth() + 1;
   if (month >= 8) return `${twYear}-1`;
-  return `${twYear - 1}-1`;
+  if (month === 1) return `${twYear - 1}-1`;
+  return `${twYear - 1}-2`;
+}
+
+function getCurrentSemMonth() {
+  const now = new Date();
+  return { semester: getCurrentSemester(), month: now.getMonth() + 1 };
 }
 
 function getSemesterMonths(semKey) {
@@ -646,7 +653,7 @@ function showPage(pageId) {
 // ============================================================
 
 async function loadStudentDashboard() {
-  const sem = getCurrentSemester();
+  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
   document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
   document.getElementById('s-company-name').textContent = currentUser.company || '-';
@@ -654,8 +661,6 @@ async function loadStudentDashboard() {
   const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
   const journals = snap.docs.map(d => d.data());
   document.getElementById('s-submitted-count').textContent = journals.length;
-  const now = new Date();
-  const thisMonth = now.getMonth() + 1;
   const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
   document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
     '<span class="badge badge-green">✅ 本月已繳</span>' :
@@ -670,15 +675,21 @@ function initWriteMonths() {
   const mSel = document.getElementById('write-month');
   if (!mSel) return;
   mSel.innerHTML = '';
-  const now = new Date();
-  const thisMonth = now.getMonth() + 1;
+  const { semester: currentSem, month: thisMonth } = getCurrentSemMonth();
   const sem = document.getElementById('write-semester')?.value || getCurrentSemester();
-  getSemesterMonths(sem).forEach(m => {
+  const order = getSemesterMonths(sem);
+  const monthsFromDeadlines = writeDeadlineDocs
+    .filter(d => d.semester === sem)
+    .map(d => Number(d.month))
+    .filter(m => order.includes(m));
+  const months = monthsFromDeadlines.length ? [...new Set(monthsFromDeadlines)].sort((a,b) => order.indexOf(a) - order.indexOf(b)) : order;
+  months.forEach(m => {
     const opt = document.createElement('option');
     opt.value = m; opt.textContent = `${m}月`;
-    if (m === thisMonth) opt.selected = true;
+    if (sem === currentSem && m === thisMonth) opt.selected = true;
     mSel.appendChild(opt);
   });
+  if (!mSel.value && mSel.options.length) mSel.selectedIndex = 0;
 }
 
 async function initWriteForm() {
@@ -686,12 +697,12 @@ async function initWriteForm() {
   const snap = await getDocs(collection(db, 'deadlines'));
   const now = new Date();
   const semMap = {};
+  writeDeadlineDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   snap.docs.forEach(d => {
     const dd = d.data();
     const openDate = new Date(dd.openDate);
     const closeDate = new Date(dd.closeDate);
-    const future60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
-    if (closeDate >= now || openDate <= future60) {
+    if (dd.semester && dd.month && openDate <= now) {
       if (!semMap[dd.semester]) semMap[dd.semester] = { label: dd.semesterLabel || dd.semester, latestOpen: openDate };
       else if (openDate > semMap[dd.semester].latestOpen) semMap[dd.semester].latestOpen = openDate;
     }
@@ -701,9 +712,10 @@ async function initWriteForm() {
   if (sems.length === 0) {
     populateSemesterSelects('write-semester');
   } else {
-    sems.sort((a, b) => semMap[b].latestOpen - semMap[a].latestOpen);
+    const cur = getCurrentSemester();
+    sems.sort((a, b) => (a === cur ? -1 : b === cur ? 1 : semMap[b].latestOpen - semMap[a].latestOpen));
     writeSemSel.innerHTML = sems.map(k => `<option value="${k}">${semMap[k].label}</option>`).join('');
-    writeSemSel.value = sems[0];
+    writeSemSel.value = sems.includes(cur) ? cur : sems[0];
   }
   initWriteMonths();
   document.getElementById('write-company').value = currentUser.company || '';
