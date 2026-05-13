@@ -1750,14 +1750,24 @@ async function loadLocationStats() {
     getDocs(collection(db, 'students'))
   ]);
   hideLoading();
-  const activeSeatNos = new Set(stuCompSnap.docs.map(d => d.id));
-  const journals = snap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  const studentMap = {};
+  stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
+  const activeSeatNos = new Set(Object.keys(studentMap));
+  const journals = snap.docs.map(d => {
+    const data = d.data();
+    const s = studentMap[data.seatNo] || {};
+    return {
+      ...data,
+      studentName: s.name || data.studentName || '',
+      company: s.company || data.company || '未填寫'
+    };
+  }).filter(j => activeSeatNos.has(j.seatNo));
 
   // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
   const companySet = new Set();
   stuCompSnap.docs.forEach(d => { if (d.data().company) companySet.add(d.data().company); });
   // 補上月記中出現但學生資料已沒有的舊公司（降級處理）
-  journals.forEach(j => { if (j.company && !companySet.has(j.company)) {} });
+  journals.forEach(j => { if (j.company && !companySet.has(j.company)) companySet.add(j.company); });
   const companies = [...companySet].sort();
 
   // 填入公司勾選清單
@@ -1765,7 +1775,7 @@ async function loadLocationStats() {
   if (cbList) {
     cbList.innerHTML = companies.map(c =>
       `<label style="display:flex;align-items:center;gap:8px;padding:6px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)">
-        <input type="checkbox" class="company-cb" value="${c}" checked onchange="renderFilteredCity(journals_cache)"> ${c}
+        <input type="checkbox" class="company-cb" value="${escapeHtml(c)}" checked onchange="renderFilteredCity(journals_cache)"> ${escapeHtml(c)}
       </label>`
     ).join('');
   }
@@ -1793,6 +1803,7 @@ function renderFilteredCity(journals) {
     if (!selectedCompanies.has(j.company)) return;
     (j.entries||[]).forEach(e => {
       const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
+      if (!rawAddr) return;
       const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
     });
@@ -1831,6 +1842,52 @@ function renderFilteredCity(journals) {
       return `<div class="chart-bar-item"><div class="chart-bar-label">${label}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent2)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
     }).join('') : '<div class="empty-state"><div class="icon">📏</div><p>無距離資料</p></div>';
   }
+  renderLocationDetailTable(journals, selectedCompanies);
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+}
+
+function renderLocationDetailTable(journals, selectedCompanies) {
+  const detailEl = document.getElementById('location-detail-table');
+  if (!detailEl) return;
+  const grouped = {};
+  journals.forEach(j => {
+    if (!selectedCompanies.has(j.company)) return;
+    const records = (j.entries || [])
+      .filter(e => (e.address || '').trim())
+      .map(e => ({
+        seatNo: j.seatNo || '',
+        name: j.studentName || '',
+        company: j.company || '未填寫',
+        date: e.date || '',
+        address: (e.address || '').trim(),
+        distance: e.distance
+      }));
+    if (!records.length) return;
+    if (!grouped[j.company]) grouped[j.company] = [];
+    grouped[j.company].push(...records);
+  });
+  const companies = Object.keys(grouped).sort();
+  if (!companies.length) {
+    detailEl.innerHTML = '<div class="empty-state"><div class="icon">📍</div><p>尚無可顯示的工作地址紀錄</p></div>';
+    return;
+  }
+  detailEl.innerHTML = companies.map((company, idx) => {
+    const rows = grouped[company].sort((a,b) => `${a.seatNo}${a.date}`.localeCompare(`${b.seatNo}${b.date}`));
+    const subId = `loc-detail-${idx}`;
+    return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+      <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:700">
+        <span>🏭 ${escapeHtml(company)}</span><span>${rows.length} 筆 ▾</span>
+      </button>
+      <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
+        <table><thead><tr><th>座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(km)</th></tr></thead><tbody>
+          ${rows.map(r => `<tr><td>${escapeHtml(r.seatNo)}</td><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(r.date || '-')}</td><td>${escapeHtml(r.address)}</td><td>${r.distance ?? '-'}</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 
