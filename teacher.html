@@ -1025,6 +1025,13 @@ async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
+  const stillAdmin = await verifyCurrentAdmin();
+  if (!stillAdmin) {
+    hideLoading();
+    await window._auth.signOut(window._auth.auth);
+    toast('移除老師失敗：目前帳號已不是管理員', 'error');
+    return;
+  }
   const ids = String(docId || '').split('|').filter(Boolean);
   await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
   hideLoading();
@@ -1788,6 +1795,7 @@ async function loadTeacherJournals() {
       isDeletedStudent: true
     };
   });
+  journals = journals.filter(j => !j.isDeletedStudent);
   if (startStr && endStr) journals = journals.filter(j => journalInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
