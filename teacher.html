@@ -794,8 +794,13 @@ function getCurrentSemester() {
   const twYear = now.getFullYear() - 1911;
   const month = now.getMonth() + 1;
   if (month >= 8) return `${twYear}-1`;
-  if (month >= 2) return `${twYear}-1`; // adjust as needed
-  return `${twYear - 1}-1`;
+  if (month === 1) return `${twYear - 1}-1`;
+  return `${twYear - 1}-2`;
+}
+
+function getCurrentSemMonth() {
+  const now = new Date();
+  return { semester: getCurrentSemester(), month: now.getMonth() + 1 };
 }
 
 function getSemesterMonths(semKey) {
@@ -1106,7 +1111,7 @@ async function removeBinding(docId, email) {
 
 // ---- 老師儀表板 ----
 async function loadTeacherDashboard() {
-  const sem = getCurrentSemester();
+  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
   const semLabel = `${y}學年第${t}學期`;
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
@@ -1115,8 +1120,6 @@ async function loadTeacherDashboard() {
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   const total = stuSnap.size;
   document.getElementById('stat-total-students').textContent = total;
-  const now = new Date();
-  const thisMonth = now.getMonth() + 1;
   const jSnap = await getDocs(query(collection(db, 'journals'), where('semester', '==', sem), where('month', '==', thisMonth)));
   const submitted = jSnap.docs.filter(d => activeSeatNos.has(d.data().seatNo)).length;
   const missing = total - submitted;
