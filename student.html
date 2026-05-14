@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -378,7 +379,7 @@ tr:last-child td { border-bottom: none; }
           <div id="work-entries-container"></div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-lg" onclick="saveJournal()">💾 儲存月記</button>
+          <button id="save-journal-btn" class="btn btn-primary btn-lg" onclick="saveJournal()">💾 儲存月記</button>
           <button class="btn btn-secondary" onclick="showPage('s-dashboard')">取消</button>
         </div>
       </div>
@@ -1217,6 +1218,8 @@ async function saveJournal() {
     submittedAt: new Date().toISOString()
   };
   if (JSON.stringify(data).length > 900000) return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
+  const saveBtn = document.getElementById('save-journal-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 儲存中...'; }
   showLoading();
   try {
     const { doc, getDoc, setDoc } = firebase_funcs;
@@ -1226,15 +1229,21 @@ async function saveJournal() {
     if (existing.exists()) {
       const submittedDate = existing.data().submittedAt?.slice(0, 10) || '未知日期';
       const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）\n\n確定要覆蓋原本的資料嗎？`);
-      if (!confirmed) { toast('已取消，原本月記保留', 'info'); return; }
+      if (!confirmed) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+        toast('已取消，原本月記保留', 'info');
+        return;
+      }
     }
     showLoading();
     await setDoc(journalRef, data);
     hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     toast('月記已成功儲存！', 'success');
     showPage('s-dashboard');
   } catch(e) {
     hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
   }
 }
