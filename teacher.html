@@ -254,6 +254,8 @@ tr:last-child td { border-bottom: none; }
 .binding-row:last-child { border-bottom: none; }
 
 .entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
+
+.entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -2176,7 +2178,7 @@ function renderJournalCard(j, isTeacher) {
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
   const _sp = resolveImgSrc(j.salaryPhoto);
-  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
   const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',${isTeacher})">🗑️ 刪除</button>`;
   return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
