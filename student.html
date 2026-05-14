@@ -604,6 +604,12 @@ async function googleStudentLogin() {
       city: stuData.city || ''
     };
 
+    // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
+    try {
+      const { updateDoc } = firebase_funcs;
+      await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
+    } catch(e) { console.warn('補寫 uid 失敗', e); }
+
     enterApp();
   } catch(e) {
     hideLoading();
@@ -1500,6 +1506,8 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!stuSnap.exists()) { await window._auth.signOut(auth); return; }
           const stuData = stuSnap.data();
           currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
+          // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
+          try { const { updateDoc } = firebase_funcs; await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid }); } catch(e) { console.warn('補寫 uid 失敗', e); }
           enterApp();
         } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試'), 'error'); }
       }
