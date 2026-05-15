@@ -222,11 +222,17 @@ tr:last-child td { border-bottom: none; }
 
 .submit-grid { display: grid; grid-template-columns: 140px repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; font-size: 12px; }
 .submit-grid-header { font-size: 11px; color: var(--text2); padding: 6px; text-align: center; font-weight: 600; }
+.submit-grid > .submit-grid-header:first-child,
+.submit-grid > .submit-grid-header:nth-child(2) {
+  position: sticky; left: 0; z-index: 2;
+  background: var(--bg2);
+}
 .submit-cell { padding: 6px; text-align: center; border-radius: 6px; font-size: 11px; font-weight: 600; }
 .submit-cell.done { background: rgba(34,197,94,0.12); color: var(--accent-green); }
 .submit-cell.miss { background: rgba(239,68,68,0.1); color: var(--accent-red); }
 .submit-cell.late { background: rgba(245,158,11,0.12); color: var(--accent-yellow); }
 .submit-cell.na { background: transparent; color: var(--text3); }
+.submit-name-cell { position: sticky; left: 0; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px; font-weight: 600; }
 
 .config-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
 .config-banner strong { color: var(--accent-yellow); }
@@ -1567,7 +1573,7 @@ async function loadSubmitStats() {
       if (!j) return '<div class="submit-cell miss">✗</div>';
       return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
     }).join('');
-    return `<div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-grid-header" style="text-align:left;color:var(--text)">${s.seatNo} ${s.name}</div>${cells}</div>`;
+    return `<div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-name-cell">${s.seatNo} ${s.name}</div>${cells}</div>`;
   }).join('');
   html += '</div></div>';
   document.getElementById('submit-stats-content').innerHTML = html;
