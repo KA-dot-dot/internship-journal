@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -1706,7 +1707,7 @@ async function exportAllStatsExcel() {
       const address = (e.address || '').trim();
       if (!address) return;
       const rawAddr = address.replace(/^\d{3,6}\s*/, '');
-      const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '';
+      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '').replace(/臺/g, '台');
       locationRows.push({
         公司: s.company || j.company || '',
         座號: j.seatNo || '',
@@ -1813,7 +1814,7 @@ function renderFilteredCity(journals) {
     (j.entries||[]).forEach(e => {
       const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
       if (!rawAddr) return;
-      const city = rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知';
+      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知').replace(/臺/g, '台');
       cityMap[city] = (cityMap[city]||0) + 1;
     });
   });
