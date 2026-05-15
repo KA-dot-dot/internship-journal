@@ -1552,7 +1552,11 @@ async function loadSubmitStats() {
   const deadlineMap = buildDeadlineMap(deadlineSnap);
   const journalMap = {};
   journals.forEach(j => { journalMap[`${j.seatNo}-${j.semester}-${j.month}`] = j; });
-  let html = `<div class="submit-grid">
+  const colCount = monthSlots.length + 1;
+  const minWidth = Math.max(600, colCount * 72) + 'px';
+  let html = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+  <div style="min-width:${minWidth}">
+  <div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))">
     <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
     <div class="submit-grid-header">姓名</div>
     ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
@@ -1563,8 +1567,9 @@ async function loadSubmitStats() {
       if (!j) return '<div class="submit-cell miss">✗</div>';
       return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
     }).join('');
-    return `<div class="submit-grid"><div class="submit-grid-header" style="text-align:left;color:var(--text)">${s.seatNo} ${s.name}</div>${cells}</div>`;
+    return `<div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-grid-header" style="text-align:left;color:var(--text)">${s.seatNo} ${s.name}</div>${cells}</div>`;
   }).join('');
+  html += '</div></div>';
   document.getElementById('submit-stats-content').innerHTML = html;
 }
 
