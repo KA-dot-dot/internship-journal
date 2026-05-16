@@ -1408,6 +1408,7 @@ function renderJournalCard(j, isTeacher) {
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px">
       <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${j.reflection||''}
     </div>
+    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
     ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <strong style="font-size:12px;color:#22c55e">💬 老師評語</strong>
@@ -1415,7 +1416,6 @@ function renderJournalCard(j, isTeacher) {
       </div>
       ${j.teacherComment ? `<span style="color:var(--text)">${j.teacherComment}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
     </div>` : ''}
-    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
   </div>`;
 }
 
