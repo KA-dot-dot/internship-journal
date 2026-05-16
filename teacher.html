@@ -400,6 +400,7 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-dashboard" class="hidden fade-in">
         <div class="page-title">📊 主頁</div>
         <div class="page-subtitle" id="t-dashboard-subtitle">載入中...</div>
+        <div style="font-size:15px;font-weight:700;margin:20px 0 12px">學生繳交概況</div>
         <div class="stats-grid" id="t-stats-grid">
           <div class="stat-card">
             <div class="stat-label">學生總數</div>
@@ -417,6 +418,9 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">繳交率</div>
             <div class="stat-value" style="color:var(--accent)" id="stat-rate">-</div>
           </div>
+        </div>
+        <div style="font-size:15px;font-weight:700;margin:18px 0 12px">老師審閱進度</div>
+        <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-label">已審閱</div>
             <div class="stat-value" style="color:var(--accent-green)" id="stat-reviewed">-</div>
@@ -1367,7 +1371,7 @@ async function loadStudentsTable() {
       <td>${googleCell}</td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="editStudent('${seatNo}')">編輯</button>
-        <button class="btn btn-secondary btn-sm" onclick="window.open('student.html','_blank')">🎓 月記</button>
+        <button class="btn btn-secondary btn-sm" onclick="viewStudentJournals('${seatNo}','${safeName}')">📖 月記</button>
         <button class="btn btn-danger btn-sm" onclick="deleteStudent('${seatNo}','${s.name}')">刪除</button>
       </td>
     </tr>`;
@@ -2080,7 +2084,7 @@ function renderFilteredCity(journals) {
   if (summaryEl) summaryEl.textContent = `共 ${total} 筆工作記錄，${sorted.length} 個縣市`;
 
   // 距離統計
-  const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20-50km': 0, '50-100km': 0, '100-150km': 0, '150km+': 0 };
+  const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20-50km': 0, '50-100km': 0, '100+km': 0 };
   journals.forEach(j => {
     if (!selectedCompanies.has(j.company)) return;
     (j.entries||[]).forEach(e => {
@@ -2091,8 +2095,7 @@ function renderFilteredCity(journals) {
       else if (d < 20) distBuckets['10-20km']++;
       else if (d < 50) distBuckets['20-50km']++;
       else if (d < 100) distBuckets['50-100km']++;
-      else if (d < 150) distBuckets['100-150km']++;
-      else distBuckets['150km+']++;
+      else distBuckets['100+km']++;
     });
   });
   const distTotal = Object.values(distBuckets).reduce((s,x) => s+x, 0);
