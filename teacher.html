@@ -268,7 +268,7 @@ tr:last-child td { border-bottom: none; }
 .salary-chart-card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px; }
 .salary-bar-col { display:flex;flex-direction:column;align-items:center;flex:1;min-width:36px;cursor:pointer; }
 .salary-bar-col:hover .salary-bar-inner { opacity:0.75; }
-.salary-bar-inner { width:72%;border-radius:4px 4px 0 0;transition:all 0.3s;min-height:4px; }
+.salary-bar-inner { width:28px;border-radius:6px 6px 0 0;transition:all 0.3s;min-height:4px; }
 </style>
 </head>
 <body>
@@ -2274,8 +2274,8 @@ function renderJournalCard(j, isTeacher) {
     <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${j.company||'-'}</span><span>繳交：${j.submittedAt?.slice(0,10)||'-'}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${j.reflection||''}</div>
-    ${commentSection}
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
+    ${commentSection}
   </div>`;
 }
 
@@ -2521,7 +2521,7 @@ function renderSalaryBarChart(journals, stuCompanyMap) {
   const bars = months.map((m,i) => {
     const avg=monthAvgs[i], hPct=Math.round((avg/maxAvg)*100);
     const mDisp=m.slice(5).replace(/^0/,'')+'月';
-    return `<div class="salary-bar-col" onclick="selectSalaryMonth('${m}',this)" title="${m} 平均 $${avg.toLocaleString()}"><div style="font-size:10px;color:var(--accent-green);font-weight:600;margin-bottom:4px;white-space:nowrap">$${Math.round(avg/1000)}k</div><div style="width:100%;display:flex;align-items:flex-end;justify-content:center;height:100px"><div class="salary-bar-inner" style="height:${Math.max(hPct,3)}%;background:var(--bg3);border:1px solid var(--border)"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">${mDisp}</div></div>`;
+    return `<div class="salary-bar-col" onclick="selectSalaryMonth('${m}',this)" title="${m} 平均 $${avg.toLocaleString()}"><div style="font-size:10px;color:#4f8ef7;font-weight:600;margin-bottom:4px;white-space:nowrap">$${Math.round(avg/1000)}k</div><div style="width:100%;display:flex;align-items:flex-end;justify-content:center;height:110px"><div class="salary-bar-inner" style="height:${Math.max(hPct,3)}%;background:rgba(79,142,247,0.3);border:none"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">${mDisp}</div></div>`;
   }).join('');
   container.innerHTML=`<div style="display:flex;gap:4px;align-items:flex-end;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:12px">${bars}</div><div id="salary-bar-detail" style="font-size:13px;min-height:40px"></div>`;
   const firstCol=container.querySelector('.salary-bar-col');
@@ -2529,9 +2529,9 @@ function renderSalaryBarChart(journals, stuCompanyMap) {
 }
 
 function selectSalaryMonth(monthLabel, clickedEl) {
-  document.querySelectorAll('#salary-bar-chart-container .salary-bar-inner').forEach(b=>{b.style.background='var(--bg3)';b.style.borderColor='var(--border)';});
+  document.querySelectorAll('#salary-bar-chart-container .salary-bar-inner').forEach(b=>{b.style.background='rgba(79,142,247,0.3)';b.style.boxShadow='none';});
   const bar=clickedEl?.querySelector('.salary-bar-inner');
-  if(bar){bar.style.background='linear-gradient(180deg,var(--accent),var(--accent2))';bar.style.borderColor='transparent';}
+  if(bar){bar.style.background='linear-gradient(180deg,#6ea8ff,#4f8ef7)';bar.style.boxShadow='0 0 14px rgba(79,142,247,0.55)';}
   const detail=document.getElementById('salary-bar-detail');
   const {monthDataMap}=window._salaryBarData||{};
   if(!detail||!monthDataMap?.[monthLabel]) return;
