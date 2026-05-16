@@ -1804,19 +1804,61 @@ async function exportAllStatsExcel() {
       };
     });
 
+  // ── 工作表 1：繳交狀況 ──
+  // ── 工作表 2：學生薪資總覽 ──
+  const stuSalaryRows = students.map(s => {
+    const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null);
+    const avg = sJournals.length ? Math.round(sJournals.reduce((a,b) => a + b.salary, 0) / sJournals.length) : '';
+    return { 座號: s.seatNo || s.id, 姓名: s.name || '', 公司: s.company || '', 月數: sJournals.length, '平均薪資(元)': avg };
+  });
+  // ── 工作表 3：各公司薪資 ──
+  const companyAggMap = {};
+  journals.filter(j => j.salary != null).forEach(j => {
+    const c = (studentMap[j.seatNo]?.company) || j.company || '未填寫';
+    if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
+    companyAggMap[c].studentSet.add(j.seatNo);
+    companyAggMap[c].salaries.push(j.salary);
+  });
+  const companyRows2 = Object.entries(companyAggMap).sort((a,b) => b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length - a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)
+    .map(([name, d]) => ({ 公司名稱: name, 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
+  // ── 工作表 4：月記清單（含評語、已審閱）──
+  let allJournals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
+  if (start && end) allJournals = allJournals.filter(j => journalMonthInRange(j, start, end));
+  const journalListRows = allJournals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
+    座號: j.seatNo || '',
+    姓名: (studentMap[j.seatNo]?.name) || j.studentName || '',
+    學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
+    月份: `${j.month}月`,
+    繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
+    老師評語: j.teacherComment || '',
+    已審閱: j.teacherReviewed ? '✓' : ''
+  }));
+
   const wb = XLSX.utils.book_new();
   const submitWs = XLSX.utils.aoa_to_sheet(submitAoA);
-  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
+  const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
+  const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
+  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
+  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
+
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
-  locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
+  stuSalaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, { wch: 14 }];
+  companyWs2['!cols'] = [{ wch: 22 }, { wch: 8 }, { wch: 14 }];
   salaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, submitWs, '總交狀況');
-  XLSX.utils.book_append_sheet(wb, locationWs, '地點統計');
-  XLSX.utils.book_append_sheet(wb, salaryWs, '薪資統計');
+  journalWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 40 }, { wch: 8 }];
+  locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
+
+  XLSX.utils.book_append_sheet(wb, submitWs, '繳交狀況');
+  XLSX.utils.book_append_sheet(wb, stuSalaryWs, '學生薪資總覽');
+  XLSX.utils.book_append_sheet(wb, companyWs2, '各公司薪資');
+  XLSX.utils.book_append_sheet(wb, salaryWs, '各月薪資明細');
+  XLSX.utils.book_append_sheet(wb, journalWs, '月記清單');
+  XLSX.utils.book_append_sheet(wb, locationWs, '出勤地點');
+
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
-  toast('✅ 已下載 Excel', 'success');
+  toast('✅ 已下載 Excel（6 張工作表）', 'success');
 }
 
 // 地點統計（簡化版）
@@ -2479,6 +2521,8 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   });
   sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
   sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
+  // 收集 tooltip 資料點
+  const tooltipPoints = [];
   companies.forEach(c=>{
     const color=colorMap[c];
     const vi=companyAvgs[c].map((v,i)=>v!=null?i:null).filter(v=>v!==null);
@@ -2486,13 +2530,31 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     companyAvgs[c].forEach((v,i)=>{
       if(v==null) return;
       const x=xPos(i).toFixed(1),y=yPos(v).toFixed(1);
-      sp.push(`<circle cx="${x}" cy="${y}" r="4.5" fill="${color}" stroke="var(--bg2)" stroke-width="2"><title>${c} | ${months[i]}: $${v.toLocaleString()}</title></circle>`);
-      if(n<=9) sp.push(`<text x="${x}" y="${(parseFloat(y)-8).toFixed(1)}" text-anchor="middle" font-size="9" fill="${color}" font-weight="600">$${Math.round(v/1000)}k</text>`);
+      const tipId=`tip-${c.replace(/[^a-z0-9]/gi,'_')}-${i}`;
+      sp.push(`<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--bg2)" stroke-width="2" style="cursor:pointer" data-tip="${c} | ${months[i]}: $${v.toLocaleString()}" class="salary-dot"/>`);
+      tooltipPoints.push({x:parseFloat(x),y:parseFloat(y),label:`${c}\n${months[i]}: $${v.toLocaleString()}`,color});
     });
   });
   const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
   if(ci.length>1) sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
-  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">${sp.join('')}</svg>`;
+  container.innerHTML=`<div style="position:relative;display:inline-block;width:100%">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="salary-line-svg">${sp.join('')}</svg>
+    <div id="salary-line-tooltip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:pre;line-height:1.7;color:var(--text)"></div>
+  </div>`;
+  const tipEl=container.querySelector('#salary-line-tooltip');
+  container.querySelectorAll('.salary-dot').forEach(dot=>{
+    dot.addEventListener('mouseenter',function(){
+      tipEl.textContent=this.getAttribute('data-tip');
+      tipEl.style.display='block';
+    });
+    dot.addEventListener('mousemove',function(e){
+      const rect=container.getBoundingClientRect();
+      let lx=e.clientX-rect.left+14,ly=e.clientY-rect.top-14;
+      if(lx+170>rect.width) lx=e.clientX-rect.left-170;
+      tipEl.style.left=lx+'px';tipEl.style.top=ly+'px';
+    });
+    dot.addEventListener('mouseleave',function(){tipEl.style.display='none';});
+  });
   if(legendEl){
     const items=companies.map(c=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px"></span>${c}</span>`);
     if(ci.length>1) items.push(`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:2px;border-top:2px dashed rgba(255,255,255,0.35)"></span>全班平均</span>`);
