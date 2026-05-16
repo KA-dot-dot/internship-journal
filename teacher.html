@@ -263,6 +263,12 @@ tr:last-child td { border-bottom: none; }
 .entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
 
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7; }
+.badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+.salary-chart-card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px; }
+.salary-bar-col { display:flex;flex-direction:column;align-items:center;flex:1;min-width:36px;cursor:pointer; }
+.salary-bar-col:hover .salary-bar-inner { opacity:0.75; }
+.salary-bar-inner { width:72%;border-radius:4px 4px 0 0;transition:all 0.3s;min-height:4px; }
 </style>
 </head>
 <body>
@@ -526,7 +532,18 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-card"><div class="stat-label">最高薪資</div><div class="stat-value" style="color:var(--accent)" id="salary-max">-</div></div>
             <div class="stat-card"><div class="stat-label">最低薪資</div><div class="stat-value" style="color:var(--accent-yellow)" id="salary-min">-</div></div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+                    <div class="salary-chart-card">
+            <div style="font-size:15px;font-weight:700;margin-bottom:6px">📈 各公司薪資走勢（依月份）</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各公司每月平均薪資，虛線為全班平均</div>
+            <div id="salary-line-chart-container"><div class="empty-state"><div class="icon">📈</div><p>查詢後顯示</p></div></div>
+            <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px"></div>
+          </div>
+          <div class="salary-chart-card">
+            <div style="font-size:15px;font-weight:700;margin-bottom:6px">📊 各月薪資分佈（點長條查明細）</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各月全班平均薪資，點選長條展開公司 / 學生明細</div>
+            <div id="salary-bar-chart-container"><div class="empty-state"><div class="icon">📊</div><p>查詢後顯示</p></div></div>
+          </div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
             <div class="card">
               <div style="font-size:15px;font-weight:700;margin-bottom:14px">👤 各學生薪資平均（元/月）</div>
               <div class="table-wrap"><table><thead><tr><th>座號</th><th>姓名</th><th>公司</th><th>月數</th><th>平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
@@ -555,6 +572,7 @@ tr:last-child td { border-bottom: none; }
           <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
           <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals()">🔄 重新整理</button>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
+          <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
         </div>
         <div id="t-journals-list"></div>
       </div>
@@ -755,11 +773,52 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- ==================== 評語 Modal ==================== -->
+<div class="modal-overlay hidden" id="comment-modal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title" id="comment-modal-title">✏️ 撰寫評語</div>
+      <button class="modal-close" onclick="closeModal('comment-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="comment-modal-info" style="background:var(--bg3);padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;color:var(--text2);line-height:1.8"></div>
+      <div class="form-group">
+        <label>老師評語</label>
+        <textarea id="comment-modal-textarea" rows="5" placeholder="請輸入對本份月記的評語與建議..."></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 24px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('comment-modal')">取消</button>
+      <button class="btn btn-success" onclick="saveTeacherComment()">💾 儲存評語（自動標記已審閱）</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 批次審閱 Modal ==================== -->
+<div class="modal-overlay hidden" id="batch-review-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title">⚠️ 批次標記已審閱</div>
+      <button class="modal-close" onclick="closeModal('batch-review-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="batch-review-info" style="background:var(--bg3);padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.9"></div>
+      <p style="font-size:13px;color:var(--text2)">已有評語的月記不受影響。此操作無法還原，請確認後再執行。</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 24px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('batch-review-modal')">取消</button>
+      <button class="btn btn-success" onclick="executeBatchReview()">✅ 確認批次標記</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== JavaScript ==================== -->
 <script>
 // ============ 全域狀態 ============
 let currentUser = null; // { role:'teacher', uid, name, email }
 let db, firebase_funcs;
+let _currentCommentJournal = null;
+let _batchReviewJournals = [];
 
 // ===== 學校網域限制 =====
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
@@ -1973,6 +2032,8 @@ async function loadSalaryStats() {
   document.getElementById('salary-detail-table').innerHTML = journals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j =>
     `<tr><td>${j.seatNo}</td><td>${j.studentName||'-'}</td><td>${stuCompanyMap[j.seatNo]||j.company||'-'}</td><td>${j.month}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary||0).toLocaleString()}</td><td>${j.mentor||'-'}</td></tr>`
   ).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
+  renderSalaryLineChart(journals, stuCompanyMap);
+  renderSalaryBarChart(journals, stuCompanyMap);
 }
 
 // ---- 月記總覽 ----
@@ -2013,6 +2074,7 @@ async function loadTeacherJournals() {
   if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+  window._teacherJournalsCache = journals;
   document.getElementById('t-journals-list').innerHTML = journals.length ? journals.map(j => renderJournalCard(j, true)).join('') : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
 }
 
@@ -2173,7 +2235,7 @@ function renderJournalCard(j, isTeacher) {
     return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div><span style="color:var(--accent-red);font-size:12px">${j.seatNo} 已刪除學生</span><br><span style="font-size:15px;font-weight:700">${j.month}月份月記</span></div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span><span class="badge badge-blue">${j.semester?.replace('-1','第1學期').replace('-2','第2學期') || ''}</span>${deleteBtn}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span>${reviewedBadge}<span class="badge badge-blue">${j.semester?.replace('-1','第1學期').replace('-2','第2學期') || ''}</span>${commentBtn}${deleteBtn}</div>
       </div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${j.submittedAt?.slice(0,10)||'-'}</div>
     </div>`;
@@ -2191,6 +2253,18 @@ function renderJournalCard(j, isTeacher) {
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
   const _sp = resolveImgSrc(j.salaryPhoto);
   const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  // ── 評語 / 已審閱 ──
+  const hasComment = !!(j.teacherComment);
+  const isReviewed = !!(j.teacherReviewed);
+  const reviewedBadge = isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '';
+  const commentBtn = isTeacher ? (
+    hasComment
+      ? `<button class="btn btn-sm" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border)" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">✏️ 編輯評語</button>`
+      : `<button class="btn btn-primary btn-sm" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">✏️ 撰寫評語</button>`
+  ) : '';
+  const commentSection = (isTeacher && hasComment)
+    ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${j.teacherComment}</div>`
+    : '';
   const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',${isTeacher})">🗑️ 刪除</button>`;
   return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -2200,6 +2274,7 @@ function renderJournalCard(j, isTeacher) {
     <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${j.company||'-'}</span><span>繳交：${j.submittedAt?.slice(0,10)||'-'}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${j.reflection||''}</div>
+    ${commentSection}
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
   </div>`;
 }
@@ -2233,7 +2308,7 @@ function printJournalsPDF(journals, title) {
   const rows = journals.map((j, idx) => {
     const entries = (j.entries||[]).map((e,i) => `<div style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa"><div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${e.date||''}</div>${e.address?`<div style="color:#555;margin-bottom:4px">📍 工作地點：${e.address}</div>`:''}<div style="margin-bottom:4px">內容：${e.content||''}</div>${(e.photos||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">${(e.photos||[]).map(p=>{const s=resolveImgSrc(p);return `<img src="${s}" style="max-width:350px;max-height:265px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`;}).join('')}</div>`:''}</div>`).join('');
     const pageBreak = idx > 0 ? 'page-break-before:always;' : '';
-    return `<div style="${pageBreak}padding:20px 10px"><h2 style="font-size:18px;border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:14px">🗒️ ${j.studentName||''}　實習月記</h2><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px"><thead><tr style="background:#1e3a5f;color:#fff"><th style="padding:6px 10px;border:1px solid #999">座號</th><th style="padding:6px 10px;border:1px solid #999">姓名</th><th style="padding:6px 10px;border:1px solid #999">實習公司</th><th style="padding:6px 10px;border:1px solid #999">學期</th><th style="padding:6px 10px;border:1px solid #999">月份</th></tr></thead><tbody><tr><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.seatNo||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.studentName||''}</td><td style="padding:6px 10px;border:1px solid #ccc">${j.company||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.semester||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.month||''}月</td></tr></tbody></table><div style="margin-bottom:8px"><b>主要師傅/學長姐：</b>${j.mentor||''}</div><div style="margin-bottom:8px"><b>本月薪資：</b>${j.salary?j.salary.toLocaleString()+' 元':'-'}</div>${j.salaryPhoto?`<div style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:6px">💴 薪資單</div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa"><img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:350px;max-height:265px;border-radius:6px;border:1px solid #ddd;display:block"></div></div>`:'<div style="margin-bottom:14px"></div>'}<div style="margin-bottom:8px;font-weight:600">工作摘要</div>${entries||'<div style="color:#999;font-size:13px">無工作摘要</div>'}<div style="margin-top:14px"><b>本月心得：</b></div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;min-height:60px;margin-top:6px;background:#fafafa">${j.reflection||''}</div></div>`;
+    return `<div style="${pageBreak}padding:20px 10px"><h2 style="font-size:18px;border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:14px">🗒️ ${j.studentName||''}　實習月記</h2><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px"><thead><tr style="background:#1e3a5f;color:#fff"><th style="padding:6px 10px;border:1px solid #999">座號</th><th style="padding:6px 10px;border:1px solid #999">姓名</th><th style="padding:6px 10px;border:1px solid #999">實習公司</th><th style="padding:6px 10px;border:1px solid #999">學期</th><th style="padding:6px 10px;border:1px solid #999">月份</th></tr></thead><tbody><tr><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.seatNo||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.studentName||''}</td><td style="padding:6px 10px;border:1px solid #ccc">${j.company||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.semester||''}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${j.month||''}月</td></tr></tbody></table><div style="margin-bottom:8px"><b>主要師傅/學長姐：</b>${j.mentor||''}</div><div style="margin-bottom:8px"><b>本月薪資：</b>${j.salary?j.salary.toLocaleString()+' 元':'-'}</div>${j.salaryPhoto?`<div style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:6px">💴 薪資單</div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa"><img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:350px;max-height:265px;border-radius:6px;border:1px solid #ddd;display:block"></div></div>`:'<div style="margin-bottom:14px"></div>'}<div style="margin-bottom:8px;font-weight:600">工作摘要</div>${entries||'<div style="color:#999;font-size:13px">無工作摘要</div>'}<div style="margin-top:14px"><b>本月心得：</b></div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;min-height:60px;margin-top:6px;background:#fafafa">${j.reflection||''}</div>${(j.teacherReviewed||j.teacherComment)?`<div style="margin-top:10px;border:1px solid #86efac;border-radius:6px;padding:10px 12px;background:#f0fdf4"><b style="color:#166534">💬 老師評語 <span style="background:#bbf7d0;color:#166534;border-radius:10px;padding:2px 8px;font-size:11px">✅ 已審閱</span></b><br><span style="color:#1a1a1a">${j.teacherComment||'（老師已閱讀，無文字評語）'}</span></div>`:''}</div>`;
   }).join('<hr style="margin:0;border:none">');
   const win = window.open('', '_blank', 'width=900,height=700');
   if (!win) return toast('請允許彈出視窗，再試一次', 'error');
@@ -2246,6 +2321,231 @@ function printJournalsPDF(journals, title) {
 function toggleLocDetail(subId) {
   const el = document.getElementById(subId);
   if (el) el.classList.toggle('hidden');
+}
+
+// ============================================================
+// ===== 老師評語功能 ==========================================
+// ============================================================
+
+function openCommentModal(seatNo, semester, month) {
+  _currentCommentJournal = { seatNo, semester, month };
+  const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
+  const { doc, getDoc } = firebase_funcs;
+  getDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`)).then(snap => {
+    const data = snap.exists() ? snap.data() : {};
+    document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
+    document.getElementById('comment-modal-info').innerHTML =
+      `👤 學生：<strong>${seatNo} ${data.studentName || seatNo}</strong><br>📅 學期：<strong>${semLabel}</strong><br>📆 月份：<strong>${month} 月</strong>`;
+    document.getElementById('comment-modal-textarea').value = data.teacherComment || '';
+  }).catch(() => { document.getElementById('comment-modal-textarea').value = ''; });
+  openModal('comment-modal');
+}
+
+async function saveTeacherComment() {
+  if (!_currentCommentJournal) return;
+  const { seatNo, semester, month } = _currentCommentJournal;
+  const comment = document.getElementById('comment-modal-textarea').value.trim();
+  if (!comment) return toast('評語不能為空', 'error');
+  const { doc, updateDoc } = firebase_funcs;
+  showLoading();
+  try {
+    await updateDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`), {
+      teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString()
+    });
+    hideLoading();
+    closeModal('comment-modal');
+    toast('✅ 評語已儲存，月記標記為已審閱', 'success');
+    loadTeacherJournals();
+  } catch(e) {
+    hideLoading();
+    toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
+  }
+}
+
+// ============================================================
+// ===== 批次審閱功能 ==========================================
+// ============================================================
+
+function openBatchReviewModal() {
+  const allJournals = window._teacherJournalsCache || [];
+  if (!allJournals.length) return toast('請先查詢月記後再使用批次功能', 'error');
+  _batchReviewJournals = allJournals.filter(j => !j.teacherComment && !j.teacherReviewed);
+  const total = allJournals.length, pending = _batchReviewJournals.length;
+  const startVal = document.getElementById('t-journals-date-start')?.value || '全部';
+  const endVal   = document.getElementById('t-journals-date-end')?.value || '全部';
+  document.getElementById('batch-review-info').innerHTML =
+    `📅 查詢範圍：<strong>${startVal} ～ ${endVal}</strong><br>` +
+    `📋 範圍內月記：<strong>${total} 份</strong><br>` +
+    `📝 尚未審閱：<strong style="color:var(--accent-green)">${pending} 份</strong>`;
+  if (!pending) return toast('目前查詢範圍內所有月記均已審閱或有評語', 'info');
+  openModal('batch-review-modal');
+}
+
+async function executeBatchReview() {
+  if (!_batchReviewJournals.length) { closeModal('batch-review-modal'); return; }
+  const { doc, updateDoc } = firebase_funcs;
+  showLoading();
+  try {
+    const now = new Date().toISOString();
+    await Promise.all(_batchReviewJournals.map(j =>
+      updateDoc(doc(db, 'journals', `${j.seatNo}-${j.semester}-${j.month}`), { teacherReviewed: true, reviewedAt: now })
+    ));
+    hideLoading();
+    closeModal('batch-review-modal');
+    toast(`✅ 已批次標記 ${_batchReviewJournals.length} 份月記為已審閱`, 'success');
+    _batchReviewJournals = [];
+    loadTeacherJournals();
+  } catch(e) {
+    hideLoading();
+    toast('❌ 批次標記失敗：' + (e.message || '請重試'), 'error');
+  }
+}
+
+// ============================================================
+// ===== 薪資圖表 =============================================
+// ============================================================
+
+function _computeMonthLabel(j) {
+  const [roc, half] = (j.semester || '').split('-').map(Number);
+  if (!roc || !half) return null;
+  let year = roc + 1911;
+  if (half === 1 && j.month === 1) year = roc + 1912;
+  if (half === 2) year = roc + 1912;
+  return `${year}/${String(j.month).padStart(2,'0')}`;
+}
+
+function renderSalaryLineChart(journals, stuCompanyMap) {
+  const container = document.getElementById('salary-line-chart-container');
+  const legendEl  = document.getElementById('salary-line-chart-legend');
+  if (!container) return;
+  const COLORS = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#7c3aed','#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6'];
+  const monthDataMap = {}, companySet = new Set();
+  journals.forEach(j => {
+    if (j.salary == null) return;
+    const company = stuCompanyMap[j.seatNo] || j.company || '未填寫';
+    companySet.add(company);
+    const label = _computeMonthLabel(j); if (!label) return;
+    if (!monthDataMap[label]) monthDataMap[label] = { total:[], companies:{} };
+    if (!monthDataMap[label].companies[company]) monthDataMap[label].companies[company] = [];
+    monthDataMap[label].companies[company].push(j.salary);
+    monthDataMap[label].total.push(j.salary);
+  });
+  const months = Object.keys(monthDataMap).sort();
+  const companies = [...companySet].sort();
+  if (!months.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📈</div><p>尚無薪資資料</p></div>';
+    if (legendEl) legendEl.innerHTML = ''; return;
+  }
+  const colorMap = {};
+  companies.forEach((c,i) => { colorMap[c] = COLORS[i % COLORS.length]; });
+  const companyAvgs = {};
+  companies.forEach(c => {
+    companyAvgs[c] = months.map(m => {
+      const v = monthDataMap[m]?.companies[c];
+      return v?.length ? Math.round(v.reduce((a,b)=>a+b,0)/v.length) : null;
+    });
+  });
+  const classAvgs = months.map(m => {
+    const v = monthDataMap[m].total;
+    return v.length ? Math.round(v.reduce((a,b)=>a+b,0)/v.length) : null;
+  });
+  const allVals = [...classAvgs,...Object.values(companyAvgs).flat()].filter(v=>v!=null);
+  if (!allVals.length) return;
+  const maxV=Math.max(...allVals), rawMin=Math.min(...allVals);
+  const pad=(maxV-rawMin)*0.12||maxV*0.12||2000;
+  const minVal=Math.max(0,rawMin-pad), yRange=(maxV+pad)-minVal||1;
+  const W=580,H=210,ML=68,MR=16,MT=18,MB=42,plotW=W-ML-MR,plotH=H-MT-MB,n=months.length;
+  const xPos=i=>ML+(n>1?i*plotW/(n-1):plotW/2);
+  const yPos=v=>MT+plotH-((v-minVal)/yRange)*plotH;
+  function smPath(pts){
+    if(!pts.length) return '';
+    if(pts.length===1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    let d=`M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for(let i=0;i<pts.length-1;i++){
+      const[x0,y0]=pts[i],[x1,y1]=pts[i+1],cx=(x0+x1)/2;
+      d+=` C ${cx.toFixed(1)} ${y0.toFixed(1)} ${cx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    } return d;
+  }
+  let sp=[];
+  for(let i=0;i<5;i++){
+    const v=minVal+(yRange/4)*i, y=yPos(v).toFixed(1);
+    sp.push(`<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="#2a3047" stroke-width="1"/>`);
+    sp.push(`<text x="${ML-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="#8892aa">$${Math.round(v/1000)}k</text>`);
+  }
+  months.forEach((m,i)=>{
+    const x=xPos(i).toFixed(1),yBt=(MT+plotH).toFixed(1);
+    sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="#2a3047" stroke-width="1"/>`);
+    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m.slice(2)}</text>`);
+  });
+  sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
+  sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
+  companies.forEach(c=>{
+    const color=colorMap[c];
+    const vi=companyAvgs[c].map((v,i)=>v!=null?i:null).filter(v=>v!==null);
+    if(vi.length>1) sp.push(`<path d="${smPath(vi.map(i=>[xPos(i),yPos(companyAvgs[c][i])]))}" fill="none" stroke="${color}" stroke-width="2.2" opacity="0.9"/>`);
+    companyAvgs[c].forEach((v,i)=>{
+      if(v==null) return;
+      const x=xPos(i).toFixed(1),y=yPos(v).toFixed(1);
+      sp.push(`<circle cx="${x}" cy="${y}" r="4.5" fill="${color}" stroke="var(--bg2)" stroke-width="2"><title>${c} | ${months[i]}: $${v.toLocaleString()}</title></circle>`);
+      if(n<=9) sp.push(`<text x="${x}" y="${(parseFloat(y)-8).toFixed(1)}" text-anchor="middle" font-size="9" fill="${color}" font-weight="600">$${Math.round(v/1000)}k</text>`);
+    });
+  });
+  const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
+  if(ci.length>1) sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block">${sp.join('')}</svg>`;
+  if(legendEl){
+    const items=companies.map(c=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px"></span>${c}</span>`);
+    if(ci.length>1) items.push(`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:2px;border-top:2px dashed rgba(255,255,255,0.35)"></span>全班平均</span>`);
+    legendEl.innerHTML=items.join('');
+  }
+}
+
+function renderSalaryBarChart(journals, stuCompanyMap) {
+  const container = document.getElementById('salary-bar-chart-container');
+  if (!container) return;
+  const monthDataMap = {};
+  journals.forEach(j => {
+    if (j.salary == null) return;
+    const company = stuCompanyMap[j.seatNo] || j.company || '未填寫';
+    const label = _computeMonthLabel(j); if (!label) return;
+    if (!monthDataMap[label]) monthDataMap[label] = { total:[], byCompany:{} };
+    monthDataMap[label].total.push(j.salary);
+    if (!monthDataMap[label].byCompany[company]) monthDataMap[label].byCompany[company] = [];
+    monthDataMap[label].byCompany[company].push({ seatNo:j.seatNo, name:j.studentName||'-', salary:j.salary });
+  });
+  const months = Object.keys(monthDataMap).sort();
+  if (!months.length) { container.innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>尚無薪資資料</p></div>'; return; }
+  const monthAvgs = months.map(m => { const v=monthDataMap[m].total; return v.length?Math.round(v.reduce((a,b)=>a+b,0)/v.length):0; });
+  const maxAvg = Math.max(...monthAvgs) || 1;
+  window._salaryBarData = { monthDataMap, months };
+  const bars = months.map((m,i) => {
+    const avg=monthAvgs[i], hPct=Math.round((avg/maxAvg)*100);
+    const mDisp=m.slice(5).replace(/^0/,'')+'月';
+    return `<div class="salary-bar-col" onclick="selectSalaryMonth('${m}',this)" title="${m} 平均 $${avg.toLocaleString()}"><div style="font-size:10px;color:var(--accent-green);font-weight:600;margin-bottom:4px;white-space:nowrap">$${Math.round(avg/1000)}k</div><div style="width:100%;display:flex;align-items:flex-end;justify-content:center;height:100px"><div class="salary-bar-inner" style="height:${Math.max(hPct,3)}%;background:var(--bg3);border:1px solid var(--border)"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">${mDisp}</div></div>`;
+  }).join('');
+  container.innerHTML=`<div style="display:flex;gap:4px;align-items:flex-end;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:12px">${bars}</div><div id="salary-bar-detail" style="font-size:13px;min-height:40px"></div>`;
+  const firstCol=container.querySelector('.salary-bar-col');
+  if(firstCol) selectSalaryMonth(months[0],firstCol);
+}
+
+function selectSalaryMonth(monthLabel, clickedEl) {
+  document.querySelectorAll('#salary-bar-chart-container .salary-bar-inner').forEach(b=>{b.style.background='var(--bg3)';b.style.borderColor='var(--border)';});
+  const bar=clickedEl?.querySelector('.salary-bar-inner');
+  if(bar){bar.style.background='linear-gradient(180deg,var(--accent),var(--accent2))';bar.style.borderColor='transparent';}
+  const detail=document.getElementById('salary-bar-detail');
+  const {monthDataMap}=window._salaryBarData||{};
+  if(!detail||!monthDataMap?.[monthLabel]) return;
+  const data=monthDataMap[monthLabel];
+  const totalAvg=Math.round(data.total.reduce((a,b)=>a+b,0)/data.total.length);
+  const companyRows=Object.entries(data.byCompany)
+    .sort((a,b)=>(b[1].reduce((s,x)=>s+x.salary,0)/b[1].length)-(a[1].reduce((s,x)=>s+x.salary,0)/a[1].length))
+    .map(([company,records])=>{
+      const cAvg=Math.round(records.reduce((s,x)=>s+x.salary,0)/records.length);
+      const stuRows=records.sort((a,b)=>a.seatNo.localeCompare(b.seatNo))
+        .map(r=>`<tr><td style="padding:5px 10px;font-size:12px">${r.seatNo}</td><td style="padding:5px 10px;font-size:12px">${r.name}</td><td style="padding:5px 10px;font-size:12px;color:var(--accent-green);font-weight:600">$${r.salary.toLocaleString()}</td></tr>`).join('');
+      return `<tr style="background:var(--bg3)"><td colspan="3" style="padding:6px 10px;font-weight:700;font-size:12px">🏭 ${company}<span style="color:var(--accent-green);font-weight:400;margin-left:8px">平均 $${cAvg.toLocaleString()}</span></td></tr>${stuRows}`;
+    }).join('');
+  detail.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-weight:700">${monthLabel} 薪資明細</span><span style="color:var(--accent-green);font-weight:700">全月平均 $${totalAvg.toLocaleString()}</span></div><div class="table-wrap"><table><thead><tr><th>座號</th><th>姓名</th><th>薪資</th></tr></thead><tbody>${companyRows}</tbody></table></div>`;
 }
 
 // ============================================================
