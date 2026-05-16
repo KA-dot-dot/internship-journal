@@ -358,7 +358,7 @@ tr:last-child td { border-bottom: none; }
     <div class="sidebar" id="teacher-sidebar">
       <div class="nav-section">概覽</div>
       <button class="nav-item active" onclick="showPage('t-dashboard')" data-page="t-dashboard">
-        <span class="icon">📊</span> 儀表板
+        <span class="icon">📊</span> 主頁
       </button>
       <div class="nav-section">管理</div>
       <button class="nav-item" onclick="showPage('t-students')" data-page="t-students">
@@ -396,9 +396,9 @@ tr:last-child td { border-bottom: none; }
     <!-- Main Content -->
     <div class="main-content">
 
-      <!-- ========== 老師：儀表板 ========== -->
+      <!-- ========== 老師：主頁 ========== -->
       <div id="page-t-dashboard" class="hidden fade-in">
-        <div class="page-title">📊 儀表板</div>
+        <div class="page-title">📊 主頁</div>
         <div class="page-subtitle" id="t-dashboard-subtitle">載入中...</div>
         <div class="stats-grid" id="t-stats-grid">
           <div class="stat-card">
@@ -416,6 +416,18 @@ tr:last-child td { border-bottom: none; }
           <div class="stat-card">
             <div class="stat-label">繳交率</div>
             <div class="stat-value" style="color:var(--accent)" id="stat-rate">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">已審閱</div>
+            <div class="stat-value" style="color:var(--accent-green)" id="stat-reviewed">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">未審閱</div>
+            <div class="stat-value" style="color:var(--accent-yellow)" id="stat-unreviewed">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">有評語</div>
+            <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
           </div>
         </div>
         <div class="card" style="margin-bottom:20px">
@@ -766,7 +778,7 @@ tr:last-child td { border-bottom: none; }
 
   <!-- 手機底部導航 -->
   <div class="mobile-nav" id="teacher-mobile-nav">
-    <button class="mobile-nav-item active" onclick="showPage('t-dashboard')"><span class="icon">📊</span>儀表板</button>
+    <button class="mobile-nav-item active" onclick="showPage('t-dashboard')"><span class="icon">📊</span>主頁</button>
     <button class="mobile-nav-item" onclick="showPage('t-students')"><span class="icon">👥</span>學生</button>
     <button class="mobile-nav-item" onclick="showPage('t-stats')" data-page="t-stats"><span class="icon">📊</span>統計</button>
     <button class="mobile-nav-item" onclick="showPage('t-admin')"><span class="icon">🔑</span>帳號</button>
@@ -784,17 +796,15 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="modal-body">
       <div class="form-row">
+        <div class="form-group"><label>姓名 *</label><input type="text" id="add-name" placeholder="王小明"></div>
         <div class="form-group"><label>班級座號 *</label><input type="text" id="add-seat" placeholder="01"></div>
-        <div class="form-group"><label>學號 *</label><input type="text" id="add-student-id" placeholder="1130001"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>姓名 *</label><input type="text" id="add-name" placeholder="王小明"></div>
-        <div class="form-group"><label>性別</label><select id="add-gender"><option value="">請選擇</option><option value="男">男</option><option value="女">女</option></select></div>
+        <div class="form-group"><label>學號 *</label><input type="text" id="add-student-id" placeholder="1130001"></div>
+        <div class="form-group"><label>實習公司名稱 *</label><input type="text" id="add-company" placeholder="XX科技股份有限公司"></div>
       </div>
-      <div class="form-group"><label>生日（西元年月日）*</label><input type="text" id="add-birthday" placeholder="2009/5/10" maxlength="10"></div>
-      <div class="form-group"><label>實習公司名稱 *</label><input type="text" id="add-company" placeholder="XX科技股份有限公司"></div>
       <div class="form-group"><label>Google 學校帳號</label><input type="text" id="add-google-email" placeholder="u333101@tcivs.tc.edu.tw"></div>
-      <p style="font-size:12px;color:var(--text3);margin-top:-8px;margin-bottom:14px">留空儲存會解除此座號原本的學生帳號綁定</p>
+      <p style="font-size:12px;color:var(--text3);margin-top:-8px;margin-bottom:14px">可在此新增或更新帳號；刪除學生時會一併移除 Google 帳號綁定</p>
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" onclick="saveStudent()">💾 儲存</button>
         <button class="btn btn-secondary" onclick="closeModal('add-student-modal')">取消</button>
@@ -811,10 +821,10 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　性別　生日　公司　Google帳號</code>（Google帳號可留空）</p>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　實習公司　Google帳號綁定</code>（Google帳號可留空）</p>
       <div class="config-code" style="margin-bottom:12px;font-size:12px">
-        王小明　01　1130001　男　2009/5/10　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
-        李小華　02　1130002　女　2008/3/20　OO工業有限公司　u333102@tcivs.tc.edu.tw
+        王小明　01　1130001　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
+        李小華　02　1130002　OO工業有限公司　u333102@tcivs.tc.edu.tw
       </div>
       <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
       <div style="display:flex;gap:10px">
@@ -1253,7 +1263,7 @@ async function removeBinding(docId, email) {
 // ===== 老師功能 ==============================================
 // ============================================================
 
-// ---- 老師儀表板 ----
+// ---- 老師主頁 ----
 async function loadTeacherDashboard() {
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
@@ -1265,13 +1275,20 @@ async function loadTeacherDashboard() {
   const total = stuSnap.size;
   document.getElementById('stat-total-students').textContent = total;
   const jSnap = await getDocs(query(collection(db, 'journals'), where('semester', '==', sem), where('month', '==', thisMonth)));
-  const submitted = jSnap.docs.filter(d => activeSeatNos.has(d.data().seatNo)).length;
+  const activeJournals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  const submitted = activeJournals.length;
   const missing = total - submitted;
+  const reviewed = activeJournals.filter(j => !!j.teacherReviewed).length;
+  const commented = activeJournals.filter(j => (j.teacherComment || '').trim()).length;
+  const unreviewed = Math.max(submitted - reviewed, 0);
   document.getElementById('stat-submitted').textContent = submitted;
   document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-rate').textContent = total ? Math.round(submitted/total*100) + '%' : '0%';
+  document.getElementById('stat-reviewed').textContent = reviewed;
+  document.getElementById('stat-unreviewed').textContent = unreviewed;
+  document.getElementById('stat-commented').textContent = commented;
   await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
-  const submittedSeats = new Set(jSnap.docs.map(d => d.data().seatNo));
+  const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
   const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id)).map(d => d.data().name);
   const el = document.getElementById('t-missing-list');
   if (missingStudents.length === 0) {
@@ -1297,14 +1314,15 @@ async function loadDeadlineInfo(targetId, sem, month) {
 
 // ---- 學生管理 ----
 function viewStudentJournals(seatNo, name) {
+  showPage('t-journals');
   const searchEl = document.getElementById('t-journals-search');
   if (searchEl) searchEl.value = seatNo;
   const ds = document.getElementById('t-journals-date-start');
   const de = document.getElementById('t-journals-date-end');
   if (ds) ds.value = '';
   if (de) de.value = '';
-  showPage('t-journals');
-  toast(`📖 顯示 ${seatNo} ${name} 的月記`, 'info');
+  loadTeacherJournals();
+  toast(`📖 顯示 ${seatNo} ${name} 的全部月記`, 'info');
 }
 
 async function loadStudentsTable() {
@@ -1333,7 +1351,6 @@ async function loadStudentsTable() {
     if (binding) {
       googleCell = `<div style="display:flex;align-items:center;gap:6px">
         <span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${binding.email}">✅ ${binding.email}</span>
-        <button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="removeBindingInline('${binding.docId}','${binding.email}')">解除</button>
       </div>`;
     } else {
       googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -1393,8 +1410,7 @@ async function removeBindingInline(docId, email) {
 }
 
 function openAddStudentModal() {
-  ['add-seat','add-student-id','add-name','add-birthday','add-company','add-google-email'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  const gEl = document.getElementById('add-gender'); if(gEl) gEl.value='';
+  ['add-seat','add-student-id','add-name','add-company','add-google-email'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('add-student-modal').dataset.editId = '';
   openModal('add-student-modal');
 }
@@ -1407,8 +1423,6 @@ async function editStudent(seatNo) {
   document.getElementById('add-seat').value = s.seatNo;
   document.getElementById('add-student-id').value = s.studentId || '';
   document.getElementById('add-name').value = s.name;
-  document.getElementById('add-gender').value = s.gender || '';
-  document.getElementById('add-birthday').value = s.birthday;
   document.getElementById('add-company').value = s.company || '';
   const bindSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)));
   const googleEl = document.getElementById('add-google-email');
@@ -1420,16 +1434,12 @@ async function editStudent(seatNo) {
 async function saveStudent() {
   const seat = document.getElementById('add-seat').value.trim().padStart(2,'0');
   const name = document.getElementById('add-name').value.trim();
-  const bdayRaw = document.getElementById('add-birthday').value.trim();
-  const bday = normalizeBirthday(bdayRaw);
   if (!seat || !name) return toast('座號和姓名為必填', 'error');
-  if (!bday) return toast('生日格式錯誤，請輸入如：2009/5/10', 'error');
   const googleEmail = (document.getElementById('add-google-email')?.value || '').trim().toLowerCase();
   if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
   const data = {
     seatNo: seat, studentId: document.getElementById('add-student-id').value.trim(),
-    name, gender: document.getElementById('add-gender').value || '',
-    birthday: bday, company: document.getElementById('add-company').value.trim(),
+    name, company: document.getElementById('add-company').value.trim(),
     updatedAt: new Date().toISOString()
   };
   showLoading();
@@ -1519,7 +1529,7 @@ async function importStudents() {
   // 優先用 Tab 分隔（Excel 複製預設是 Tab）
   const sep = firstLine.includes('\t') ? '\t' : ',';
   // 排除標題行（第一欄包含任一關鍵字）
-  const HEADER_KEYWORDS = ['姓名','座號','學號','性別','生日','名稱','公司','錄取','實習'];
+  const HEADER_KEYWORDS = ['姓名','座號','學號','名稱','公司','錄取','實習','Google'];
   const dataLines = lines.filter(l => {
     const first = l.split(sep)[0].trim();
     return !HEADER_KEYWORDS.some(k => first.includes(k));
@@ -1529,22 +1539,18 @@ async function importStudents() {
   for (const line of dataLines) {
     // Tab 分隔時用 split(\t)，保留公司名稱中的逗號
     const cols = line.split(sep).map(s => s.trim());
-    // 欄位：姓名、座號、學號、性別、生日、公司、Google帳號（Google帳號可留空）
+    // 欄位：姓名、座號、學號、實習公司、Google帳號綁定（Google帳號可留空）
     const name = cols[0] || '';
     const seat = cols[1] || '';
     const sid = cols[2] || '';
-    const gender = cols[3] || '';
-    const bdayRaw = cols[4] || '';
-    const emailIdx = cols.findIndex((v, idx) => idx >= 5 && v.includes('@'));
+    const emailIdx = cols.findIndex((v, idx) => idx >= 4 && v.includes('@'));
     const email = emailIdx >= 0 ? cols[emailIdx].toLowerCase() : '';
-    const companyCols = emailIdx >= 0 ? cols.slice(5, emailIdx) : cols.slice(5);
+    const companyCols = emailIdx >= 0 ? cols.slice(3, emailIdx) : cols.slice(3);
     const company = companyCols.join(sep === '\t' ? '' : ',').trim();
     if (!seat || !name) { errors.push('跳過（資料不足）：' + line.slice(0,30)); continue; }
-    const bday = normalizeBirthday(bdayRaw);
     const seatNo = String(parseInt(seat) || 0).padStart(2,'0');
     await setDoc(doc(db, 'students', seatNo), {
-      seatNo, studentId: sid, name, gender,
-      birthday: bday || bdayRaw, company,
+      seatNo, studentId: sid, name, company,
       updatedAt: new Date().toISOString()
     });
     if (email) {
@@ -2074,16 +2080,19 @@ function renderFilteredCity(journals) {
   if (summaryEl) summaryEl.textContent = `共 ${total} 筆工作記錄，${sorted.length} 個縣市`;
 
   // 距離統計
-  const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20km+': 0 };
+  const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20-50km': 0, '50-100km': 0, '100-150km': 0, '150km+': 0 };
   journals.forEach(j => {
     if (!selectedCompanies.has(j.company)) return;
     (j.entries||[]).forEach(e => {
-      const d = e.distance;
-      if (d == null) return;
+      const d = Number(e.distance);
+      if (!Number.isFinite(d)) return;
       if (d < 5) distBuckets['0-5km']++;
       else if (d < 10) distBuckets['5-10km']++;
       else if (d < 20) distBuckets['10-20km']++;
-      else distBuckets['20km+']++;
+      else if (d < 50) distBuckets['20-50km']++;
+      else if (d < 100) distBuckets['50-100km']++;
+      else if (d < 150) distBuckets['100-150km']++;
+      else distBuckets['150km+']++;
     });
   });
   const distTotal = Object.values(distBuckets).reduce((s,x) => s+x, 0);
