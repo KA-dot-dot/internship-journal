@@ -16,7 +16,7 @@
 <!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getFirestore, initializeFirestore, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
   const firebaseConfig = {
@@ -33,7 +33,7 @@
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
 
-  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
+  window._firebase = { db, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
 </script>
 
@@ -773,6 +773,17 @@ tr:last-child td { border-bottom: none; }
           </div>
           <a href="https://console.cloudinary.com/settings/billing/plans" target="_blank" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:var(--bg3);color:var(--text1);border:1px solid var(--border)">🔗 前往 Cloudinary 查看用量</a>
         </div>
+
+        <div class="card" style="grid-column:1/-1;margin-top:0">
+          <div style="font-size:15px;font-weight:700;margin-bottom:8px">🔐 月記安全欄位補寫</div>
+          <p style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px">
+            安全版會用 ownerUid 限制學生只能讀寫自己的月記。若有舊月記缺少 ownerUid，請先執行一次補寫，再讓學生測試。
+          </p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="backfillJournalOwners()">&#36983;&#31227;&#33290;&#26376;&#35352;&#21040;&#23433;&#20840;&#36335;&#24465;</button>
+            <span id="owner-backfill-result" style="font-size:13px;color:var(--text2)">&#23578;&#26410;&#36983;&#31227;</span>
+          </div>
+        </div>
         </div>
       </div>
 
@@ -1105,7 +1116,7 @@ function showPage(pageId) {
 
 async function loadAdminPage() {
   await waitForFirebaseAsync();
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
 
   // 載入老師清單
   const adminSnap = await getDocs(collection(db, 'admins'));
@@ -1153,7 +1164,7 @@ async function addAdmin() {
 
   showLoading();
   try {
-    const { collection, getDocs, doc, setDoc } = firebase_funcs;
+    const { collection, collectionGroup, getDocs, doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1234,7 +1245,7 @@ async function bindStudent() {
 }
 
 async function loadBindingList() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const snap = await getDocs(collection(db, 'studentBindings'));
   const el = document.getElementById('binding-list');
   if (snap.empty) {
@@ -1273,13 +1284,13 @@ async function loadTeacherDashboard() {
   const [y, t] = sem.split('-').map(Number);
   const semLabel = `${y}學年第${t}學期`;
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
-  const { collection, getDocs, query, where } = firebase_funcs;
+  const { collection, collectionGroup, getDocs, query, where } = firebase_funcs;
   const stuSnap = await getDocs(collection(db, 'students'));
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   const total = stuSnap.size;
   document.getElementById('stat-total-students').textContent = total;
-  const jSnap = await getDocs(query(collection(db, 'journals'), where('semester', '==', sem), where('month', '==', thisMonth)));
-  const activeJournals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  const jSnap = await getDocs(collectionGroup(db, 'journals'));
+  const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth);
   const submitted = activeJournals.length;
   const missing = total - submitted;
   const reviewed = activeJournals.filter(j => !!j.teacherReviewed).length;
@@ -1331,7 +1342,7 @@ function viewStudentJournals(seatNo, name) {
 
 async function loadStudentsTable() {
   showLoading();
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const [stuSnap, bindSnap] = await Promise.all([
     getDocs(collection(db, 'students')),
     getDocs(collection(db, 'studentBindings'))
@@ -1420,7 +1431,7 @@ function openAddStudentModal() {
 }
 
 async function editStudent(seatNo) {
-  const { collection, doc, getDoc, getDocs, query, where } = firebase_funcs;
+  const { collection, collectionGroup, doc, getDoc, getDocs, query, where } = firebase_funcs;
   const snap = await getDoc(doc(db, 'students', seatNo));
   if (!snap.exists()) return;
   const s = snap.data();
@@ -1447,7 +1458,7 @@ async function saveStudent() {
     updatedAt: new Date().toISOString()
   };
   showLoading();
-  const { collection, doc, getDoc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
+  const { collection, collectionGroup, doc, getDoc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
   const existingStudentSnap = await getDoc(doc(db, 'students', seat));
   const bindingSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seat)));
   const oldEmails = bindingSnap.docs.map(d => (d.data().email || '').toLowerCase()).filter(Boolean);
@@ -1464,12 +1475,12 @@ async function saveStudent() {
       (googleEmail && oldEmails.length && !oldEmails.includes(googleEmail));
 
     if (isDifferentPerson) {
-      const journalSnap = await getDocs(query(collection(db, 'journals'), where('seatNo', '==', seat)));
+      const journalSnap = await getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)));
       hideLoading();
-      if (journalSnap.size > 0) {
+      if (userJournalDocs(journalSnap).length > 0) {
         const ok = confirm(
           '座號 ' + seat + ' 原本是「' + (oldName || '舊學生') + '」，現在要改成「' + name + '」。\n\n' +
-          '系統找到此座號還有 ' + journalSnap.size + ' 筆舊月記。為避免舊月記出現在新學生帳號下，建議刪除舊月記後再儲存。\n\n' +
+          '系統找到此座號還有 ' + userJournalDocs(journalSnap).length + ' 筆舊月記。為避免舊月記出現在新學生帳號下，建議刪除舊月記後再儲存。\n\n' +
           '按「確定」：刪除舊月記並儲存新學生\n按「取消」：不儲存，先返回檢查'
         );
         if (!ok) return toast('已取消儲存，舊月記未刪除', 'info');
@@ -1480,8 +1491,8 @@ async function saveStudent() {
   }
 
   if (clearOldJournals) {
-    const journalSnap = await getDocs(query(collection(db, 'journals'), where('seatNo', '==', seat)));
-    await Promise.all(journalSnap.docs.map(d => deleteDoc(d.ref)));
+    const journalSnap = await getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)));
+    await Promise.all(userJournalDocs(journalSnap).map(d => deleteDoc(d.ref)));
   }
 
   await setDoc(doc(db, 'students', seat), data);
@@ -1502,19 +1513,19 @@ async function saveStudent() {
 }
 async function deleteStudent(seatNo, name) {
   if (!confirm(`確定要刪除學生「${name}」嗎？`)) return;
-  const { collection, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
+  const { collection, collectionGroup, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
   showLoading();
   const [journalSnap, bindingSnap] = await Promise.all([
-    getDocs(query(collection(db, 'journals'), where('seatNo', '==', seatNo))),
+    getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seatNo))),
     getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)))
   ]);
   await Promise.all([
-    ...journalSnap.docs.map(d => deleteDoc(d.ref)),
+    ...userJournalDocs(journalSnap).map(d => deleteDoc(d.ref)),
     ...bindingSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, 'students', seatNo))
   ]);
   hideLoading();
-  toast(`Deleted student, ${journalSnap.size} journals, and ${bindingSnap.size} bindings`, 'success');
+  toast(`Deleted student, ${userJournalDocs(journalSnap).length} journals, and ${bindingSnap.size} bindings`, 'success');
   loadStudentsTable();
 }
 
@@ -1582,7 +1593,7 @@ async function importStudents() {
 
 // ---- 截止日期 ----
 async function loadDeadlinesTable() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const snap = await getDocs(collection(db, 'deadlines'));
   const now = new Date();
   const rows = snap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
@@ -1684,17 +1695,17 @@ async function deleteDeadline(id) {
 // ---- 統計 ----
 async function loadSubmitStats() {
   const { start, end } = getStatsDateRange('submit-stats');
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   showLoading();
   const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
     getDocs(collection(db, 'students')),
-    getDocs(collection(db, 'journals')),
+    getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
   ]);
   hideLoading();
   const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   if (!monthSlots.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>請選擇日期區間後查詢</p></div>'; return; }
@@ -1819,19 +1830,19 @@ async function loadAllStats() {
 }
 
 async function exportAllStatsExcel() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('export-stats');
   showLoading();
   const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
     getDocs(collection(db, 'students')),
-    getDocs(collection(db, 'journals')),
+    getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
   ]);
   hideLoading();
   const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
   const studentMap = {};
   students.forEach(s => { studentMap[s.id] = s; });
-  let journals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
+  let journals = userJournalData(jSnap).filter(j => studentMap[j.seatNo]);
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   journals.sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
   const monthSlots = getStatsMonthSlots(start, end, journals);
@@ -1956,7 +1967,7 @@ async function exportAllStatsExcel() {
     salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:c.name, 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
   });
   // ── 工作表 4：月記清單（含評語、已審閱）──
-  let allJournals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
+  let allJournals = userJournalData(jSnap).filter(j => studentMap[j.seatNo]);
   if (start && end) allJournals = allJournals.filter(j => journalMonthInRange(j, start, end));
   const journalListRows = allJournals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
     座號: j.seatNo || '',
@@ -2003,18 +2014,18 @@ async function exportAllStatsExcel() {
 
 // 地點統計（簡化版）
 async function loadLocationStats() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('location-stats');
   showLoading();
   const [snap, stuCompSnap] = await Promise.all([
-    getDocs(collection(db, 'journals')),
+    getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'students'))
   ]);
   hideLoading();
   const studentMap = {};
   stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
   const activeSeatNos = new Set(Object.keys(studentMap));
-  let journals = snap.docs.map(d => {
+  let journals = userJournalDocs(snap).map(d => {
     const data = d.data();
     const s = studentMap[data.seatNo] || {};
     return {
@@ -2266,11 +2277,11 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
 
 // 薪資統計
 async function loadSalaryStats() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('salary-stats');
   showLoading();
   const [snap, stuSnap] = await Promise.all([
-    getDocs(collection(db, 'journals')),
+    getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'students'))
   ]);
   hideLoading();
@@ -2284,7 +2295,7 @@ async function loadSalaryStats() {
   });
 
   // 只統計目前學生名單中的學生（過濾掉已刪除學生的舊月記）
-  let allActiveJournals = snap.docs.map(d => d.data()).filter(j => stuCompanyMap.hasOwnProperty(j.seatNo));
+  let allActiveJournals = userJournalData(snap).filter(j => stuCompanyMap.hasOwnProperty(j.seatNo));
   if (start && end) allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
   let journals = allActiveJournals
     .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
@@ -2340,16 +2351,16 @@ async function loadTeacherJournals() {
   const search = (document.getElementById('t-journals-search')?.value || '').toLowerCase();
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocsFromServer } = firebase_funcs;
+  const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
   showLoading();
   const [snap, stuSnap] = await Promise.all([
-    getDocsFromServer(collection(db, 'journals')),
+    getDocsFromServer(collectionGroup(db, 'journals')),
     getDocsFromServer(collection(db, 'students'))
   ]);
   hideLoading();
   const studentMap = {};
   stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
-  let journals = snap.docs.map(d => {
+  let journals = userJournalDocs(snap).map(d => {
     const j = d.data();
     if (studentMap[j.seatNo]) return j;
     return {
@@ -2377,7 +2388,7 @@ async function loadTeacherJournals() {
 
 // ---- 匯出 ----
 async function loadExportStudents() {
-  const { collection, getDocs } = firebase_funcs;
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
   try {
     const snap = await getDocs(collection(db, 'students'));
     const sel = document.getElementById('export-student-select');
@@ -2394,15 +2405,15 @@ async function exportSemesterPDF() {
   const endVal = document.getElementById('export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocsFromServer } = firebase_funcs;
+  const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
   showLoading();
   const [jSnap, stuSnap] = await Promise.all([
-    getDocsFromServer(collection(db, 'journals')),
+    getDocsFromServer(collectionGroup(db, 'journals')),
     getDocsFromServer(collection(db, 'students'))
   ]);
   hideLoading();
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  let journals = jSnap.docs.map(d => d.data()).filter(j => activeSeatNos.has(j.seatNo));
+  let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
   if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   if (!journals.length) return toast('無月記資料可匯出', 'error');
@@ -2412,16 +2423,16 @@ async function exportSemesterPDF() {
 async function exportStudentPDF() {
   const seat = document.getElementById('export-student-select')?.value;
   if (!seat) return toast('請先選擇學生', 'error');
-  const { collection, getDocsFromServer, query, where } = firebase_funcs;
+  const { collection, collectionGroup, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
   const [jSnap, stuSnap] = await Promise.all([
-    getDocsFromServer(query(collection(db, 'journals'), where('seatNo', '==', seat))),
+    getDocsFromServer(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat))),
     getDocsFromServer(collection(db, 'students'))
   ]);
   hideLoading();
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
-  const journals = jSnap.docs.map(d => d.data()).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const journals = userJournalData(jSnap).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
   if (!journals.length) return toast('該學生尚無月記', 'error');
   const name = journals[0].studentName || seat;
   printJournalsPDF(journals, `${name}實習月記`);
@@ -2480,6 +2491,52 @@ async function saveStorageUsage() {
   toast('✅ 已更新儲存用量', 'success');
 }
 
+async function backfillJournalOwners() {
+  if (!confirm('\u78ba\u5b9a\u8981\u628a\u820a\u7248 /journals \u6708\u8a18\u9077\u79fb\u5230 /users/{uid}/journals \u55ce\uff1f\u820a\u8cc7\u6599\u6703\u4fdd\u7559\u4f5c\u70ba\u5099\u4efd\uff0c\u4e0d\u6703\u522a\u9664\u3002')) return;
+  const resultEl = document.getElementById('owner-backfill-result');
+  const { collection, doc, getDocsFromServer, setDoc } = firebase_funcs;
+  showLoading();
+  try {
+    const [journalSnap, bindingSnap] = await Promise.all([
+      getDocsFromServer(collection(db, 'journals')),
+      getDocsFromServer(collection(db, 'studentBindings'))
+    ]);
+    const ownerBySeat = {};
+    bindingSnap.docs.forEach(d => {
+      const b = d.data();
+      const seat = String(b.seatNo || '').padStart(2, '0');
+      if (seat && b.uid) ownerBySeat[seat] = { uid: b.uid, email: b.email || '' };
+    });
+    let migrated = 0, missing = 0;
+    const now = new Date().toISOString();
+    const tasks = [];
+    journalSnap.docs.forEach(d => {
+      const j = d.data();
+      const seat = String(j.seatNo || '').padStart(2, '0');
+      const owner = ownerBySeat[seat] || (j.ownerUid ? { uid: j.ownerUid, email: j.ownerEmail || '' } : null);
+      if (!owner || !owner.uid) { missing++; return; }
+      const targetRef = doc(db, 'users', owner.uid, 'journals', d.id);
+      const migratedData = {
+        ...j,
+        seatNo: seat,
+        ownerUid: owner.uid,
+        ownerEmail: owner.email || j.ownerEmail || '',
+        storagePath: 'user',
+        ownerMigratedAt: now
+      };
+      migrated++;
+      tasks.push(setDoc(targetRef, migratedData, { merge: true }));
+    });
+    await Promise.all(tasks);
+    hideLoading();
+    if (resultEl) resultEl.textContent = `\u5df2\u9077\u79fb/\u78ba\u8a8d ${migrated} \u7b46\uff1b\u7f3a\u5c11\u7d81\u5b9a ${missing} \u7b46\u3002\u820a /journals \u5df2\u4fdd\u7559\u5099\u4efd\u3002`;
+    toast(`\u820a\u6708\u8a18\u9077\u79fb\u5b8c\u6210\uff1a${migrated} \u7b46`, 'success');
+  } catch(e) {
+    hideLoading();
+    if (resultEl) resultEl.textContent = '\u9077\u79fb\u5931\u6557\uff1a' + (e.message || e);
+    toast('\u9077\u79fb\u5931\u6557\uff1a' + (e.message || '\u8acb\u7a0d\u5f8c\u518d\u8a66'), 'error');
+  }
+}
 async function saveStorageThreshold() {
   const val = parseFloat(document.getElementById('storage-threshold-input').value);
   if (isNaN(val) || val < 1 || val > 25) return toast('警戒線請設在 1～25 GB 之間', 'error');
@@ -2584,10 +2641,37 @@ function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
   openModal('delete-journal-modal');
 }
 
+function isUserJournalDoc(docSnap) {
+  return !!(docSnap && docSnap.ref && typeof docSnap.ref.path === 'string' && docSnap.ref.path.indexOf('users/') === 0);
+}
+
+function teacherJournalKey(seatNo, semester, month) {
+  return `${seatNo}-${semester}-${month}`;
+}
+
+function findTeacherJournal(seatNo, semester, month) {
+  const key = teacherJournalKey(seatNo, semester, month);
+  return (window._teacherJournalsCache || []).find(j => teacherJournalKey(j.seatNo, j.semester, j.month) === key) || null;
+}
+
+function getTeacherJournalRef(seatNo, semester, month, ownerUid) {
+  const uid = ownerUid || findTeacherJournal(seatNo, semester, month)?.ownerUid || '';
+  if (!uid) throw new Error('\u6b64\u6708\u8a18\u7f3a\u5c11 ownerUid\uff0c\u8acb\u5148\u5230\u7cfb\u7d71\u8a2d\u5b9a\u57f7\u884c\u300c\u9077\u79fb\u820a\u6708\u8a18\u5230\u5b89\u5168\u8def\u5f91\u300d\u3002');
+  const { doc } = firebase_funcs;
+  return doc(db, 'users', uid, 'journals', teacherJournalKey(seatNo, semester, month));
+}
+
+function userJournalDocs(snapshot) {
+  return snapshot.docs.filter(isUserJournalDoc);
+}
+
+function userJournalData(snapshot) {
+  return userJournalDocs(snapshot).map(d => d.data());
+}
 async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   const { doc, deleteDoc } = firebase_funcs;
   try {
-    await deleteDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`));
+    await deleteDoc(getTeacherJournalRef(seatNo, semester, month));
     closeModal('delete-journal-modal');
     toast('✅ 月記已刪除', 'success');
     if (isTeacher) loadTeacherJournals();
@@ -2625,10 +2709,11 @@ function toggleLocDetail(subId) {
 // ============================================================
 
 function openCommentModal(seatNo, semester, month) {
-  _currentCommentJournal = { seatNo, semester, month };
+  const cachedJournal = findTeacherJournal(seatNo, semester, month);
+  _currentCommentJournal = { seatNo, semester, month, ownerUid: cachedJournal?.ownerUid || "" };
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
   const { doc, getDoc } = firebase_funcs;
-  getDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`)).then(snap => {
+  getDoc(getTeacherJournalRef(seatNo, semester, month)).then(snap => {
     const data = snap.exists() ? snap.data() : {};
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
@@ -2640,13 +2725,13 @@ function openCommentModal(seatNo, semester, month) {
 
 async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
-  const { seatNo, semester, month } = _currentCommentJournal;
+  const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
   if (!comment) return toast('評語不能為空', 'error');
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
-    await updateDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`), {
+    await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
       teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString()
     });
     hideLoading();
@@ -2685,7 +2770,7 @@ async function executeBatchReview() {
   try {
     const now = new Date().toISOString();
     await Promise.all(_batchReviewJournals.map(j =>
-      updateDoc(doc(db, 'journals', `${j.seatNo}-${j.semester}-${j.month}`), { teacherReviewed: true, reviewedAt: now })
+      updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now })
     ));
     hideLoading();
     closeModal('batch-review-modal');
