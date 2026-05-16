@@ -774,16 +774,6 @@ tr:last-child td { border-bottom: none; }
           <a href="https://console.cloudinary.com/settings/billing/plans" target="_blank" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:var(--bg3);color:var(--text1);border:1px solid var(--border)">🔗 前往 Cloudinary 查看用量</a>
         </div>
 
-        <div class="card" style="grid-column:1/-1;margin-top:0">
-          <div style="font-size:15px;font-weight:700;margin-bottom:8px">🔐 月記安全欄位補寫</div>
-          <p style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px">
-            安全版會用 ownerUid 限制學生只能讀寫自己的月記。若有舊月記缺少 ownerUid，請先執行一次補寫，再讓學生測試。
-          </p>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="backfillJournalOwners()">&#36983;&#31227;&#33290;&#26376;&#35352;&#21040;&#23433;&#20840;&#36335;&#24465;</button>
-            <span id="owner-backfill-result" style="font-size:13px;color:var(--text2)">&#23578;&#26410;&#36983;&#31227;</span>
-          </div>
-        </div>
         </div>
       </div>
 
@@ -2491,52 +2481,7 @@ async function saveStorageUsage() {
   toast('✅ 已更新儲存用量', 'success');
 }
 
-async function backfillJournalOwners() {
-  if (!confirm('\u78ba\u5b9a\u8981\u628a\u820a\u7248 /journals \u6708\u8a18\u9077\u79fb\u5230 /users/{uid}/journals \u55ce\uff1f\u820a\u8cc7\u6599\u6703\u4fdd\u7559\u4f5c\u70ba\u5099\u4efd\uff0c\u4e0d\u6703\u522a\u9664\u3002')) return;
-  const resultEl = document.getElementById('owner-backfill-result');
-  const { collection, doc, getDocsFromServer, setDoc } = firebase_funcs;
-  showLoading();
-  try {
-    const [journalSnap, bindingSnap] = await Promise.all([
-      getDocsFromServer(collection(db, 'journals')),
-      getDocsFromServer(collection(db, 'studentBindings'))
-    ]);
-    const ownerBySeat = {};
-    bindingSnap.docs.forEach(d => {
-      const b = d.data();
-      const seat = String(b.seatNo || '').padStart(2, '0');
-      if (seat && b.uid) ownerBySeat[seat] = { uid: b.uid, email: b.email || '' };
-    });
-    let migrated = 0, missing = 0;
-    const now = new Date().toISOString();
-    const tasks = [];
-    journalSnap.docs.forEach(d => {
-      const j = d.data();
-      const seat = String(j.seatNo || '').padStart(2, '0');
-      const owner = ownerBySeat[seat] || (j.ownerUid ? { uid: j.ownerUid, email: j.ownerEmail || '' } : null);
-      if (!owner || !owner.uid) { missing++; return; }
-      const targetRef = doc(db, 'users', owner.uid, 'journals', d.id);
-      const migratedData = {
-        ...j,
-        seatNo: seat,
-        ownerUid: owner.uid,
-        ownerEmail: owner.email || j.ownerEmail || '',
-        storagePath: 'user',
-        ownerMigratedAt: now
-      };
-      migrated++;
-      tasks.push(setDoc(targetRef, migratedData, { merge: true }));
-    });
-    await Promise.all(tasks);
-    hideLoading();
-    if (resultEl) resultEl.textContent = `\u5df2\u9077\u79fb/\u78ba\u8a8d ${migrated} \u7b46\uff1b\u7f3a\u5c11\u7d81\u5b9a ${missing} \u7b46\u3002\u820a /journals \u5df2\u4fdd\u7559\u5099\u4efd\u3002`;
-    toast(`\u820a\u6708\u8a18\u9077\u79fb\u5b8c\u6210\uff1a${migrated} \u7b46`, 'success');
-  } catch(e) {
-    hideLoading();
-    if (resultEl) resultEl.textContent = '\u9077\u79fb\u5931\u6557\uff1a' + (e.message || e);
-    toast('\u9077\u79fb\u5931\u6557\uff1a' + (e.message || '\u8acb\u7a0d\u5f8c\u518d\u8a66'), 'error');
-  }
-}
+
 async function saveStorageThreshold() {
   const val = parseFloat(document.getElementById('storage-threshold-input').value);
   if (isNaN(val) || val < 1 || val > 25) return toast('警戒線請設在 1～25 GB 之間', 'error');
