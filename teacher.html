@@ -269,6 +269,29 @@ tr:last-child td { border-bottom: none; }
 .salary-bar-col { display:flex;flex-direction:column;align-items:center;flex:1;min-width:36px;cursor:pointer; }
 .salary-bar-col:hover .salary-bar-inner { opacity:0.75; }
 .salary-bar-inner { width:28px;border-radius:6px 6px 0 0;transition:all 0.3s;min-height:4px; }
+.salary-focus-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:16px; }
+.salary-focus-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+.salary-focus-title { font-size:13px; color:var(--text2); margin-bottom:8px; }
+.salary-focus-value { font-size:20px; font-weight:800; color:var(--text); line-height:1.3; }
+.salary-focus-sub { font-size:12px; color:var(--text3); margin-top:4px; }
+.salary-alert-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:12px; }
+.salary-alert-box { border:1px solid var(--border); border-radius:var(--radius); padding:14px; background:var(--bg2); min-height:96px; }
+.salary-alert-box.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
+.salary-alert-box.danger { border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.08); }
+.salary-alert-box.good { border-color:rgba(34,197,94,0.30); background:rgba(34,197,94,0.07); }
+.salary-alert-title { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:700; font-size:13px; margin-bottom:8px; }
+.salary-alert-count { font-size:11px; color:var(--text2); font-weight:600; }
+.salary-alert-list { display:flex; flex-direction:column; gap:7px; font-size:12px; color:var(--text2); }
+.salary-alert-item { display:flex; justify-content:space-between; gap:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:7px; }
+.salary-alert-main { color:var(--text); font-weight:600; }
+.salary-alert-note { color:var(--text3); font-size:11px; margin-top:2px; }
+.salary-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+.salary-section-title { font-size:15px; font-weight:700; }
+.salary-sub-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.salary-sub-tab { border:1px solid var(--border); background:var(--bg3); color:var(--text2); border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; }
+.salary-sub-tab.active { background:rgba(79,142,247,0.16); border-color:rgba(79,142,247,0.45); color:var(--accent); font-weight:700; }
+.salary-detail-panel.hidden { display:none; }
+.salary-advanced-toggle { width:100%; border:1px solid var(--border); background:var(--bg3); color:var(--text); border-radius:var(--radius); padding:12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; font-weight:700; margin-bottom:10px; }
 </style>
 </head>
 <body>
@@ -532,30 +555,81 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-card"><div class="stat-label">最高薪資</div><div class="stat-value" style="color:var(--accent)" id="salary-max">-</div></div>
             <div class="stat-card"><div class="stat-label">最低薪資</div><div class="stat-value" style="color:var(--accent-yellow)" id="salary-min">-</div></div>
           </div>
-                    <div class="salary-chart-card">
-            <div style="font-size:15px;font-weight:700;margin-bottom:6px">📈 各公司薪資走勢（依月份）</div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各公司每月平均薪資，虛線為全班平均</div>
+
+          <div class="salary-focus-grid">
+            <div class="salary-focus-card">
+              <div class="salary-focus-title">最高平均學生</div>
+              <div class="salary-focus-value" id="salary-top-student">-</div>
+              <div class="salary-focus-sub" id="salary-top-student-sub">查詢後顯示</div>
+            </div>
+            <div class="salary-focus-card">
+              <div class="salary-focus-title">最低平均學生</div>
+              <div class="salary-focus-value" id="salary-low-student">-</div>
+              <div class="salary-focus-sub" id="salary-low-student-sub">查詢後顯示</div>
+            </div>
+            <div class="salary-focus-card">
+              <div class="salary-focus-title">最高平均公司</div>
+              <div class="salary-focus-value" id="salary-top-company">-</div>
+              <div class="salary-focus-sub" id="salary-top-company-sub">查詢後顯示</div>
+            </div>
+            <div class="salary-focus-card">
+              <div class="salary-focus-title">最低平均公司</div>
+              <div class="salary-focus-value" id="salary-low-company">-</div>
+              <div class="salary-focus-sub" id="salary-low-company-sub">查詢後顯示</div>
+            </div>
+          </div>
+
+          <div class="salary-chart-card">
+            <div class="salary-section-head">
+              <div>
+                <div class="salary-section-title">⚠️ 需要注意</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:4px">自動標出低於平均、缺漏與公司內部落差，先看誰需要追蹤</div>
+              </div>
+            </div>
+            <div id="salary-alerts-container" class="salary-alert-grid"><div class="empty-state"><div class="icon">⚠️</div><p>查詢後顯示</p></div></div>
+          </div>
+
+          <div class="salary-chart-card">
+            <div class="salary-section-head">
+              <div>
+                <div class="salary-section-title">📊 月份趨勢（點長條查明細）</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:4px">先看全班每月平均，再點選月份展開公司 / 學生明細</div>
+              </div>
+            </div>
+            <div id="salary-bar-chart-container"><div class="empty-state"><div class="icon">📊</div><p>查詢後顯示</p></div></div>
+          </div>
+
+          <button class="salary-advanced-toggle" type="button" onclick="toggleSalaryAdvanced()">
+            <span>📈 進階：各公司薪資走勢</span><span id="salary-advanced-arrow">展開</span>
+          </button>
+          <div class="salary-chart-card hidden" id="salary-advanced-panel">
+            <div style="font-size:15px;font-weight:700;margin-bottom:6px">各公司薪資走勢（依月份）</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各公司每月平均薪資，虛線為全班平均；公司多時建議只在需要比較時展開</div>
             <div id="salary-line-chart-container"><div class="empty-state"><div class="icon">📈</div><p>查詢後顯示</p></div></div>
             <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px"></div>
           </div>
-          <div class="salary-chart-card">
-            <div style="font-size:15px;font-weight:700;margin-bottom:6px">📊 各月薪資分佈（點長條查明細）</div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各月全班平均薪資，點選長條展開公司 / 學生明細</div>
-            <div id="salary-bar-chart-container"><div class="empty-state"><div class="icon">📊</div><p>查詢後顯示</p></div></div>
-          </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-            <div class="card">
-              <div style="font-size:15px;font-weight:700;margin-bottom:14px">👤 各學生薪資平均（元/月）</div>
+
+          <div class="card">
+            <div class="salary-section-head">
+              <div>
+                <div class="salary-section-title">詳細資料</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:4px">依問題切換表格，不再一次攤開</div>
+              </div>
+            </div>
+            <div class="salary-sub-tabs">
+              <button class="salary-sub-tab active" id="salary-tab-student" onclick="switchSalaryDetailTab('student')">👤 學生平均</button>
+              <button class="salary-sub-tab" id="salary-tab-company" onclick="switchSalaryDetailTab('company')">🏭 公司平均</button>
+              <button class="salary-sub-tab" id="salary-tab-detail" onclick="switchSalaryDetailTab('detail')">📄 全部明細</button>
+            </div>
+            <div id="salary-panel-student" class="salary-detail-panel">
               <div class="table-wrap"><table><thead><tr><th>座號</th><th>姓名</th><th>公司</th><th>月數</th><th>平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
             </div>
-            <div class="card">
-              <div style="font-size:15px;font-weight:700;margin-bottom:14px">🏭 各公司薪資平均（元/月）</div>
+            <div id="salary-panel-company" class="salary-detail-panel hidden">
               <div class="table-wrap"><table><thead><tr><th>公司名稱</th><th>學生數</th><th>平均薪資</th></tr></thead><tbody id="salary-company-table"></tbody></table></div>
             </div>
-          </div>
-          <div class="card">
-            <div style="font-size:15px;font-weight:700;margin-bottom:14px">📈 全班各月薪資明細</div>
-            <div class="table-wrap"><table><thead><tr><th>座號</th><th>姓名</th><th>公司</th><th>月份</th><th>薪資</th><th>師傅/學長姐</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
+            <div id="salary-panel-detail" class="salary-detail-panel hidden">
+              <div class="table-wrap"><table><thead><tr><th>座號</th><th>姓名</th><th>公司</th><th>月份</th><th>薪資</th><th>師傅/學長姐</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1799,7 +1873,7 @@ async function exportAllStatsExcel() {
         姓名: s.name || j.studentName || '',
         公司: s.company || j.company || '',
         月份: `${j.month}月`,
-        '薪資(元)': j.salary,
+        '薪資(元)': Number(j.salary) || 0,
         '師傅/學長姐': j.mentor || ''
       };
     });
@@ -1807,20 +1881,70 @@ async function exportAllStatsExcel() {
   // ── 工作表 1：繳交狀況 ──
   // ── 工作表 2：學生薪資總覽 ──
   const stuSalaryRows = students.map(s => {
-    const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null);
-    const avg = sJournals.length ? Math.round(sJournals.reduce((a,b) => a + b.salary, 0) / sJournals.length) : '';
+    const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)));
+    const salaries = sJournals.map(j => Number(j.salary));
+    const avg = salaryAvg(salaries) || '';
     return { 座號: s.seatNo || s.id, 姓名: s.name || '', 公司: s.company || '', 月數: sJournals.length, '平均薪資(元)': avg };
   });
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
-  journals.filter(j => j.salary != null).forEach(j => {
+  journals.filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary))).forEach(j => {
     const c = (studentMap[j.seatNo]?.company) || j.company || '未填寫';
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
     companyAggMap[c].studentSet.add(j.seatNo);
-    companyAggMap[c].salaries.push(j.salary);
+    companyAggMap[c].salaries.push(Number(j.salary));
   });
   const companyRows2 = Object.entries(companyAggMap).sort((a,b) => b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length - a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)
     .map(([name, d]) => ({ 公司名稱: name, 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
+
+  // ── 薪資摘要與異常提醒，和頁面判斷口徑一致 ──
+  const salaryStudentList = stuSalaryRows
+    .filter(r => r['平均薪資(元)'] !== '')
+    .map(r => ({ seatNo: String(r.座號 || ''), name: r.姓名 || '', company: r.公司 || '', avg: Number(r['平均薪資(元)']), monthCount: r.月數 }));
+  const salaryCompanyList = companyRows2.map(r => {
+    const studentsInCompany = salaryStudentList.filter(s => (s.company || '未填寫') === r.公司名稱);
+    return { name: r.公司名稱, studentCount: r.學生數, avg: Number(r['平均薪資(元)']), students: studentsInCompany };
+  });
+  const allSalaryNums = salaryRows.map(r => Number(r['薪資(元)'])).filter(Number.isFinite);
+  const salaryClassAvg = salaryAvg(allSalaryNums);
+  const topSalaryStudent = [...salaryStudentList].sort((a,b)=>b.avg-a.avg)[0];
+  const lowSalaryStudent = [...salaryStudentList].sort((a,b)=>a.avg-b.avg)[0];
+  const topSalaryCompany = [...salaryCompanyList].sort((a,b)=>b.avg-a.avg)[0];
+  const lowSalaryCompany = [...salaryCompanyList].sort((a,b)=>a.avg-b.avg)[0];
+  const salarySummaryRows = [
+    { 項目:'統計期間', 內容: start && end ? `${start} ~ ${end}` : '全部資料' },
+    { 項目:'有薪資記錄學生', 內容: salaryStudentList.length },
+    { 項目:'全班薪資平均', 內容: salaryClassAvg || '' },
+    { 項目:'最高單筆薪資', 內容: allSalaryNums.length ? Math.max(...allSalaryNums) : '' },
+    { 項目:'最低單筆薪資', 內容: allSalaryNums.length ? Math.min(...allSalaryNums) : '' },
+    { 項目:'最高平均學生', 內容: topSalaryStudent ? `${topSalaryStudent.seatNo} ${topSalaryStudent.name}｜${topSalaryStudent.company}｜${topSalaryStudent.avg}` : '' },
+    { 項目:'最低平均學生', 內容: lowSalaryStudent ? `${lowSalaryStudent.seatNo} ${lowSalaryStudent.name}｜${lowSalaryStudent.company}｜${lowSalaryStudent.avg}` : '' },
+    { 項目:'最高平均公司', 內容: topSalaryCompany ? `${topSalaryCompany.name}｜${topSalaryCompany.studentCount}人｜${topSalaryCompany.avg}` : '' },
+    { 項目:'最低平均公司', 內容: lowSalaryCompany ? `${lowSalaryCompany.name}｜${lowSalaryCompany.studentCount}人｜${lowSalaryCompany.avg}` : '' }
+  ];
+  const lowThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 0.8) : 0;
+  const highThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 1.3) : 0;
+  const salaryAlertRows = [];
+  salaryStudentList.filter(s => lowThreshold && s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg).forEach(s => {
+    salaryAlertRows.push({ 類型:'低於平均20%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，低於門檻 ${lowThreshold}` });
+  });
+  salaryStudentList.filter(s => highThreshold && s.avg > highThreshold).sort((a,b)=>b.avg-a.avg).forEach(s => {
+    salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
+  });
+  journals.filter(j => studentMap[j.seatNo] && (j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)))).forEach(j => {
+    const s = studentMap[j.seatNo] || {};
+    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:s.name || j.studentName || '', 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白` });
+  });
+  salaryCompanyList.map(c => {
+    const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
+    const max = avgs.length ? Math.max(...avgs) : 0;
+    const min = avgs.length ? Math.min(...avgs) : 0;
+    const gap = max - min;
+    const pct = max ? Math.round(gap / max * 100) : 0;
+    return { ...c, max, min, gap, pct };
+  }).filter(c => c.studentCount >= 2 && c.gap >= 5000 && c.pct >= 25).sort((a,b)=>b.gap-a.gap).forEach(c => {
+    salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:c.name, 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
+  });
   // ── 工作表 4：月記清單（含評語、已審閱）──
   let allJournals = jSnap.docs.map(d => d.data()).filter(j => studentMap[j.seatNo]);
   if (start && end) allJournals = allJournals.filter(j => journalMonthInRange(j, start, end));
@@ -1836,6 +1960,8 @@ async function exportAllStatsExcel() {
 
   const wb = XLSX.utils.book_new();
   const submitWs = XLSX.utils.aoa_to_sheet(submitAoA);
+  const salarySummaryWs = XLSX.utils.json_to_sheet(salarySummaryRows);
+  const salaryAlertWs = XLSX.utils.json_to_sheet(salaryAlertRows.length ? salaryAlertRows : [{ 類型:'', 座號:'', 姓名:'', 公司:'', 月數:'', 平均薪資:'', 說明:'目前沒有薪資異常提醒' }]);
   const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
@@ -1843,6 +1969,8 @@ async function exportAllStatsExcel() {
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
+  salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
+  salaryAlertWs['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 12 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 44 }];
   stuSalaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, { wch: 14 }];
   companyWs2['!cols'] = [{ wch: 22 }, { wch: 8 }, { wch: 14 }];
   salaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 }];
@@ -1850,6 +1978,8 @@ async function exportAllStatsExcel() {
   locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
 
   XLSX.utils.book_append_sheet(wb, submitWs, '繳交狀況');
+  XLSX.utils.book_append_sheet(wb, salarySummaryWs, '薪資摘要');
+  XLSX.utils.book_append_sheet(wb, salaryAlertWs, '薪資異常提醒');
   XLSX.utils.book_append_sheet(wb, stuSalaryWs, '學生薪資總覽');
   XLSX.utils.book_append_sheet(wb, companyWs2, '各公司薪資');
   XLSX.utils.book_append_sheet(wb, salaryWs, '各月薪資明細');
@@ -1858,7 +1988,7 @@ async function exportAllStatsExcel() {
 
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
-  toast('✅ 已下載 Excel（6 張工作表）', 'success');
+  toast('✅ 已下載 Excel（8 張工作表，含薪資摘要與異常提醒）', 'success');
 }
 
 // 地點統計（簡化版）
@@ -2022,6 +2152,106 @@ function toggleAllCompanyFilter(checked) {
   if (window.journals_cache) renderFilteredCity(window.journals_cache);
 }
 
+function salaryAvg(values) {
+  const nums = values.map(Number).filter(Number.isFinite);
+  return nums.length ? Math.round(nums.reduce((a,b)=>a+b,0) / nums.length) : 0;
+}
+
+function formatMoney(v) {
+  return Number.isFinite(Number(v)) ? `$${Math.round(Number(v)).toLocaleString()}` : '-';
+}
+
+function switchSalaryDetailTab(tab) {
+  ['student','company','detail'].forEach(t => {
+    document.getElementById(`salary-tab-${t}`)?.classList.toggle('active', t === tab);
+    document.getElementById(`salary-panel-${t}`)?.classList.toggle('hidden', t !== tab);
+  });
+}
+
+function toggleSalaryAdvanced() {
+  const panel = document.getElementById('salary-advanced-panel');
+  const arrow = document.getElementById('salary-advanced-arrow');
+  if (!panel) return;
+  const willOpen = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !willOpen);
+  if (arrow) arrow.textContent = willOpen ? '收合' : '展開';
+}
+
+function setSalaryFocusCard(id, main, sub) {
+  const mainEl = document.getElementById(id);
+  const subEl = document.getElementById(`${id}-sub`);
+  if (mainEl) mainEl.textContent = main || '-';
+  if (subEl) subEl.textContent = sub || '查詢後顯示';
+}
+
+function renderSalaryFocus(studentList, companyList) {
+  const topStudent = [...studentList].sort((a,b)=>b.avg-a.avg)[0];
+  const lowStudent = [...studentList].sort((a,b)=>a.avg-b.avg)[0];
+  const topCompany = [...companyList].sort((a,b)=>b.avg-a.avg)[0];
+  const lowCompany = [...companyList].sort((a,b)=>a.avg-b.avg)[0];
+  setSalaryFocusCard('salary-top-student', topStudent ? `${topStudent.seatNo} ${topStudent.name || '-'}` : '-', topStudent ? `${formatMoney(topStudent.avg)}｜${topStudent.company || '-'}` : '尚無薪資資料');
+  setSalaryFocusCard('salary-low-student', lowStudent ? `${lowStudent.seatNo} ${lowStudent.name || '-'}` : '-', lowStudent ? `${formatMoney(lowStudent.avg)}｜${lowStudent.company || '-'}` : '尚無薪資資料');
+  setSalaryFocusCard('salary-top-company', topCompany ? topCompany.name : '-', topCompany ? `${formatMoney(topCompany.avg)}｜${topCompany.studentCount} 人` : '尚無薪資資料');
+  setSalaryFocusCard('salary-low-company', lowCompany ? lowCompany.name : '-', lowCompany ? `${formatMoney(lowCompany.avg)}｜${lowCompany.studentCount} 人` : '尚無薪資資料');
+}
+
+function renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap }) {
+  const el = document.getElementById('salary-alerts-container');
+  if (!el) return;
+  if (!classAvg) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>尚無薪資資料可判斷</p></div>';
+    return;
+  }
+
+  const lowThreshold = Math.round(classAvg * 0.8);
+  const highThreshold = Math.round(classAvg * 1.3);
+  const lowStudents = studentList.filter(s => s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg);
+  const highStudents = studentList.filter(s => s.avg > highThreshold).sort((a,b)=>b.avg-a.avg);
+  const missingSalary = allActiveJournals
+    .filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)))
+    .sort((a,b)=>`${a.seatNo}${a.month}`.localeCompare(`${b.seatNo}${b.month}`));
+  const companyGaps = companyList
+    .map(c => {
+      const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
+      const max = avgs.length ? Math.max(...avgs) : 0;
+      const min = avgs.length ? Math.min(...avgs) : 0;
+      const gap = max - min;
+      const pct = max ? Math.round(gap / max * 100) : 0;
+      return { ...c, max, min, gap, pct };
+    })
+    .filter(c => c.studentCount >= 2 && c.gap >= 5000 && c.pct >= 25)
+    .sort((a,b)=>b.gap-a.gap);
+
+  function peopleItems(items, type) {
+    return items.slice(0, 5).map(s => {
+      const pct = classAvg ? Math.round((s.avg - classAvg) / classAvg * 100) : 0;
+      const note = type === 'low' ? `低於平均 ${Math.abs(pct)}%` : `高於平均 ${pct}%`;
+      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.seatNo)} ${escapeHtml(s.name || '-')}</div><div class="salary-alert-note">${escapeHtml(s.company || '-')}｜${note}</div></div><strong>${formatMoney(s.avg)}</strong></div>`;
+    }).join('');
+  }
+
+  function missingItems(items) {
+    return items.slice(0, 5).map(j => {
+      const company = stuCompanyMap[j.seatNo] || j.company || '-';
+      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(j.seatNo || '-')} ${escapeHtml(j.studentName || '-')}</div><div class="salary-alert-note">${escapeHtml(company)}｜${escapeHtml(j.semester || '')} ${escapeHtml(j.month || '')}月</div></div><strong>未填</strong></div>`;
+    }).join('');
+  }
+
+  function gapItems(items) {
+    return items.slice(0, 5).map(c =>
+      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(c.name)}</div><div class="salary-alert-note">最高 ${formatMoney(c.max)}｜最低 ${formatMoney(c.min)}</div></div><strong>差 ${formatMoney(c.gap)}</strong></div>`
+    ).join('');
+  }
+
+  const boxes = [
+    { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
+    { cls:'warn', title:'薪資缺漏', count:missingSalary.length, html:missingItems(missingSalary) || '<div class="salary-alert-note">沒有已交但薪資空白的月記</div>' },
+    { cls:'warn', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
+    { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }
+  ];
+  el.innerHTML = boxes.map(b => `<div class="salary-alert-box ${b.cls}"><div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div><div class="salary-alert-list">${b.html}</div></div>`).join('');
+}
+
 // 薪資統計
 async function loadSalaryStats() {
   const { collection, getDocs } = firebase_funcs;
@@ -2034,29 +2264,35 @@ async function loadSalaryStats() {
   hideLoading();
   // 建立 seatNo → 最新公司名對應表
   const stuCompanyMap = {};
-  stuSnap.docs.forEach(d => { stuCompanyMap[d.id] = d.data().company || ''; });
+  const stuInfoMap = {};
+  stuSnap.docs.forEach(d => {
+    const s = d.data();
+    stuCompanyMap[d.id] = s.company || '';
+    stuInfoMap[d.id] = { seatNo: d.id, name: s.name || '', company: s.company || '' };
+  });
 
   // 只統計目前學生名單中的學生（過濾掉已刪除學生的舊月記）
-  let journals = snap.docs.map(d => d.data()).filter(j =>
-    j.salary != null && stuCompanyMap.hasOwnProperty(j.seatNo)
-  );
-  if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
+  let allActiveJournals = snap.docs.map(d => d.data()).filter(j => stuCompanyMap.hasOwnProperty(j.seatNo));
+  if (start && end) allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
+  let journals = allActiveJournals
+    .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
+    .map(j => ({ ...j, salary: Number(j.salary) }));
   const studentMap = {};
   journals.forEach(j => {
     // 使用學生資料的最新公司名
     const currentCompany = stuCompanyMap[j.seatNo] || j.company;
-    if (!studentMap[j.seatNo]) studentMap[j.seatNo] = { seatNo: j.seatNo, name: j.studentName, company: currentCompany, salaries: [] };
+    if (!studentMap[j.seatNo]) studentMap[j.seatNo] = { seatNo: j.seatNo, name: j.studentName || stuInfoMap[j.seatNo]?.name || '', company: currentCompany, salaries: [] };
     studentMap[j.seatNo].salaries.push(j.salary);
   });
-  const studentList = Object.values(studentMap).sort((a,b) => a.seatNo?.localeCompare(b.seatNo));
+  const studentList = Object.values(studentMap).map(s => ({ ...s, avg: salaryAvg(s.salaries) })).sort((a,b) => a.seatNo?.localeCompare(b.seatNo));
   const allSalaries = studentList.flatMap(s => s.salaries);
-  const classAvg = allSalaries.length ? Math.round(allSalaries.reduce((a,b)=>a+b,0)/allSalaries.length) : 0;
+  const classAvg = salaryAvg(allSalaries);
   document.getElementById('salary-student-count').textContent = studentList.length;
   document.getElementById('salary-class-avg').textContent = classAvg ? `$${classAvg.toLocaleString()}` : '-';
   document.getElementById('salary-max').textContent = allSalaries.length ? `$${Math.max(...allSalaries).toLocaleString()}` : '-';
   document.getElementById('salary-min').textContent = allSalaries.length ? `$${Math.min(...allSalaries).toLocaleString()}` : '-';
   document.getElementById('salary-student-table').innerHTML = studentList.map(s => {
-    const avg = Math.round(s.salaries.reduce((a,b)=>a+b,0)/s.salaries.length);
+    const avg = s.avg;
     return `<tr><td>${s.seatNo}</td><td>${s.name||'-'}</td><td>${s.company||'-'}</td><td>${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無薪資資料</td></tr>';
   const companyMap = {};
@@ -2067,15 +2303,22 @@ async function loadSalaryStats() {
     companyMap[c].studentSet.add(j.seatNo);
     companyMap[c].salaries.push(j.salary);
   });
-  document.getElementById('salary-company-table').innerHTML = Object.entries(companyMap).sort((a,b) => (b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length) - (a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)).map(([name, d]) => {
-    const avg = Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length);
-    return `<tr><td>${name}</td><td>${d.studentSet.size}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
+  const companyList = Object.entries(companyMap).map(([name, d]) => {
+    const students = studentList.filter(s => (s.company || '未填寫') === name);
+    return { name, studentCount: d.studentSet.size, avg: salaryAvg(d.salaries), salaries: d.salaries, students };
+  }).sort((a,b) => b.avg - a.avg);
+  document.getElementById('salary-company-table').innerHTML = companyList.map(d => {
+    const avg = d.avg;
+    return `<tr><td>${d.name}</td><td>${d.studentCount}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
   document.getElementById('salary-detail-table').innerHTML = journals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j =>
     `<tr><td>${j.seatNo}</td><td>${j.studentName||'-'}</td><td>${stuCompanyMap[j.seatNo]||j.company||'-'}</td><td>${j.month}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary||0).toLocaleString()}</td><td>${j.mentor||'-'}</td></tr>`
   ).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
+  renderSalaryFocus(studentList, companyList);
+  renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap });
   renderSalaryLineChart(journals, stuCompanyMap);
   renderSalaryBarChart(journals, stuCompanyMap);
+  switchSalaryDetailTab('student');
 }
 
 // ---- 月記總覽 ----
