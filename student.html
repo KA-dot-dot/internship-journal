@@ -664,7 +664,7 @@ async function loadStudentDashboard() {
   document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
   document.getElementById('s-company-name').textContent = currentUser.company || '-';
   const { collection, getDocsFromServer, query, where } = firebase_funcs;
-  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
   const journals = snap.docs.map(d => d.data());
   document.getElementById('s-submitted-count').textContent = journals.length;
   const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
@@ -751,7 +751,7 @@ async function checkMonthDeadline() {
   }
 
   // 2. 載入此月份已有的資料（有就填入，沒有就清空）
-  const journalSnap = await getDoc(doc(db, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
+  const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
   if (journalSnap.exists()) {
     const j = journalSnap.data();
     document.getElementById('write-salary').value = j.salary ?? '';
@@ -1197,7 +1197,10 @@ async function saveJournal() {
     city: currentUser.city || '', semester: sem, month,
     salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
-    submittedAt: new Date().toISOString()
+    submittedAt: new Date().toISOString(),
+    ownerUid: currentUser.uid || '',
+    ownerEmail: currentUser.email || '',
+    storagePath: 'user'
   };
   if (JSON.stringify(data).length > 900000) return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
   const saveBtn = document.getElementById('save-journal-btn');
@@ -1205,7 +1208,7 @@ async function saveJournal() {
   showLoading();
   try {
     const { doc, getDoc, setDoc } = firebase_funcs;
-    const journalRef = doc(db, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
+    const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
     const existing = await getDoc(journalRef);
     hideLoading();
     if (existing.exists()) {
@@ -1237,7 +1240,7 @@ async function loadStudentHistory() {
   const endStr = endVal.replace(/-/g,'');
   const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   // 有填日期才過濾，沒填就顯示全部
@@ -1270,7 +1273,7 @@ async function exportMyPDF() {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }
   showLoading();
-  const snap = await getDocsFromServer(query(collection(db, 'journals'), where('seatNo','==',currentUser.seatNo)));
+  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
   hideLoading();
   let journals = snap.docs.map(d => d.data());
   if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
@@ -1287,7 +1290,7 @@ async function editJournal(seatNo, sem, month) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
   const { doc, getDoc } = firebase_funcs;
   showLoading();
-  const snap = await getDoc(doc(db, 'journals', `${seatNo}-${sem}-${month}`));
+  const snap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`));
   hideLoading();
   if (!snap.exists()) return toast('月記不存在', 'error');
   const j = snap.data();
@@ -1431,7 +1434,7 @@ async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能刪除自己的月記', 'error');
   const { doc, deleteDoc } = firebase_funcs;
   try {
-    await deleteDoc(doc(db, 'journals', `${seatNo}-${semester}-${month}`));
+    await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${semester}-${month}`));
     closeModal('delete-journal-modal');
     toast('✅ 月記已刪除', 'success');
     loadStudentHistory();
