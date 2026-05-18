@@ -2445,16 +2445,18 @@ async function exportSemesterPDF() {
 async function exportStudentPDF() {
   const seat = document.getElementById('export-student-select')?.value;
   if (!seat) return toast('請先選擇學生', 'error');
-  const { collection, collectionGroup, query, where } = firebase_funcs;
+  const { collection, collectionGroup } = firebase_funcs;
   showLoading();
   try {
     const [jSnap, stuSnap] = await Promise.all([
-      getDocsWithFallback(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)), '學生月記資料'),
+      getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料'),
       getDocsWithFallback(collection(db, 'students'), '學生名單')
     ]);
     const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
     if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
-    const journals = userJournalData(jSnap).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    const journals = userJournalData(jSnap)
+      .filter(j => String(j.seatNo) === String(seat))
+      .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     if (!journals.length) return toast('該學生尚無月記', 'error');
     const name = journals[0].studentName || seat;
     printJournalsPDF(journals, `${name}實習月記`);
