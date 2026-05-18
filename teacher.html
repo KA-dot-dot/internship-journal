@@ -2821,7 +2821,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   const maxV=Math.max(...allVals), rawMin=Math.min(...allVals);
   const pad=(maxV-rawMin)*0.12||maxV*0.12||2000;
   const minVal=Math.max(0,rawMin-pad), yRange=(maxV+pad)-minVal||1;
-  const W=580,H=210,ML=68,MR=16,MT=18,MB=42,plotW=W-ML-MR,plotH=H-MT-MB,n=months.length;
+  const W=580,H=210,ML=68,MR=60,MT=18,MB=42,plotW=W-ML-MR,plotH=H-MT-MB,n=months.length;
   const xPos=i=>ML+(n>1?i*plotW/(n-1):plotW/2);
   const yPos=v=>MT+plotH-((v-minVal)/yRange)*plotH;
   function smPath(pts){
@@ -2861,7 +2861,12 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     });
   });
   const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
-  if(ci.length>1) sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+  if(ci.length>1){
+    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+    const lastI=ci[ci.length-1];
+    const lx=(xPos(lastI)+8).toFixed(1), ly=(yPos(classAvgs[lastI])+4).toFixed(1);
+    sp.push(`<text x="${lx}" y="${ly}" font-size="11" fill="rgba(255,255,255,0.6)" font-family="Noto Sans TC,sans-serif" font-weight="500">全班平均</text>`);
+  }
   container.innerHTML=`<div style="position:relative;display:inline-block;width:100%">
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="salary-line-svg">${sp.join('')}</svg>
     <div id="salary-line-tooltip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:pre;line-height:1.7;color:var(--text)"></div>
@@ -2882,7 +2887,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   });
   if(legendEl){
     const items=companies.map(c=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px"></span>${c}</span>`);
-    if(ci.length>1) items.push(`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:2px;border-top:2px dashed rgba(255,255,255,0.35)"></span>全班平均</span>`);
+
     legendEl.innerHTML=items.join('');
   }
 }
