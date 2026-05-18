@@ -541,6 +541,33 @@ function hideLoading() { document.getElementById('loading-overlay').classList.ad
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function getMyJournalDocs(timeoutMs = 15000) {
+  const { collection, getDocs, getDocsFromServer, query } = firebase_funcs;
+  const journalsQuery = query(collection(db, 'users', currentUser.uid, 'journals'));
+  try {
+    return await withTimeout(
+      getDocsFromServer(journalsQuery),
+      timeoutMs,
+      '讀取月記資料逾時，請確認網路後再試'
+    );
+  } catch (e) {
+    console.warn('從伺服器讀取月記失敗，改用一般讀取', e);
+    return await withTimeout(
+      getDocs(journalsQuery),
+      timeoutMs,
+      '讀取月記資料逾時，請確認網路後再試'
+    );
+  }
+}
+
 // ============ Google 學生登入 ============
 // ============ 登入後共用：驗證並進入系統 ============
 async function handleLoginUser(user) {
@@ -688,18 +715,25 @@ async function loadStudentDashboard() {
   const [y, t] = sem.split('-').map(Number);
   document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
   document.getElementById('s-company-name').textContent = currentUser.company || '-';
-  const { collection, getDocsFromServer, query, where } = firebase_funcs;
-  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
-  const journals = snap.docs.map(d => d.data());
-  document.getElementById('s-submitted-count').textContent = journals.length;
-  const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
-  document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
-    '<span class="badge badge-green">✅ 本月已繳</span>' :
-    '<span class="badge badge-red">❌ 本月未繳</span>';
-  const recent = journals.sort((a,b) => b.month - a.month).slice(0, 3);
-  document.getElementById('s-recent-journals').innerHTML = recent.length ?
-    recent.map(j => renderJournalCard(j, false)).join('') :
-    '<div class="empty-state"><div class="icon">📝</div><p>尚無月記，快去填寫第一份吧！</p></div>';
+  try {
+    const snap = await getMyJournalDocs();
+    const journals = snap.docs.map(d => d.data());
+    document.getElementById('s-submitted-count').textContent = journals.length;
+    const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
+    document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
+      '<span class="badge badge-green">✅ 本月已繳</span>' :
+      '<span class="badge badge-red">❌ 本月未繳</span>';
+    const recent = journals.sort((a,b) => b.month - a.month).slice(0, 3);
+    document.getElementById('s-recent-journals').innerHTML = recent.length ?
+      recent.map(j => renderJournalCard(j, false)).join('') :
+      '<div class="empty-state"><div class="icon">📝</div><p>尚無月記，快去填寫第一份吧！</p></div>';
+  } catch (e) {
+    console.error('載入首頁月記失敗', e);
+    document.getElementById('s-submitted-count').textContent = '-';
+    document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
+    document.getElementById('s-recent-journals').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
+    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  }
 }
 
 function initWriteMonths() {
@@ -1263,17 +1297,23 @@ async function loadStudentHistory() {
   const endVal = document.getElementById('s-history-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocsFromServer, query, where } = firebase_funcs;
   showLoading();
-  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
-  hideLoading();
-  let journals = snap.docs.map(d => d.data());
-  // 有填日期才過濾，沒填就顯示全部
-  if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-  journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  document.getElementById('s-history-list').innerHTML = journals.length
-    ? journals.map(j => renderJournalCard(j, false)).join('')
-    : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
+  try {
+    const snap = await getMyJournalDocs();
+    let journals = snap.docs.map(d => d.data());
+    // 有填日期才過濾，沒填就顯示全部
+    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    document.getElementById('s-history-list').innerHTML = journals.length
+      ? journals.map(j => renderJournalCard(j, false)).join('')
+      : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
+  } catch (e) {
+    console.error('載入歷史月記失敗', e);
+    document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
+    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 function checkBrowserForExport() {
@@ -1291,23 +1331,37 @@ async function exportMyPDF() {
   const endVal = document.getElementById('s-export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, getDocsFromServer, query, where } = firebase_funcs;
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }
   showLoading();
-  const snap = await getDocsFromServer(query(collection(db, 'users', currentUser.uid, 'journals')));
-  hideLoading();
-  let journals = snap.docs.map(d => d.data());
-  if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-  journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  if (!journals.length) {
-    if (win) win.close();
-    return toast('無月記資料可下載', 'error');
+  try {
+    const snap = await getMyJournalDocs();
+    let journals = snap.docs.map(d => d.data());
+    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    if (!journals.length) {
+      if (win && !win.closed) {
+        win.document.open();
+        win.document.write('<html><head><meta charset="UTF-8"><title>沒有資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">目前沒有可下載的月記資料</p><p style="font-size:14px;color:#777;">請返回原頁面確認日期範圍或先填寫月記。</p></body></html>');
+        win.document.close();
+      }
+      return toast('無月記資料可下載', 'error');
+    }
+    printJournalsPDF(journals, `${currentUser.name}實習月記`, win);
+  } catch (e) {
+    console.error('匯出 PDF 失敗', e);
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write(`<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">${e.message || '請確認網路連線後再試'}</p><p style="font-size:14px;color:#777;">請關閉此頁，回到原頁面重新操作。</p></body></html>`);
+      win.document.close();
+    }
+    toast('匯出失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
   }
-  printJournalsPDF(journals, `${currentUser.name}實習月記`, win);
 }
 
 // ---- 編輯月記 ----
