@@ -549,19 +549,20 @@ function withTimeout(promise, ms, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function getMyJournalDocs(timeoutMs = 15000) {
+async function getMyJournalDocs(timeoutMs = 25000) {
   const { collection, getDocs, getDocsFromServer, query } = firebase_funcs;
   const journalsQuery = query(collection(db, 'users', currentUser.uid, 'journals'));
+  // 先嘗試一般讀取（有快取加速），再 fallback 到強制伺服器讀取
   try {
     return await withTimeout(
-      getDocsFromServer(journalsQuery),
+      getDocs(journalsQuery),
       timeoutMs,
       '讀取月記資料逾時，請確認網路後再試'
     );
   } catch (e) {
-    console.warn('從伺服器讀取月記失敗，改用一般讀取', e);
+    console.warn('一般讀取失敗，改用強制伺服器讀取', e);
     return await withTimeout(
-      getDocs(journalsQuery),
+      getDocsFromServer(journalsQuery),
       timeoutMs,
       '讀取月記資料逾時，請確認網路後再試'
     );
@@ -1339,11 +1340,11 @@ async function exportMyPDF() {
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
-    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 15 秒內沒有完成，系統會自動顯示錯誤原因。版本：2026-05-18-fix4</p></body></html>');
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 30 秒內沒有完成，系統會自動顯示錯誤原因。版本：2026-05-18-fix5</p></body></html>');
   }
   showLoading();
   try {
-    const snap = await getMyJournalDocs();
+    const snap = await getMyJournalDocs(30000);
     let journals = snap.docs.map(d => d.data());
     if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
@@ -1358,12 +1359,24 @@ async function exportMyPDF() {
     printJournalsPDF(journals, `${currentUser.name}實習月記`, win);
   } catch (e) {
     console.error('匯出 PDF 失敗', e);
+    const errMsg = (e.message || '請確認網路連線後再試');
     if (win && !win.closed) {
       win.document.open();
-      win.document.write(`<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">${e.message || '請確認網路連線後再試'}</p><p style="font-size:14px;color:#777;">請關閉此頁，回到原頁面重新操作。</p></body></html>`);
+      win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + errMsg + '</p><p style="font-size:14px;color:#777;">請關閉此頁，回到原頁面重新操作。</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉此頁</button></body></html>');
       win.document.close();
+    } else {
+      // 視窗被封鎖或已關閉，改用 overlay 顯示錯誤
+      let overlay = document.getElementById('print-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'print-overlay';
+        overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;';
+        document.body.appendChild(overlay);
+      }
+      overlay.innerHTML = '<div style="background:#b91c1c;color:#fff;padding:14px 16px;font-size:14px;line-height:1.7;text-align:center;">月記資料載入失敗<br><span style="font-size:12px;">' + errMsg + '</span><br><button onclick="document.getElementById(\'print-overlay\').style.display=\'none\'" style="margin-top:8px;padding:6px 18px;background:#fff;color:#b91c1c;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">✕ 關閉</button></div>';
+      overlay.style.display = 'block';
     }
-    toast('匯出失敗：' + (e.message || '請確認網路連線'), 'error');
+    toast('匯出失敗：' + errMsg, 'error');
   } finally {
     hideLoading();
   }
