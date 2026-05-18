@@ -637,38 +637,22 @@ async function googleStudentLogin() {
   showLoading();
   try {
     await waitForFirebaseAsync();
-    const { auth, provider, signInWithPopup, signInWithRedirect } = window._auth;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      // 手機裝置改用 Redirect，避免 Safari/Chrome 彈窗被擋
-      await signInWithRedirect(auth, provider);
-      // Redirect 後頁面會跳走，不會執行到這行
-      return;
-    }
+    const { auth, provider, signInWithPopup } = window._auth;
+    // 手機與桌機統一使用 Popup，避免 Redirect 在手機瀏覽器的 cookie 問題
     const result = await signInWithPopup(auth, provider);
     await handleLoginUser(result.user);
   } catch(e) {
     hideLoading();
-    if (e.code === 'auth/popup-closed-by-user') return;
+    if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     console.error('Google 登入失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
   }
 }
 
-// 處理 Redirect 登入回傳結果（手機跳回後自動執行）
+// Redirect 流程已停用，保留空函式避免呼叫錯誤
 async function handleRedirectResult() {
-  try {
-    await waitForFirebaseAsync();
-    const { auth, getRedirectResult } = window._auth;
-    const result = await getRedirectResult(auth);
-    if (!result) return; // 非 redirect 流程，忽略
-    showLoading();
-    await handleLoginUser(result.user);
-  } catch(e) {
-    hideLoading();
-    console.error('Redirect 登入處理失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
-  }
+  // 不再使用 signInWithRedirect，此函式為空操作
+  return;
 }
 
 // ============ 進入應用 ============
@@ -1355,7 +1339,7 @@ async function exportMyPDF() {
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
-    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 15 秒內沒有完成，系統會自動顯示錯誤原因。版本：2026-05-18-fix3</p></body></html>');
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 15 秒內沒有完成，系統會自動顯示錯誤原因。版本：2026-05-18-fix4</p></body></html>');
   }
   showLoading();
   try {
