@@ -990,6 +990,32 @@ function toast(msg, type = 'info') {
 function showLoading() { document.getElementById('loading-overlay').classList.remove('hidden'); }
 function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
 
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function getDocsWithFallback(refOrQuery, label = '資料', timeoutMs = 20000) {
+  const { getDocs, getDocsFromServer } = firebase_funcs;
+  try {
+    return await withTimeout(
+      getDocsFromServer(refOrQuery),
+      timeoutMs,
+      `${label}讀取逾時，請確認網路後再試`
+    );
+  } catch (e) {
+    console.warn(`${label}從伺服器讀取失敗，改用一般讀取`, e);
+    return await withTimeout(
+      getDocs(refOrQuery),
+      timeoutMs,
+      `${label}讀取逾時，請確認網路後再試`
+    );
+  }
+}
+
 // ============ Modal ============
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
@@ -2395,37 +2421,49 @@ async function exportSemesterPDF() {
   const endVal = document.getElementById('export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
-  const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
+  const { collection, collectionGroup } = firebase_funcs;
   showLoading();
-  const [jSnap, stuSnap] = await Promise.all([
-    getDocsFromServer(collectionGroup(db, 'journals')),
-    getDocsFromServer(collection(db, 'students'))
-  ]);
-  hideLoading();
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
-  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-  journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
-  if (!journals.length) return toast('無月記資料可匯出', 'error');
-  printJournalsPDF(journals, '實習月記總覽');
+  try {
+    const [jSnap, stuSnap] = await Promise.all([
+      getDocsWithFallback(collectionGroup(db, 'journals'), '月記資料'),
+      getDocsWithFallback(collection(db, 'students'), '學生名單')
+    ]);
+    const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+    let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
+    if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+    if (!journals.length) return toast('無月記資料可匯出', 'error');
+    printJournalsPDF(journals, '實習月記總覽');
+  } catch(e) {
+    console.error('匯出全部月記失敗', e);
+    toast('匯出失敗：' + (e.message || '請確認網路或權限設定'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 async function exportStudentPDF() {
   const seat = document.getElementById('export-student-select')?.value;
   if (!seat) return toast('請先選擇學生', 'error');
-  const { collection, collectionGroup, getDocsFromServer, query, where } = firebase_funcs;
+  const { collection, collectionGroup, query, where } = firebase_funcs;
   showLoading();
-  const [jSnap, stuSnap] = await Promise.all([
-    getDocsFromServer(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat))),
-    getDocsFromServer(collection(db, 'students'))
-  ]);
-  hideLoading();
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
-  const journals = userJournalData(jSnap).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  if (!journals.length) return toast('該學生尚無月記', 'error');
-  const name = journals[0].studentName || seat;
-  printJournalsPDF(journals, `${name}實習月記`);
+  try {
+    const [jSnap, stuSnap] = await Promise.all([
+      getDocsWithFallback(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)), '學生月記資料'),
+      getDocsWithFallback(collection(db, 'students'), '學生名單')
+    ]);
+    const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
+    if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
+    const journals = userJournalData(jSnap).sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    if (!journals.length) return toast('該學生尚無月記', 'error');
+    const name = journals[0].studentName || seat;
+    printJournalsPDF(journals, `${name}實習月記`);
+  } catch(e) {
+    console.error('匯出單一學生月記失敗', e);
+    toast('匯出失敗：' + (e.message || '請確認網路或權限設定'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ---- 系統設定 ----
