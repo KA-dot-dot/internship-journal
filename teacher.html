@@ -2862,10 +2862,10 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   });
   const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
   if(ci.length>1){
-    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
     const lastI=ci[ci.length-1];
     const lx=(xPos(lastI)+8).toFixed(1), ly=(yPos(classAvgs[lastI])+4).toFixed(1);
-    sp.push(`<text x="${lx}" y="${ly}" font-size="11" fill="rgba(255,255,255,0.6)" font-family="Noto Sans TC,sans-serif" font-weight="500">全班平均</text>`);
+    sp.push(`<text x="${lx}" y="${ly}" font-size="11" fill="var(--text2)" font-family="Noto Sans TC,sans-serif" font-weight="500">全班平均</text>`);
   }
   container.innerHTML=`<div style="position:relative;display:inline-block;width:100%">
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="salary-line-svg">${sp.join('')}</svg>
