@@ -12,7 +12,7 @@
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -29,7 +29,7 @@
   const provider = new GoogleAuthProvider();
 
   window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
-  window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
+  window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider };
 </script>
 
 <style>
@@ -542,79 +542,104 @@ function openModal(id) { document.getElementById(id).classList.remove('hidden');
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
 // ============ Google 學生登入 ============
+// ============ 登入後共用：驗證並進入系統 ============
+async function handleLoginUser(user) {
+  const email = user.email || '';
+
+  // 1. 驗證學校網域
+  if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
+    await window._auth.signOut(window._auth.auth);
+    hideLoading();
+    toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
+    return;
+  }
+
+  // 2. 查 studentBindings 集合
+  const { doc, getDoc, getDocs, collection: col } = firebase_funcs;
+  const emailKey = email.replace(/[@.]/g, '_');
+  const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
+
+  if (!bindSnap.exists()) {
+    const adminSnap = await getDocs(col(db, 'admins'));
+    const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
+    await window._auth.signOut(window._auth.auth);
+    hideLoading();
+    if (isTeacher) {
+      toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
+    } else {
+      toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+    }
+    return;
+  }
+
+  const binding = bindSnap.data();
+  const seatNo = binding.seatNo;
+
+  // 3. 取得學生資料
+  const stuSnap = await getDoc(doc(db, 'students', seatNo));
+  if (!stuSnap.exists()) {
+    await window._auth.signOut(window._auth.auth);
+    hideLoading();
+    toast('❌ 找不到學生資料，請聯絡老師', 'error');
+    return;
+  }
+
+  const stuData = stuSnap.data();
+  currentUser = {
+    role: 'student',
+    uid: user.uid,
+    email,
+    seatNo,
+    name: stuData.name,
+    studentId: stuData.studentId || '',
+    company: stuData.company || '',
+    gender: stuData.gender || '',
+    city: stuData.city || ''
+  };
+
+  // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
+  try {
+    const { updateDoc } = firebase_funcs;
+    await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
+  } catch(e) { console.warn('補寫 uid 失敗', e); }
+
+  enterApp();
+}
+
 async function googleStudentLogin() {
   showLoading();
   try {
     await waitForFirebaseAsync();
-    const { auth, provider, signInWithPopup } = window._auth;
+    const { auth, provider, signInWithPopup, signInWithRedirect } = window._auth;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      // 手機裝置改用 Redirect，避免 Safari/Chrome 彈窗被擋
+      await signInWithRedirect(auth, provider);
+      // Redirect 後頁面會跳走，不會執行到這行
+      return;
+    }
     const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    const email = user.email || '';
-
-    // 1. 驗證學校網域
-    if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
-      await window._auth.signOut(auth);
-      hideLoading();
-      toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
-      return;
-    }
-
-    // 2. 查 studentBindings 集合
-    const { doc, getDoc, getDocs, collection } = firebase_funcs;
-    const emailKey = email.replace(/[@.]/g, '_');
-    const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
-
-    if (!bindSnap.exists()) {
-      // 檢查是否為老師帳號
-      const { getDocs, collection: col } = firebase_funcs;
-      const adminSnap = await getDocs(col(db, 'admins'));
-      const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
-      await window._auth.signOut(auth);
-      hideLoading();
-      if (isTeacher) {
-        toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
-      } else {
-        toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
-      }
-      return;
-    }
-
-    const binding = bindSnap.data();
-    const seatNo = binding.seatNo;
-
-    // 3. 取得學生資料
-    const stuSnap = await getDoc(doc(db, 'students', seatNo));
-    if (!stuSnap.exists()) {
-      await window._auth.signOut(auth);
-      hideLoading();
-      toast('❌ 找不到學生資料，請聯絡老師', 'error');
-      return;
-    }
-
-    const stuData = stuSnap.data();
-    currentUser = {
-      role: 'student',
-      uid: user.uid,
-      email,
-      seatNo,
-      name: stuData.name,
-      studentId: stuData.studentId || '',
-      company: stuData.company || '',
-      gender: stuData.gender || '',
-      city: stuData.city || ''
-    };
-
-    // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
-    try {
-      const { updateDoc } = firebase_funcs;
-      await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
-    } catch(e) { console.warn('補寫 uid 失敗', e); }
-
-    enterApp();
+    await handleLoginUser(result.user);
   } catch(e) {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user') return;
     console.error('Google 登入失敗', e);
+    toast('登入失敗：' + (e.message || '請重試'), 'error');
+  }
+}
+
+// 處理 Redirect 登入回傳結果（手機跳回後自動執行）
+async function handleRedirectResult() {
+  try {
+    await waitForFirebaseAsync();
+    const { auth, getRedirectResult } = window._auth;
+    const result = await getRedirectResult(auth);
+    if (!result) return; // 非 redirect 流程，忽略
+    showLoading();
+    await handleLoginUser(result.user);
+  } catch(e) {
+    hideLoading();
+    console.error('Redirect 登入處理失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
   }
 }
@@ -1481,6 +1506,7 @@ function printJournalsPDF(journals, title, win) {
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
+  handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
   disableStudentAutocomplete();
   const autocompleteObserver = new MutationObserver(muts => {
     muts.forEach(m => m.addedNodes.forEach(node => {
