@@ -1334,7 +1334,7 @@ async function exportMyPDF() {
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
-    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 15 秒內沒有完成，系統會自動顯示錯誤原因。版本：2026-05-18-fix2</p></body></html>');
   }
   showLoading();
   try {
