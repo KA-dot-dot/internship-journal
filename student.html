@@ -793,6 +793,11 @@ async function checkMonthDeadline() {
   const month = parseInt(document.getElementById('write-month').value);
   if (!sem || !month) return;
   const { doc, getDoc } = firebase_funcs;
+  const saveBtn = document.getElementById('save-journal-btn');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '💾 儲存月記';
+  }
 
   // 1. 檢查截止日期
   const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
@@ -804,9 +809,17 @@ async function checkMonthDeadline() {
     const now = new Date();
     const open = new Date(d.openDate);
     const close = new Date(d.closeDate);
-    if (now < open) el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${d.openDate}（尚未開放）</span>`;
-    else if (now > close) el.innerHTML = `<span class="badge badge-red">🔒 已截止（${d.closeDate}）</span>`;
-    else el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${d.closeDate}</span>`;
+    if (now < open) {
+      el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${d.openDate}（尚未開放）</span>`;
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '⏳ 尚未開放';
+      }
+    } else if (now > close) {
+      el.innerHTML = `<span class="badge badge-yellow">⚠️ 已截止（${d.closeDate}），仍可補交，系統會標記為遲繳</span>`;
+    } else {
+      el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${d.closeDate}</span>`;
+    }
   }
 
   // 2. 載入此月份已有的資料（有就填入，沒有就清空）
@@ -1228,6 +1241,15 @@ function handleSalaryPhoto(event) {
 async function saveJournal() {
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
+  const { doc, getDoc, setDoc } = firebase_funcs;
+  const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
+  if (deadlineSnap.exists()) {
+    const deadline = deadlineSnap.data();
+    const now = new Date();
+    const open = new Date(deadline.openDate);
+    const close = new Date(deadline.closeDate);
+    if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
+  }
   const reflection = document.getElementById('write-reflection').value.trim();
   if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
   const salary = parseInt(document.getElementById('write-salary').value) || null;
@@ -1266,7 +1288,6 @@ async function saveJournal() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 儲存中...'; }
   showLoading();
   try {
-    const { doc, getDoc, setDoc } = firebase_funcs;
     const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
     const existing = await getDoc(journalRef);
     hideLoading();
