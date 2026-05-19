@@ -265,6 +265,17 @@ tr:last-child td { border-bottom: none; }
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+
+/* ===== 老師端批次刪除 ===== */
+#t-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
+#t-batch-toolbar label { display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; user-select:none; }
+#t-batch-count { font-size:13px; color:var(--text2); flex:1; }
+.t-journal-cb-wrap { position:absolute; top:14px; left:14px; z-index:2; }
+.t-journal-cb-wrap input[type=checkbox] { width:18px; height:18px; cursor:pointer; accent-color:var(--accent-red); }
+.t-journal-card-selectable { padding-left:42px !important; position:relative; }
+#t-batch-float { display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--accent-red); color:#fff; border-radius:30px; padding:12px 22px; font-size:14px; font-weight:600; box-shadow:0 6px 24px rgba(239,68,68,0.5); z-index:200; align-items:center; gap:10px; white-space:nowrap; cursor:pointer; border:none; font-family:var(--font-main); }
+#t-batch-float:hover { background:#dc2626; transform:translateX(-50%) translateY(-2px); }
+@media (min-width:769px) { #t-batch-float { bottom:24px; } }
 .salary-chart-card { background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px; }
 .salary-bar-col { display:flex;flex-direction:column;align-items:center;flex:1;min-width:36px;cursor:pointer; }
 .salary-bar-col:hover .salary-bar-inner { opacity:0.75; }
@@ -654,7 +665,7 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-journals" class="hidden fade-in">
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
           <input type="date" id="t-journals-date-start" style="min-width:150px">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
@@ -663,6 +674,14 @@ tr:last-child td { border-bottom: none; }
           <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals()">🔄 重新整理</button>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
           <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
+        </div>
+        <!-- 批次選取工具列 -->
+        <div id="t-batch-toolbar">
+          <label>
+            <input type="checkbox" id="t-select-all-cb" onchange="toggleSelectAllTeacherJournals()" style="width:16px;height:16px;accent-color:var(--accent-red)">
+            <span style="font-weight:600">全選</span>
+          </label>
+          <span id="t-batch-count" style="font-size:13px;color:var(--text2)">已選 0 筆</span>
         </div>
         <div id="t-journals-list"></div>
       </div>
@@ -879,6 +898,27 @@ tr:last-child td { border-bottom: none; }
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 24px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeModal('comment-modal')">取消</button>
       <button class="btn btn-success" onclick="saveTeacherComment()">💾 儲存評語（自動標記已審閱）</button>
+    </div>
+  </div>
+</div>
+
+<!-- 浮動批次刪除按鈕（老師端） -->
+<button id="t-batch-float" onclick="confirmTeacherBatchDelete()">🗑️ <span id="t-batch-float-label">刪除選取</span></button>
+
+<!-- 老師端批次刪除確認 Modal -->
+<div class="modal-overlay hidden" id="t-batch-delete-modal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title">🗑️ 確認批次刪除</div>
+      <button class="modal-close" onclick="closeModal('t-batch-delete-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="t-batch-delete-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.9"></div>
+      <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('t-batch-delete-modal')">取消</button>
+      <button class="btn btn-danger" id="t-batch-delete-confirm-btn">確認刪除</button>
     </div>
   </div>
 </div>
@@ -2400,7 +2440,86 @@ async function loadTeacherJournals() {
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   window._teacherJournalsCache = journals;
-  document.getElementById('t-journals-list').innerHTML = journals.length ? journals.map(j => renderJournalCard(j, true)).join('') : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
+  const toolbar = document.getElementById('t-batch-toolbar');
+  if (toolbar) toolbar.style.display = journals.length ? 'flex' : 'none';
+  const allCb = document.getElementById('t-select-all-cb');
+  if (allCb) allCb.checked = false;
+  document.getElementById('t-batch-float').style.display = 'none';
+  document.getElementById('t-journals-list').innerHTML = journals.length
+    ? journals.map(j => renderJournalCard(j, true)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
+  updateTeacherBatchBar();
+}
+
+function toggleSelectAllTeacherJournals() {
+  const checked = document.getElementById('t-select-all-cb')?.checked;
+  document.querySelectorAll('#t-journals-list .t-journal-select-cb').forEach(cb => { cb.checked = checked; });
+  updateTeacherBatchBar();
+}
+
+function updateTeacherBatchBar() {
+  const cbs = [...document.querySelectorAll('#t-journals-list .t-journal-select-cb:checked')];
+  const allCbs = document.querySelectorAll('#t-journals-list .t-journal-select-cb');
+  const allCb = document.getElementById('t-select-all-cb');
+  if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
+  const floatBtn = document.getElementById('t-batch-float');
+  const countEl = document.getElementById('t-batch-count');
+  if (!floatBtn) return;
+  if (cbs.length === 0) {
+    floatBtn.style.display = 'none';
+    if (countEl) countEl.textContent = '已選 0 筆';
+    return;
+  }
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month), ownerUid: cb.dataset.uid, studentName: cb.dataset.name }));
+  const label = getTeacherJournalMonthRangeLabel(journals);
+  if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
+  const floatLabel = document.getElementById('t-batch-float-label');
+  if (floatLabel) floatLabel.textContent = `刪除選取（${label}）`;
+  floatBtn.style.display = 'flex';
+}
+
+function getTeacherJournalMonthRangeLabel(journals) {
+  if (!journals.length) return '';
+  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const n = journals.length;
+  if (first.month === last.month && first.semester === last.semester) return `${first.month}月，共${n}筆`;
+  return `${first.month}月 ～ ${last.month}月，共${n}筆`;
+}
+
+function confirmTeacherBatchDelete() {
+  const cbs = [...document.querySelectorAll('#t-journals-list .t-journal-select-cb:checked')];
+  if (!cbs.length) return;
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month), ownerUid: cb.dataset.uid, studentName: cb.dataset.name }));
+  const label = getTeacherJournalMonthRangeLabel(journals);
+  // 整理學生清單摘要
+  const studentSet = {};
+  journals.forEach(j => { if (!studentSet[j.seatNo]) studentSet[j.seatNo] = j.studentName; });
+  const studentSummary = Object.entries(studentSet).slice(0, 5).map(([s, n]) => `${s} ${n}`).join('、');
+  const extraCount = Object.keys(studentSet).length > 5 ? `...等 ${Object.keys(studentSet).length} 位學生` : '';
+  document.getElementById('t-batch-delete-info').innerHTML =
+    `📆 範圍：<strong>${label}</strong><br>👥 學生：<strong>${studentSummary}${extraCount}</strong><br>🗑️ 共 <strong>${journals.length} 筆</strong>月記`;
+  const btn = document.getElementById('t-batch-delete-confirm-btn');
+  btn.onclick = () => executeTeacherBatchDelete(journals);
+  openModal('t-batch-delete-modal');
+}
+
+async function executeTeacherBatchDelete(journals) {
+  const { deleteDoc } = firebase_funcs;
+  let success = 0, fail = 0;
+  showLoading();
+  for (const j of journals) {
+    try {
+      await deleteDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid));
+      success++;
+    } catch(e) { fail++; console.error('批次刪除失敗', j, e); }
+  }
+  hideLoading();
+  closeModal('t-batch-delete-modal');
+  document.getElementById('t-batch-float').style.display = 'none';
+  toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
+  loadTeacherJournals();
 }
 
 // ---- 匯出 ----
@@ -2572,7 +2691,9 @@ function resolveImgSrc(src) {
 function renderJournalCard(j, isTeacher) {
   if (isTeacher && j.isDeletedStudent) {
     const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'已刪除學生',true)">🗑️ 刪除</button>`;
-    return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
+    const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${j.seatNo}" data-sem="${j.semester}" data-month="${j.month}" data-uid="${j.ownerUid||''}" data-name="已刪除學生" onchange="updateTeacherBatchBar()"></div>` : '';
+    return `<div class="journal-card t-journal-card-selectable" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
+      ${cbHtml}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div><span style="color:var(--accent-red);font-size:12px">${j.seatNo} 已刪除學生</span><br><span style="font-size:15px;font-weight:700">${j.month}月份月記</span></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span><span class="badge badge-blue">${j.semester?.replace('-1','第1學期').replace('-2','第2學期') || ''}</span>${deleteBtn}</div>
@@ -2606,7 +2727,9 @@ function renderJournalCard(j, isTeacher) {
     ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${j.teacherComment}</div>`
     : '';
   const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',${isTeacher})">🗑️ 刪除</button>`;
-  return `<div class="journal-card" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
+  const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${j.seatNo}" data-sem="${j.semester}" data-month="${j.month}" data-uid="${j.ownerUid||''}" data-name="${(j.studentName||'').replace(/"/g,'&quot;')}" onchange="updateTeacherBatchBar()"></div>` : '';
+  return `<div class="${isTeacher ? 't-journal-card-selectable journal-card' : 'journal-card'}" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
+    ${cbHtml}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div>${isTeacher ? `<span style="color:var(--text2);font-size:12px">${j.seatNo} ${j.studentName}</span><br>` : ''}<span style="font-size:15px;font-weight:700">${j.month}月份月記</span></div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reviewedBadge}<span class="badge badge-blue">${j.semester?.replace('-1','第1學期').replace('-2','第2學期') || ''}</span>${commentBtn}${deleteBtn}</div>
