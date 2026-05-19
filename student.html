@@ -216,6 +216,32 @@ tr:last-child td { border-bottom: none; }
 .empty-state { text-align: center; padding: 48px 20px; color: var(--text2); }
 .empty-state .icon { font-size: 48px; margin-bottom: 14px; }
 .empty-state p { font-size: 14px; }
+
+/* ===== LINE 警告 ===== */
+#line-warning { display:none; background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(239,68,68,0.08)); border:2px solid #f59e0b; border-radius:14px; padding:18px 16px; margin-bottom:18px; text-align:center; }
+.line-warn-title { font-size:15px; font-weight:700; color:#f59e0b; margin-bottom:14px; }
+.line-warn-steps { display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.line-warn-step { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.line-warn-icon { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px; }
+.line-warn-icon.bad { background:rgba(239,68,68,0.15); border:1.5px solid rgba(239,68,68,0.4); }
+.line-warn-icon.good { background:rgba(34,197,94,0.15); border:1.5px solid rgba(34,197,94,0.4); }
+.line-warn-icon.arrow { background:transparent; border:none; font-size:18px; color:var(--text2); width:28px; }
+.line-warn-label { font-size:10px; color:var(--text2); text-align:center; max-width:56px; line-height:1.3; }
+.line-warn-instruction { font-size:13px; color:var(--text); background:rgba(245,158,11,0.1); border-radius:8px; padding:10px 12px; line-height:1.8; }
+.line-warn-symbol { font-size:17px; font-weight:700; color:#f59e0b; background:rgba(245,158,11,0.15); border-radius:6px; padding:1px 7px; }
+
+/* ===== 批次選取工具列 ===== */
+#s-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
+#s-batch-toolbar label { display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; user-select:none; }
+#s-batch-count { font-size:13px; color:var(--text2); flex:1; }
+.journal-cb-wrap { position:absolute; top:14px; left:14px; z-index:2; }
+.journal-cb-wrap input[type=checkbox] { width:18px; height:18px; cursor:pointer; accent-color:var(--accent-red); }
+.journal-card-selectable { padding-left:42px !important; position:relative; }
+
+/* 浮動刪除列 */
+#s-batch-float { display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--accent-red); color:#fff; border-radius:30px; padding:12px 22px; font-size:14px; font-weight:600; box-shadow:0 6px 24px rgba(239,68,68,0.5); z-index:200; align-items:center; gap:10px; white-space:nowrap; cursor:pointer; border:none; font-family:var(--font-main); }
+#s-batch-float:hover { background:#dc2626; transform:translateX(-50%) translateY(-2px); }
+@media (min-width:769px) { #s-batch-float { bottom:24px; } }
 </style>
 </head>
 <body>
@@ -230,6 +256,28 @@ tr:last-child td { border-bottom: none; }
 <!-- ==================== 登入頁 ==================== -->
 <div id="login-page">
   <div class="login-container">
+    <!-- LINE 內建瀏覽器警告（偵測到才顯示） -->
+    <div id="line-warning">
+      <div class="line-warn-title">⚠️ 你在 LINE 裡開啟，無法登入</div>
+      <div class="line-warn-steps">
+        <div class="line-warn-step">
+          <div class="line-warn-icon bad">💬</div>
+          <div class="line-warn-label">LINE 內建瀏覽器</div>
+        </div>
+        <div class="line-warn-icon arrow">→</div>
+        <div class="line-warn-step">
+          <div class="line-warn-icon" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);font-size:20px;font-weight:700;color:#f59e0b" id="line-warn-symbol-icon"></div>
+          <div class="line-warn-label">右下角選單</div>
+        </div>
+        <div class="line-warn-icon arrow">→</div>
+        <div class="line-warn-step">
+          <div class="line-warn-icon good">🌐</div>
+          <div class="line-warn-label">在瀏覽器中開啟</div>
+        </div>
+      </div>
+      <div class="line-warn-instruction" id="line-warn-text"></div>
+    </div>
+
     <div class="login-header">
       <div class="login-logo">📋</div>
       <h1>產學班實習月記系統</h1>
@@ -388,12 +436,20 @@ tr:last-child td { border-bottom: none; }
       <div id="page-s-history" class="hidden fade-in">
         <div class="page-title">📚 歷史月記</div>
         <div class="page-subtitle">查看我所有的實習月記</div>
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
           <input type="date" id="s-history-date-start" style="min-width:150px">
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
           <input type="date" id="s-history-date-end" style="min-width:150px">
           <button class="btn btn-primary btn-sm" onclick="loadStudentHistory()">🔍 查詢</button>
+        </div>
+        <!-- 批次選取工具列 -->
+        <div id="s-batch-toolbar">
+          <label>
+            <input type="checkbox" id="s-select-all-cb" onchange="toggleSelectAllHistory()" style="width:16px;height:16px;accent-color:var(--accent-red)">
+            <span style="font-weight:600">全選</span>
+          </label>
+          <span id="s-batch-count" style="font-size:13px;color:var(--text2)">已選 0 筆</span>
         </div>
         <div id="s-history-list"></div>
       </div>
@@ -431,6 +487,27 @@ tr:last-child td { border-bottom: none; }
 <!-- ==================== Modals ==================== -->
 <div class="modal-overlay hidden" id="photo-modal" onclick="closeModal('photo-modal')">
   <img id="photo-modal-img" style="max-width:90vw;max-height:90vh;border-radius:10px">
+</div>
+
+<!-- 浮動批次刪除按鈕 -->
+<button id="s-batch-float" onclick="confirmBatchDeleteHistory()">🗑️ <span id="s-batch-float-label">刪除選取</span></button>
+
+<!-- 批次刪除確認 Modal -->
+<div class="modal-overlay hidden" id="batch-delete-history-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title">🗑️ 確認批次刪除</div>
+      <button class="modal-close" onclick="closeModal('batch-delete-history-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="batch-delete-history-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.9"></div>
+      <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('batch-delete-history-modal')">取消</button>
+      <button class="btn btn-danger" id="batch-delete-history-confirm-btn">確認刪除</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay hidden" id="delete-journal-modal">
@@ -1307,12 +1384,17 @@ async function loadStudentHistory() {
   try {
     const snap = await getMyJournalDocs();
     let journals = snap.docs.map(d => d.data());
-    // 有填日期才過濾，沒填就顯示全部
     if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    window._studentHistoryJournals = journals;
+    const toolbar = document.getElementById('s-batch-toolbar');
+    if (toolbar) toolbar.style.display = journals.length ? 'flex' : 'none';
+    const allCb = document.getElementById('s-select-all-cb');
+    if (allCb) allCb.checked = false;
     document.getElementById('s-history-list').innerHTML = journals.length
-      ? journals.map(j => renderJournalCard(j, false)).join('')
+      ? journals.map(j => renderJournalCardSelectable(j)).join('')
       : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
+    updateHistoryBatchBar();
   } catch (e) {
     console.error('載入歷史月記失敗', e);
     document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
@@ -1320,6 +1402,118 @@ async function loadStudentHistory() {
   } finally {
     hideLoading();
   }
+}
+
+// 有 checkbox 的歷史月記卡（僅歷史頁使用）
+function renderJournalCardSelectable(j) {
+  const key = `${j.seatNo}-${j.semester}-${j.month}`;
+  const cbHtml = `<div class="journal-cb-wrap"><input type="checkbox" class="journal-select-cb" data-key="${key}" data-seat="${j.seatNo}" data-sem="${j.semester}" data-month="${j.month}" onchange="updateHistoryBatchBar()"></div>`;
+  const entryHtml = (j.entries || []).map(e => `
+    <div class="entry-item">
+      <div class="entry-date">${e.date || ''} ${e.type ? '｜'+e.type : ''}</div>
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km` : ''}</div>` : ''}
+      <div class="entry-content">${e.content || ''}</div>
+      ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
+      ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => `<img src="${resolveImgSrc(p)}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
+    </div>`).join('');
+  const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
+  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
+  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  const editBtn = `<button class="btn btn-secondary btn-sm" onclick="editJournal('${j.seatNo}','${j.semester}',${j.month})">✏️ 編輯</button>`;
+  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',false)">🗑️ 刪除</button>`;
+  return `<div class="journal-card journal-card-selectable">
+    ${cbHtml}
+    <div class="journal-card-header">
+      <div><span class="journal-month">${j.month}月份月記</span></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="badge badge-blue">${(j.semester||'').replace('-1','第1學期').replace('-2','第2學期')}</span>
+        ${editBtn}${deleteBtn}
+      </div>
+    </div>
+    <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
+      <span>公司：${j.company||'-'}</span><span>繳交：${j.submittedAt?.slice(0,10)||'-'}</span>${salaryHtml}${mentorHtml}
+    </div>
+    ${salaryPhotoHtml}
+    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px">
+      <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${j.reflection||''}
+    </div>
+    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
+    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <strong style="font-size:12px;color:#22c55e">💬 老師評語</strong>
+        <span style="font-size:11px;background:rgba(34,197,94,0.2);color:#22c55e;border-radius:10px;padding:2px 8px">✅ 已審閱</span>
+      </div>
+      ${j.teacherComment ? `<span style="color:var(--text)">${j.teacherComment}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
+    </div>` : ''}
+  </div>`;
+}
+
+function toggleSelectAllHistory() {
+  const checked = document.getElementById('s-select-all-cb')?.checked;
+  document.querySelectorAll('#s-history-list .journal-select-cb').forEach(cb => { cb.checked = checked; });
+  updateHistoryBatchBar();
+}
+
+function updateHistoryBatchBar() {
+  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
+  const allCbs = document.querySelectorAll('#s-history-list .journal-select-cb');
+  const allCb = document.getElementById('s-select-all-cb');
+  if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
+  const floatBtn = document.getElementById('s-batch-float');
+  const countEl = document.getElementById('s-batch-count');
+  if (!floatBtn) return;
+  if (cbs.length === 0) {
+    floatBtn.style.display = 'none';
+    if (countEl) countEl.textContent = '已選 0 筆';
+    return;
+  }
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
+  const label = getJournalMonthRangeLabel(journals);
+  if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
+  const floatLabel = document.getElementById('s-batch-float-label');
+  if (floatLabel) floatLabel.textContent = `刪除選取（${label}）`;
+  floatBtn.style.display = 'flex';
+}
+
+function getJournalMonthRangeLabel(journals) {
+  if (!journals.length) return '';
+  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const n = journals.length;
+  if (first.month === last.month && first.semester === last.semester) return `${first.month}月，共${n}筆`;
+  return `${first.month}月 ～ ${last.month}月，共${n}筆`;
+}
+
+function confirmBatchDeleteHistory() {
+  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
+  if (!cbs.length) return;
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
+  const label = getJournalMonthRangeLabel(journals);
+  document.getElementById('batch-delete-history-info').innerHTML =
+    `📆 範圍：<strong>${label}</strong><br>🗑️ 將刪除 <strong>${journals.length} 筆</strong>月記`;
+  const btn = document.getElementById('batch-delete-history-confirm-btn');
+  btn.onclick = () => executeBatchDeleteHistory(journals);
+  openModal('batch-delete-history-modal');
+}
+
+async function executeBatchDeleteHistory(journals) {
+  const { doc, deleteDoc } = firebase_funcs;
+  let success = 0, fail = 0;
+  showLoading();
+  for (const j of journals) {
+    if (String(j.seatNo) !== String(currentUser?.seatNo)) { fail++; continue; }
+    try {
+      await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${j.seatNo}-${j.semester}-${j.month}`));
+      success++;
+    } catch(e) { fail++; console.error('批次刪除失敗', e); }
+  }
+  hideLoading();
+  closeModal('batch-delete-history-modal');
+  document.getElementById('s-batch-float').style.display = 'none';
+  toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
+  loadStudentHistory();
+  loadStudentDashboard();
 }
 
 function checkBrowserForExport() {
@@ -1578,6 +1772,22 @@ function printJournalsPDF(journals, title, win) {
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
+  // LINE 內建瀏覽器偵測
+  (function() {
+    const ua = navigator.userAgent;
+    if (!/Line/i.test(ua)) return;
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const symbol = isIOS ? '⋯' : '⋮';
+    const platform = isIOS ? 'iPhone / iPad' : 'Android';
+    const browser = isIOS ? 'Safari' : 'Chrome';
+    const el = document.getElementById('line-warning');
+    const symIcon = document.getElementById('line-warn-symbol-icon');
+    const textEl = document.getElementById('line-warn-text');
+    if (!el) return;
+    if (symIcon) symIcon.textContent = symbol;
+    if (textEl) textEl.innerHTML = `<strong>${platform}</strong>：點右下角 <span class="line-warn-symbol">${symbol}</span> → 點「<strong>在瀏覽器中開啟</strong>」<br>系統會自動用 <strong>${browser}</strong> 開啟，就能正常登入 ✅`;
+    el.style.display = 'block';
+  })();
   handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
   disableStudentAutocomplete();
   const autocompleteObserver = new MutationObserver(muts => {
