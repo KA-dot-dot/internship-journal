@@ -1543,7 +1543,7 @@ async function deleteStudent(seatNo, name) {
     deleteDoc(doc(db, 'students', seatNo))
   ]);
   hideLoading();
-  toast(`Deleted student, ${userJournalDocs(journalSnap).length} journals, and ${bindingSnap.size} bindings`, 'success');
+  toast(`✅ 已刪除學生「${name}」，清除 ${userJournalDocs(journalSnap).length} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
   loadStudentsTable();
 }
 
@@ -2960,11 +2960,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // 頁面重整後自動恢復登入
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
-        const { doc, getDoc, getDocs, collection } = firebase_funcs;
-        const adminSnap = await getDocs(collection(db, 'admins'));
-        const byUid = adminSnap.docs.find(d => d.id === user.uid);
-        const byEmail = adminSnap.docs.find(d => d.data().email === email);
-        if (byUid || byEmail) {
+        const { doc, getDoc, setDoc } = firebase_funcs;
+        let isAdmin = false;
+        const byUid = await getDoc(doc(db, 'admins', user.uid));
+        if (byUid.exists()) {
+          isAdmin = true;
+        } else {
+          const emailKey = email.replace(/[@.]/g, '_');
+          const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+          if (byEmailKey.exists()) {
+            await setDoc(doc(db, 'admins', user.uid), { ...byEmailKey.data(), uid: user.uid });
+            isAdmin = true;
+          }
+        }
+        if (isAdmin) {
           currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
           enterApp();
         }
