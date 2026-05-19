@@ -267,7 +267,7 @@ tr:last-child td { border-bottom: none; }
         <div class="line-warn-icon arrow">→</div>
         <div class="line-warn-step">
           <div class="line-warn-icon" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);font-size:20px;font-weight:700;color:#f59e0b" id="line-warn-symbol-icon"></div>
-          <div class="line-warn-label">右下角選單</div>
+          <div class="line-warn-label">點 ••• 選單</div>
         </div>
         <div class="line-warn-icon arrow">→</div>
         <div class="line-warn-step">
@@ -546,7 +546,7 @@ function toggleTheme() {
   localStorage.setItem('theme', isLight ? 'light' : 'dark');
 }
 (function() {
-  if (localStorage.getItem('theme') === 'light') {
+  if (localStorage.getItem('theme') !== 'dark') {
     document.body.classList.add('light-mode');
     document.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('theme-toggle-btn');
@@ -1388,7 +1388,7 @@ async function loadStudentHistory() {
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     window._studentHistoryJournals = journals;
     const toolbar = document.getElementById('s-batch-toolbar');
-    if (toolbar) toolbar.style.display = journals.length ? 'flex' : 'none';
+    if (toolbar) toolbar.style.display = 'none';
     const allCb = document.getElementById('s-select-all-cb');
     if (allCb) allCb.checked = false;
     document.getElementById('s-history-list').innerHTML = journals.length
@@ -1419,8 +1419,8 @@ function renderJournalCardSelectable(j) {
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
   const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
-  const editBtn = `<button class="btn btn-secondary btn-sm" onclick="editJournal('${j.seatNo}','${j.semester}',${j.month})">✏️ 編輯</button>`;
-  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',false)">🗑️ 刪除</button>`;
+  const editBtn = `<button class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:15px;line-height:1" title="編輯月記" onclick="editJournal('${j.seatNo}','${j.semester}',${j.month})">✏️</button>`;
+  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85;padding:4px 8px;font-size:15px;line-height:1" title="刪除月記" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',false)">🗑️</button>`;
   return `<div class="journal-card journal-card-selectable">
     ${cbHtml}
     <div class="journal-card-header">
@@ -1461,12 +1461,15 @@ function updateHistoryBatchBar() {
   if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
   const floatBtn = document.getElementById('s-batch-float');
   const countEl = document.getElementById('s-batch-count');
+  const toolbar = document.getElementById('s-batch-toolbar');
   if (!floatBtn) return;
   if (cbs.length === 0) {
     floatBtn.style.display = 'none';
+    if (toolbar) toolbar.style.display = 'none';
     if (countEl) countEl.textContent = '已選 0 筆';
     return;
   }
+  if (toolbar) toolbar.style.display = 'flex';
   const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
   const label = getJournalMonthRangeLabel(journals);
   if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
@@ -1685,8 +1688,8 @@ function renderJournalCard(j, isTeacher) {
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
   const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
-  const editBtn = `<button class="btn btn-secondary btn-sm" onclick="editJournal('${j.seatNo}','${j.semester}',${j.month})">✏️ 編輯</button>`;
-  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',false)">🗑️ 刪除</button>`;
+  const editBtn = `<button class="btn btn-secondary btn-sm" style="padding:4px 8px;font-size:15px;line-height:1" title="編輯月記" onclick="editJournal('${j.seatNo}','${j.semester}',${j.month})">✏️</button>`;
+  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85;padding:4px 8px;font-size:15px;line-height:1" title="刪除月記" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',false)">🗑️</button>`;
   return `<div class="journal-card">
     <div class="journal-card-header">
       <div><span class="journal-month">${j.month}月份月記</span></div>
@@ -1785,7 +1788,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const textEl = document.getElementById('line-warn-text');
     if (!el) return;
     if (symIcon) symIcon.textContent = symbol;
-    if (textEl) textEl.innerHTML = `<strong>${platform}</strong>：點右下角 <span class="line-warn-symbol">${symbol}</span> → 點「<strong>在瀏覽器中開啟</strong>」<br>系統會自動用 <strong>${browser}</strong> 開啟，就能正常登入 ✅`;
+    if (textEl) textEl.innerHTML = `<strong>${platform}</strong>：點 <span class="line-warn-symbol">${symbol}</span> 選單 → 點「<strong>在瀏覽器中開啟</strong>」，系統會自動用 <strong>${browser}</strong> 開啟 ✅`;
     el.style.display = 'block';
   })();
   handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
