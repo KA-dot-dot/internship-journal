@@ -960,7 +960,7 @@ function toggleTheme() {
   localStorage.setItem('theme', isLight ? 'light' : 'dark');
 }
 (function() {
-  if (localStorage.getItem('theme') === 'light') {
+  if (localStorage.getItem('theme') !== 'dark') {
     document.body.classList.add('light-mode');
     document.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('theme-toggle-btn');
@@ -2441,7 +2441,7 @@ async function loadTeacherJournals() {
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
   window._teacherJournalsCache = journals;
   const toolbar = document.getElementById('t-batch-toolbar');
-  if (toolbar) toolbar.style.display = journals.length ? 'flex' : 'none';
+  if (toolbar) toolbar.style.display = 'none';
   const allCb = document.getElementById('t-select-all-cb');
   if (allCb) allCb.checked = false;
   document.getElementById('t-batch-float').style.display = 'none';
@@ -2464,12 +2464,15 @@ function updateTeacherBatchBar() {
   if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
   const floatBtn = document.getElementById('t-batch-float');
   const countEl = document.getElementById('t-batch-count');
+  const toolbar = document.getElementById('t-batch-toolbar');
   if (!floatBtn) return;
   if (cbs.length === 0) {
     floatBtn.style.display = 'none';
+    if (toolbar) toolbar.style.display = 'none';
     if (countEl) countEl.textContent = '已選 0 筆';
     return;
   }
+  if (toolbar) toolbar.style.display = 'flex';
   const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month), ownerUid: cb.dataset.uid, studentName: cb.dataset.name }));
   const label = getTeacherJournalMonthRangeLabel(journals);
   if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
@@ -2690,7 +2693,7 @@ function resolveImgSrc(src) {
 
 function renderJournalCard(j, isTeacher) {
   if (isTeacher && j.isDeletedStudent) {
-    const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'已刪除學生',true)">🗑️ 刪除</button>`;
+    const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85;padding:4px 8px;font-size:15px;line-height:1" title="刪除月記" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'已刪除學生',true)">🗑️</button>`;
     const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${j.seatNo}" data-sem="${j.semester}" data-month="${j.month}" data-uid="${j.ownerUid||''}" data-name="已刪除學生" onchange="updateTeacherBatchBar()"></div>` : '';
     return `<div class="journal-card t-journal-card-selectable" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
       ${cbHtml}
@@ -2720,13 +2723,13 @@ function renderJournalCard(j, isTeacher) {
   const reviewedBadge = isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '';
   const commentBtn = isTeacher ? (
     hasComment
-      ? `<button class="btn btn-sm" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border)" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">✏️ 編輯評語</button>`
-      : `<button class="btn btn-primary btn-sm" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">✏️ 撰寫評語</button>`
+      ? `<button class="btn btn-sm" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);padding:4px 8px;font-size:15px;line-height:1" title="編輯評語" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">✏️</button>`
+      : `<button class="btn btn-primary btn-sm" style="padding:4px 8px;font-size:15px;line-height:1" title="撰寫評語" onclick="openCommentModal('${j.seatNo}','${j.semester}',${j.month})">💬</button>`
   ) : '';
   const commentSection = (isTeacher && hasComment)
     ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${j.teacherComment}</div>`
     : '';
-  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',${isTeacher})">🗑️ 刪除</button>`;
+  const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85;padding:4px 8px;font-size:15px;line-height:1" title="刪除月記" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'${(j.studentName||'').replace(/'/g,"\\'")}',${isTeacher})">🗑️</button>`;
   const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${j.seatNo}" data-sem="${j.semester}" data-month="${j.month}" data-uid="${j.ownerUid||''}" data-name="${(j.studentName||'').replace(/"/g,'&quot;')}" onchange="updateTeacherBatchBar()"></div>` : '';
   return `<div class="${isTeacher ? 't-journal-card-selectable journal-card' : 'journal-card'}" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
     ${cbHtml}
