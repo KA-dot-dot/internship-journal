@@ -2955,24 +2955,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
-        // 頁面重整後自動恢復登入
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
-        const { doc, getDoc, setDoc } = firebase_funcs;
-        let isAdmin = false;
-        const byUid = await getDoc(doc(db, 'admins', user.uid));
-        if (byUid.exists()) {
-          isAdmin = true;
-        } else {
-          const emailKey = email.replace(/[@.]/g, '_');
-          const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
-          if (byEmailKey.exists()) {
+        try {
+          const { doc, getDoc } = firebase_funcs;
+          let isAdmin = false;
+          const byUid = await getDoc(doc(db, 'admins', user.uid));
+          if (byUid.exists()) {
             isAdmin = true;
+          } else {
+            const emailKey = email.replace(/[@.]/g, '_');
+            const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+            if (byEmailKey.exists()) {
+              isAdmin = true;
+            }
           }
-        }
-        if (isAdmin) {
-          currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
-          enterApp();
+          if (isAdmin) {
+            currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
+            enterApp();
+          }
+        } catch(e) {
+          console.warn('自動恢復登入失敗，請手動登入', e);
         }
       }
     });
