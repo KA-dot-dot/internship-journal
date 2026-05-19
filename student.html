@@ -297,19 +297,10 @@ tr:last-child td { border-bottom: none; }
         </svg>
         使用 Google 帳號登入
       </button>
-      <p id="browser-hint" style="text-align:center;font-size:12px;color:var(--text2);margin-top:10px"></p>
+      <p style="text-align:center;font-size:12px;color:var(--text2);margin-top:10px">iPhone 用 Safari・Android 用 Chrome 開啟</p>
     </div>
   </div>
 </div>
-<script>
-(function(){
-  var ua = navigator.userAgent;
-  var hint = document.getElementById('browser-hint');
-  if (!hint) return;
-  if (/iPhone|iPad|iPod/i.test(ua)) hint.textContent = 'iPhone / iPad：請用 Safari 開啟';
-  else if (/Android/i.test(ua)) hint.textContent = 'Android：請用 Chrome 開啟';
-})();
-</script>
 
 <!-- ==================== 主應用 ==================== -->
 <div id="app">
