@@ -1145,18 +1145,19 @@ async function loadAdminPage() {
       const a = d.data();
       const email = (a.email || '').toLowerCase();
       const key = email || d.id;
-      if (!adminMap.has(key)) adminMap.set(key, { ids: [], email, label: a.email || a.name || d.id, isSelf: false });
+      if (!adminMap.has(key)) adminMap.set(key, { ids: [], email, label: a.email || a.name || d.id, isSelf: false, protected: false });
       const item = adminMap.get(key);
       item.ids.push(d.id);
       if (currentUser && (d.id === currentUser.uid || email === currentUser.email)) item.isSelf = true;
       if (email) item.label = a.email;
+      if (a.protected) item.protected = true;
     });
     adminList.innerHTML = Array.from(adminMap.values()).map(a => {
       const ids = a.ids.join('|').replace(/'/g, "\\'");
       const safeEmail = (a.email || '').replace(/'/g, "\\'");
       return `<span class="admin-tag">
         👨‍🏫 ${a.label}
-        ${!a.isSelf ? `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>` : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
+        ${!a.isSelf ? (a.protected ? '<span style="font-size:11px;color:var(--accent-yellow)">🔒</span>' : `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>`) : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
       </span>`;
     }).join('');
   }
@@ -1213,7 +1214,7 @@ async function addAdmin() {
 
 async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
-  const { doc, getDoc, deleteDoc } = firebase_funcs;
+  const { doc, deleteDoc } = firebase_funcs;
   showLoading();
   const stillAdmin = await verifyCurrentAdmin();
   if (!stillAdmin) {
@@ -1222,16 +1223,7 @@ async function removeAdmin(docId, email) {
     toast('移除老師失敗：目前帳號已不是管理員', 'error');
     return;
   }
-  // 檢查是否為受保護帳號
   const ids = String(docId || '').split('|').filter(Boolean);
-  for (const id of ids) {
-    const snap = await getDoc(doc(db, 'admins', id));
-    if (snap.exists() && snap.data().protected === true) {
-      hideLoading();
-      toast('❌ 此帳號為系統保護，無法移除', 'error');
-      return;
-    }
-  }
   await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
   hideLoading();
   toast('已移除', 'success');
