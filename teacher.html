@@ -159,7 +159,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-role { font-size: 11px; color: var(--text2); }
 .app-body { display: flex; min-height: calc(100vh - 60px); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
@@ -1213,7 +1213,7 @@ async function addAdmin() {
 
 async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
-  const { doc, deleteDoc } = firebase_funcs;
+  const { doc, getDoc, deleteDoc } = firebase_funcs;
   showLoading();
   const stillAdmin = await verifyCurrentAdmin();
   if (!stillAdmin) {
@@ -1222,7 +1222,16 @@ async function removeAdmin(docId, email) {
     toast('移除老師失敗：目前帳號已不是管理員', 'error');
     return;
   }
+  // 檢查是否為受保護帳號
   const ids = String(docId || '').split('|').filter(Boolean);
+  for (const id of ids) {
+    const snap = await getDoc(doc(db, 'admins', id));
+    if (snap.exists() && snap.data().protected === true) {
+      hideLoading();
+      toast('❌ 此帳號為系統保護，無法移除', 'error');
+      return;
+    }
+  }
   await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
   hideLoading();
   toast('已移除', 'success');
