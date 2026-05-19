@@ -1038,31 +1038,31 @@ async function googleTeacherLogin() {
       return;
     }
 
-    // 2. 檢查 admins 集合，不允許前端自我升級
-    const { doc, getDoc, getDocs, collection, setDoc } = firebase_funcs;
-    const adminSnap = await getDocs(collection(db, 'admins'));
+    // 2. 檢查 admins，只用 getDoc 查自己的 uid 和 emailKey
+    //    不使用 getDocs(admins)，避免 Rules 要求 list 權限造成雞生蛋問題
+    const { doc, getDoc, setDoc } = firebase_funcs;
     let isAdmin = false;
+    let adminDocData = null;
 
-    if (!adminSnap.empty) {
-      // 檢查此人是否在 admins 清單中（by uid 或 email）
-      const byUid = await getDoc(doc(db, 'admins', user.uid));
-      if (byUid.exists()) {
+    // 先查 uid（最新格式）
+    const byUid = await getDoc(doc(db, 'admins', user.uid));
+    if (byUid.exists()) {
+      isAdmin = true;
+      adminDocData = byUid.data();
+    } else {
+      // 向下相容：查 emailKey 格式（舊版建立的管理員）
+      const emailKey = email.replace(/[@.]/g, '_');
+      const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+      if (byEmailKey.exists()) {
         isAdmin = true;
-      } else {
-        // 也支援用 email 比對（向下相容）
-        const byEmail = adminSnap.docs.find(d => d.data().email === email);
-        if (byEmail) {
-          // 把 uid 補進去
-          await setDoc(doc(db, 'admins', user.uid), { ...byEmail.data(), uid: user.uid });
-          isAdmin = true;
-        }
+        adminDocData = byEmailKey.data();
       }
     }
 
     if (!isAdmin) {
       await window._auth.signOut(auth);
       hideLoading();
-      toast(adminSnap.empty ? '❌ 尚未建立管理員，請由資料庫或既有管理流程先建立第一位管理員' : '❌ 您沒有老師權限，請聯絡系統管理員', 'error');
+      toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
       return;
     }
 
@@ -1541,7 +1541,7 @@ async function deleteStudent(seatNo, name) {
     deleteDoc(doc(db, 'students', seatNo))
   ]);
   hideLoading();
-  toast(`Deleted student, ${userJournalDocs(journalSnap).length} journals, and ${bindingSnap.size} bindings`, 'success');
+  toast(`✅ 已刪除學生「${name}」，清除 ${userJournalDocs(journalSnap).length} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
   loadStudentsTable();
 }
 
@@ -2958,11 +2958,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // 頁面重整後自動恢復登入
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
-        const { doc, getDoc, getDocs, collection } = firebase_funcs;
-        const adminSnap = await getDocs(collection(db, 'admins'));
-        const byUid = adminSnap.docs.find(d => d.id === user.uid);
-        const byEmail = adminSnap.docs.find(d => d.data().email === email);
-        if (byUid || byEmail) {
+        const { doc, getDoc, setDoc } = firebase_funcs;
+        let isAdmin = false;
+        const byUid = await getDoc(doc(db, 'admins', user.uid));
+        if (byUid.exists()) {
+          isAdmin = true;
+        } else {
+          const emailKey = email.replace(/[@.]/g, '_');
+          const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+          if (byEmailKey.exists()) {
+            isAdmin = true;
+          }
+        }
+        if (isAdmin) {
           currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
           enterApp();
         }
