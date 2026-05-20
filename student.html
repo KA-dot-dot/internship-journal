@@ -1278,15 +1278,10 @@ function handleSalaryPhoto(event) {
       if (h > maxH) { w = w * maxH / h; h = maxH; }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const previewSrc = canvas.toDataURL('image/jpeg', 0.75);
+      // 薪資單直接存 base64，不上傳外部服務，由 Firestore Rules 保護隱私
+      const base64 = canvas.toDataURL('image/jpeg', 0.75);
       const preview = document.getElementById('salary-photo-preview');
-      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${previewSrc}" data-base64="${previewSrc}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><div id="salary-uploading" style="position:absolute;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:10px;color:#fff">上傳中...</div></div>`;
-      const folder = `tcivs/${currentUser?.seatNo || 'unknown'}/salary`;
-      const blob = await canvasToBlob(canvas, 0.75);
-      const url = await uploadToCloudinary(blob, folder);
-      document.getElementById('salary-uploading')?.remove();
-      const imgEl = document.getElementById('salary-preview-img');
-      if (imgEl && url) { imgEl.src = url; imgEl.dataset.base64 = url; }
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${base64}" data-base64="${base64}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><span style="display:block;font-size:10px;color:var(--accent-green);margin-top:4px">🔒 僅老師可查看</span></div>`;
     };
     img.src = e.target.result;
   };
