@@ -715,10 +715,11 @@ tr:last-child td { border-bottom: none; }
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
           <input type="date" id="t-journals-date-end" style="min-width:150px">
           <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals()">🔄 重新整理</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
           <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
         </div>
+        <div id="t-cache-indicator" style="min-height:18px;margin-bottom:6px;font-size:11px;color:var(--text2)"></div>
         <!-- 批次選取工具列 -->
         <div id="t-batch-toolbar">
           <label>
@@ -2446,53 +2447,77 @@ async function loadSalaryStats() {
 }
 
 // ---- 月記總覽 ----
-async function loadTeacherJournals() {
-  const startVal = document.getElementById('t-journals-date-start')?.value || '';
-  const endVal = document.getElementById('t-journals-date-end')?.value || '';
-  const search = (document.getElementById('t-journals-search')?.value || '').toLowerCase();
-  const startStr = startVal.replace(/-/g,'');
-  const endStr = endVal.replace(/-/g,'');
+// 從 Firestore 拉全量，回傳 journals 陣列（含 isDeletedStudent 過濾）
+async function fetchJournalsFromServer() {
   const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
-  showLoading();
   const [snap, stuSnap] = await Promise.all([
     getDocsFromServer(collectionGroup(db, 'journals')),
     getDocsFromServer(collection(db, 'students'))
   ]);
-  hideLoading();
   const studentMap = {};
   stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
-  let journals = userJournalDocs(snap).map(d => {
+  const journals = userJournalDocs(snap).map(d => {
     const j = d.data();
     if (studentMap[j.seatNo]) return j;
     return {
-      seatNo: j.seatNo || '',
-      semester: j.semester || '',
-      month: j.month || 0,
-      submittedAt: j.submittedAt || '',
-      studentName: '已刪除學生',
-      company: '已刪除學生',
-      reflection: '',
-      entries: [],
-      salary: null,
-      mentor: '',
-      salaryPhoto: '',
-      isDeletedStudent: true
+      seatNo: j.seatNo || '', semester: j.semester || '', month: j.month || 0,
+      submittedAt: j.submittedAt || '', studentName: '已刪除學生',
+      company: '已刪除學生', reflection: '', entries: [],
+      salary: null, mentor: '', salaryPhoto: '', isDeletedStudent: true
     };
   });
-  journals = journals.filter(j => !j.isDeletedStudent);
-  if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-  if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
-  journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
-  window._teacherJournalsCache = journals;
-  const toolbar = document.getElementById('t-batch-toolbar');
-  if (toolbar) toolbar.style.display = 'none';
-  const allCb = document.getElementById('t-select-all-cb');
-  if (allCb) allCb.checked = false;
-  document.getElementById('t-batch-float').style.display = 'none';
-  document.getElementById('t-journals-list').innerHTML = journals.length
-    ? journals.map(j => renderJournalCard(j, true)).join('')
-    : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
-  updateTeacherBatchBar();
+  return journals.filter(j => !j.isDeletedStudent);
+}
+
+// 篩選 + 排序（在前端執行，不走網路）
+function filterAndSortJournals(journals, startStr, endStr, search) {
+  let result = [...journals];
+  if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
+  if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
+  result.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+  return result;
+}
+
+async function loadTeacherJournals(forceRefresh) {
+  const startVal = document.getElementById('t-journals-date-start')?.value || '';
+  const endVal   = document.getElementById('t-journals-date-end')?.value   || '';
+  const search   = (document.getElementById('t-journals-search')?.value || '').toLowerCase();
+  const startStr = startVal.replace(/-/g,'');
+  const endStr   = endVal.replace(/-/g,'');
+
+  // ── Stale-while-revalidate：有效快取時先顯示，背景再更新 ──
+  if (!forceRefresh) {
+    const cached = loadJournalsFromCache();
+    if (cached) {
+      renderJournalListUI(filterAndSortJournals(cached.data, startStr, endStr, search));
+      setCacheIndicator('loading', null);
+      // 背景靜默更新
+      fetchJournalsFromServer().then(fresh => {
+        saveJournalsToCache(fresh);
+        renderJournalListUI(filterAndSortJournals(fresh, startStr, endStr, search));
+        setCacheIndicator('fresh', Date.now());
+      }).catch(e => {
+        console.warn('背景更新失敗：', e.message);
+        setCacheIndicator('fresh', cached.ts); // 顯示舊快取時間
+      });
+      return;
+    }
+  }
+
+  // ── 無快取或強制更新：顯示 loading，等待結果 ──
+  showLoading();
+  setCacheIndicator('loading', null);
+  try {
+    const journals = await fetchJournalsFromServer();
+    saveJournalsToCache(journals);
+    renderJournalListUI(filterAndSortJournals(journals, startStr, endStr, search));
+    setCacheIndicator('fresh', Date.now());
+  } catch(e) {
+    toast('載入失敗：' + e.message, 'error');
+    setCacheIndicator('', null);
+  } finally {
+    hideLoading();
+  }
 }
 
 function toggleSelectAllTeacherJournals() {
@@ -2727,6 +2752,54 @@ function initStatsDateSelects() {
   ids.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = startStr; });
   ide.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = endStr; });
 }
+
+// ======== localStorage 快取（老師端月記清單）========
+const JOURNAL_CACHE_KEY  = 'tcivs_teacher_journals_cache';
+const JOURNAL_CACHE_TTL  = 5 * 60 * 1000; // 5 分鐘
+
+function saveJournalsToCache(journals) {
+  try {
+    localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: journals }));
+  } catch(e) { /* localStorage 已滿則跳過 */ }
+}
+
+function loadJournalsFromCache() {
+  try {
+    const raw = localStorage.getItem(JOURNAL_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Date.now() - parsed.ts > JOURNAL_CACHE_TTL) return null;
+    return parsed;
+  } catch(e) { return null; }
+}
+
+function setCacheIndicator(state, ts) {
+  const el = document.getElementById('t-cache-indicator');
+  if (!el) return;
+  if (state === 'loading') {
+    el.innerHTML = '🔄 更新中...';
+  } else if (state === 'fresh') {
+    const d = new Date(ts);
+    const hhmm = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    el.innerHTML = `📦 快取資料（${hhmm}）・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">強制重新整理</button>`;
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+function renderJournalListUI(journals) {
+  window._teacherJournalsCache = journals;
+  const toolbar = document.getElementById('t-batch-toolbar');
+  if (toolbar) toolbar.style.display = 'none';
+  const allCb = document.getElementById('t-select-all-cb');
+  if (allCb) allCb.checked = false;
+  document.getElementById('t-batch-float').style.display = 'none';
+  document.getElementById('t-journals-list').innerHTML = journals.length
+    ? journals.map(j => renderJournalCard(j, true)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
+  updateTeacherBatchBar();
+}
+// ======================================================
 
 function resolveImgSrc(src) {
   if (!src) return '';
