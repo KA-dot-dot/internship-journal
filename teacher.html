@@ -18,6 +18,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getStorage, ref as storageRef, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -32,9 +33,11 @@
   const db = initializeFirestore(app, { localCache: { kind: 'memory' } });
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
+  const storage = getStorage(app);
 
   window._firebase = { db, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
+  window._storage = { storage, storageRef, getDownloadURL };
 </script>
 
 <style>
@@ -715,10 +718,11 @@ tr:last-child td { border-bottom: none; }
           <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
           <input type="date" id="t-journals-date-end" style="min-width:150px">
           <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals()">🔄 重新整理</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)">🔄 強制更新</button>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
           <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
         </div>
+        <div id="t-cache-indicator" style="margin-bottom:8px;min-height:18px"></div>
         <!-- 批次選取工具列 -->
         <div id="t-batch-toolbar">
           <label>
@@ -2446,14 +2450,57 @@ async function loadSalaryStats() {
 }
 
 // ---- 月記總覽 ----
-async function loadTeacherJournals() {
+function renderTeacherJournalsList(journals) {
+  window._teacherJournalsCache = journals;
+  const toolbar = document.getElementById('t-batch-toolbar');
+  if (toolbar) toolbar.style.display = 'none';
+  const allCb = document.getElementById('t-select-all-cb');
+  if (allCb) allCb.checked = false;
+  document.getElementById('t-batch-float').style.display = 'none';
+  document.getElementById('t-journals-list').innerHTML = journals.length
+    ? journals.map(j => renderJournalCard(j, true)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
+  updateTeacherBatchBar();
+}
+
+function showCacheIndicator(ts, isRefreshing) {
+  const el = document.getElementById('t-cache-indicator');
+  if (!el) return;
+  if (isRefreshing) {
+    el.innerHTML = `<span style="color:var(--text2);font-size:11px">🔄 更新中...</span>`;
+  } else if (ts) {
+    el.innerHTML = `<span style="color:var(--text2);font-size:11px">📦 快取 ${formatCacheTime(ts)}・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0">重新整理</button></span>`;
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+async function loadTeacherJournals(forceRefresh) {
   const startVal = document.getElementById('t-journals-date-start')?.value || '';
   const endVal = document.getElementById('t-journals-date-end')?.value || '';
   const search = (document.getElementById('t-journals-search')?.value || '').toLowerCase();
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
+
+  // --- 先嘗試顯示 localStorage 快取（不強制 refresh 時）---
+  if (!forceRefresh) {
+    const cached = loadJournalsCache();
+    if (cached) {
+      let cachedFiltered = cached.data;
+      if (startStr && endStr) cachedFiltered = cachedFiltered.filter(j => journalMonthInRange(j, startStr, endStr));
+      if (search) cachedFiltered = cachedFiltered.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
+      cachedFiltered.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+      renderTeacherJournalsList(cachedFiltered);
+      showCacheIndicator(cached.ts, true);
+      // 背景 refresh
+      _refreshTeacherJournalsBackground(startStr, endStr, search);
+      return;
+    }
+  }
+
   const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
   showLoading();
+  showCacheIndicator(null, true);
   const [snap, stuSnap] = await Promise.all([
     getDocsFromServer(collectionGroup(db, 'journals')),
     getDocsFromServer(collection(db, 'students'))
@@ -2480,19 +2527,42 @@ async function loadTeacherJournals() {
     };
   });
   journals = journals.filter(j => !j.isDeletedStudent);
+  // 存全量到 localStorage（未篩選），篩選後渲染
+  saveJournalsCache(journals);
   if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) journals = journals.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
   journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
-  window._teacherJournalsCache = journals;
-  const toolbar = document.getElementById('t-batch-toolbar');
-  if (toolbar) toolbar.style.display = 'none';
-  const allCb = document.getElementById('t-select-all-cb');
-  if (allCb) allCb.checked = false;
-  document.getElementById('t-batch-float').style.display = 'none';
-  document.getElementById('t-journals-list').innerHTML = journals.length
-    ? journals.map(j => renderJournalCard(j, true)).join('')
-    : '<div class="empty-state"><div class="icon">📭</div><p>請選擇日期後按查詢，或無此期間月記</p></div>';
-  updateTeacherBatchBar();
+  renderTeacherJournalsList(journals);
+  showCacheIndicator(Date.now(), false);
+}
+
+// 背景 refresh（先顯示快取後靜默更新）
+async function _refreshTeacherJournalsBackground(startStr, endStr, search) {
+  const { collection, collectionGroup, getDocsFromServer } = firebase_funcs;
+  try {
+    const [snap, stuSnap] = await Promise.all([
+      getDocsFromServer(collectionGroup(db, 'journals')),
+      getDocsFromServer(collection(db, 'students'))
+    ]);
+    const studentMap = {};
+    stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
+    let journals = userJournalDocs(snap).map(d => {
+      const j = d.data();
+      if (studentMap[j.seatNo]) return j;
+      return { seatNo: j.seatNo||'', semester: j.semester||'', month: j.month||0, submittedAt: j.submittedAt||'', studentName:'已刪除學生', company:'已刪除學生', reflection:'', entries:[], salary:null, mentor:'', salaryPhoto:'', isDeletedStudent:true };
+    });
+    journals = journals.filter(j => !j.isDeletedStudent);
+    saveJournalsCache(journals);
+    let filtered = [...journals];
+    if (startStr && endStr) filtered = filtered.filter(j => journalMonthInRange(j, startStr, endStr));
+    if (search) filtered = filtered.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
+    filtered.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+    renderTeacherJournalsList(filtered);
+    showCacheIndicator(Date.now(), false);
+  } catch(e) {
+    console.warn('背景 refresh 失敗：', e.message);
+    showCacheIndicator(loadJournalsCache()?.ts, false);
+  }
 }
 
 function toggleSelectAllTeacherJournals() {
@@ -2735,6 +2805,64 @@ function resolveImgSrc(src) {
   return 'data:image/jpeg;base64,' + src;
 }
 
+// ---- Firebase Storage 薪資單 URL 解析（懶載入，帶 in-memory cache）----
+const _storageUrlCache = {};
+async function resolveStorageSalaryUrl(storagePath) {
+  if (!storagePath) return '';
+  if (_storageUrlCache[storagePath]) return _storageUrlCache[storagePath];
+  try {
+    const { storage, storageRef: sRef, getDownloadURL } = window._storage || {};
+    if (!storage) return '';
+    const url = await getDownloadURL(sRef(storage, storagePath));
+    _storageUrlCache[storagePath] = url;
+    return url;
+  } catch(e) {
+    console.warn('Storage URL 解析失敗：', e.message);
+    return '';
+  }
+}
+
+// 薪資單圖片元素懶載入（老師查看用）
+function lazySalaryImg(imgEl, storagePath, fallbackUrl) {
+  if (storagePath) {
+    resolveStorageSalaryUrl(storagePath).then(url => {
+      if (url && imgEl) imgEl.src = url;
+    });
+  } else if (fallbackUrl) {
+    imgEl.src = resolveImgSrc(fallbackUrl);
+  }
+}
+
+// ---- localStorage 快取（老師端月記清單）----
+const JOURNAL_CACHE_KEY = 'tcivs_teacher_journals_cache';
+const JOURNAL_CACHE_TTL = 5 * 60 * 1000; // 5分鐘
+
+function saveJournalsCache(journals) {
+  try {
+    localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify({
+      ts: Date.now(),
+      data: journals
+    }));
+  } catch(e) { /* localStorage 滿了忽略 */ }
+}
+
+function loadJournalsCache() {
+  try {
+    const raw = localStorage.getItem(JOURNAL_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > JOURNAL_CACHE_TTL) return null; // 超過 5 分鐘不用
+    return { ts, data };
+  } catch(e) { return null; }
+}
+
+function formatCacheTime(ts) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${hh}:${mm}`;
+}
+
 function renderJournalCard(j, isTeacher) {
   if (isTeacher && j.isDeletedStudent) {
     const deleteBtn = `<button class="btn btn-sm" style="background:var(--accent-red);color:#fff;opacity:0.85;padding:4px 8px;font-size:15px;line-height:1" title="刪除月記" onclick="confirmDeleteJournal('${j.seatNo}','${j.semester}',${j.month},'已刪除學生',true)">🗑️</button>`;
@@ -2759,8 +2887,23 @@ function renderJournalCard(j, isTeacher) {
   `).join('');
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
-  const _sp = resolveImgSrc(j.salaryPhoto);
-  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  // 薪資單：新月記有 salaryPhotoStoragePath，用 lazySalaryImg 動態取 signed URL
+  const salaryUniqueId = `sp-${j.seatNo}-${j.semester}-${j.month}`.replace(/[^a-zA-Z0-9-]/g,'_');
+  const salaryPhotoHtml = j.salaryPhoto
+    ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">💴 薪資單${j.salaryPhotoStoragePath ? ' 🔒' : ''}</div>
+        <img id="${salaryUniqueId}" src="" data-storage-path="${j.salaryPhotoStoragePath||''}" data-fallback="${j.salaryPhotoStoragePath ? '' : j.salaryPhoto}"
+          style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block;background:var(--bg2)"
+          onclick="openPhotoModal(this.src)" title="薪資單" loading="lazy">
+       </div>`
+    : '';
+  // 觸發懶載入（等 DOM 插入後執行）
+  if (j.salaryPhoto) {
+    setTimeout(() => {
+      const imgEl = document.getElementById(salaryUniqueId);
+      if (imgEl) lazySalaryImg(imgEl, j.salaryPhotoStoragePath||'', j.salaryPhoto);
+    }, 0);
+  }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
   const isReviewed = !!(j.teacherReviewed);
