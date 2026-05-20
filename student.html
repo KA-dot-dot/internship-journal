@@ -13,7 +13,6 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-  import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -29,10 +28,8 @@
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
 
-  const storage = getStorage(app);
   window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider };
-  window._storage = { storage, storageRef, uploadBytes, getDownloadURL, deleteObject };
 </script>
 
 <style>
@@ -887,13 +884,10 @@ async function checkMonthDeadline() {
     document.getElementById('write-salary').value = j.salary ?? '';
     document.getElementById('write-mentor').value = j.mentor || '';
     document.getElementById('write-reflection').value = j.reflection || '';
-    // 薪資單照片（新架構用 Storage URL，舊月記相容 Cloudinary URL / base64）
+    // 薪資單照片
     const preview = document.getElementById('salary-photo-preview');
     if (j.salaryPhoto) {
-      const existingStoragePath = j.salaryPhotoStoragePath || '';
-      const displayUrl = resolveImgSrc(j.salaryPhoto);
-      const lockBadge = existingStoragePath ? '<span style="font-size:10px;color:var(--accent-green);display:block;margin-top:4px">🔒 已安全儲存（僅老師可查看）</span>' : '';
-      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${displayUrl}" data-storage-url="${j.salaryPhoto}" data-storage-path="${existingStoragePath}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button>${lockBadge}</div>`;
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${resolveImgSrc(j.salaryPhoto)}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
     } else { preview.innerHTML = ''; }
     // 工作摘要
     const container = document.getElementById('work-entries-container');
@@ -1197,25 +1191,7 @@ function toggleNoPhoto(id) {
 
 function triggerPhotoUpload(id) { document.getElementById(`${id}-file`).click(); }
 
-// ---- Firebase Storage 上傳（薪資單專用，受 Security Rules 保護）----
-async function uploadSalaryToStorage(blob, uid, journalId) {
-  if (!window._storage) return null;
-  try {
-    const { storage, storageRef: sRef, uploadBytes, getDownloadURL } = window._storage;
-    const path = `salaryPhotos/${uid}/${journalId}.jpg`;
-    const fileRef = sRef(storage, path);
-    await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
-    const url = await getDownloadURL(fileRef);
-    // 回傳 {url, path} 方便未來刪除
-    return { url, path };
-  } catch(e) {
-    console.warn('Firebase Storage 薪資單上傳失敗：', e.message);
-    toast('⚠️ 薪資單上傳失敗（' + e.message + '）', 'error');
-    return null;
-  }
-}
-
-// ---- Cloudinary 上傳（工作日誌照片用，非薪資單）----
+// ---- Cloudinary 上傳 ----
 async function uploadToCloudinary(blob, folder) {
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) return null;
   try {
@@ -1304,23 +1280,13 @@ function handleSalaryPhoto(event) {
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const previewSrc = canvas.toDataURL('image/jpeg', 0.75);
       const preview = document.getElementById('salary-photo-preview');
-      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${previewSrc}" data-storage-path="" data-storage-url="" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=\'\'" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><div id="salary-uploading" style="position:absolute;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:10px;color:#fff">🔒 上傳中（加密儲存）...</div></div>`;
-      const sem = document.getElementById('write-semester')?.value || 'temp';
-      const month = document.getElementById('write-month')?.value || '0';
-      const uid = currentUser?.uid || 'unknown';
-      const journalId = `${currentUser?.seatNo || 'unknown'}-${sem}-${month}`;
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${previewSrc}" data-base64="${previewSrc}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><div id="salary-uploading" style="position:absolute;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:10px;color:#fff">上傳中...</div></div>`;
+      const folder = `tcivs/${currentUser?.seatNo || 'unknown'}/salary`;
       const blob = await canvasToBlob(canvas, 0.75);
-      const result = await uploadSalaryToStorage(blob, uid, journalId);
+      const url = await uploadToCloudinary(blob, folder);
       document.getElementById('salary-uploading')?.remove();
       const imgEl = document.getElementById('salary-preview-img');
-      if (imgEl && result) {
-        imgEl.dataset.storageUrl = result.url;
-        imgEl.dataset.storagePath = result.path;
-        const lockEl = document.createElement('span');
-        lockEl.style.cssText = 'font-size:10px;color:var(--accent-green);display:block;margin-top:4px';
-        lockEl.textContent = '🔒 已安全儲存（僅老師可查看）';
-        imgEl.parentElement.appendChild(lockEl);
-      }
+      if (imgEl && url) { imgEl.src = url; imgEl.dataset.base64 = url; }
     };
     img.src = e.target.result;
   };
@@ -1344,11 +1310,7 @@ async function saveJournal() {
   const salary = parseInt(document.getElementById('write-salary').value) || null;
   const mentor = document.getElementById('write-mentor').value.trim();
   const salaryPhotoEl = document.getElementById('salary-photo-preview').querySelector('img');
-  // 優先用 Firebase Storage URL（新架構）；向下相容舊的 data-base64 / Cloudinary URL
-  const salaryPhoto = salaryPhotoEl
-    ? (salaryPhotoEl.dataset.storageUrl || salaryPhotoEl.dataset.base64 || '')
-    : '';
-  const salaryPhotoStoragePath = salaryPhotoEl ? (salaryPhotoEl.dataset.storagePath || '') : '';
+  const salaryPhoto = salaryPhotoEl ? salaryPhotoEl.dataset.base64 : '';
   const entries = [];
   let distanceError = false;
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
@@ -1369,7 +1331,7 @@ async function saveJournal() {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name, company: currentUser.company || '',
     city: currentUser.city || '', semester: sem, month,
-    salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '', salaryPhotoStoragePath: salaryPhotoStoragePath || '',
+    salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
     submittedAt: new Date().toISOString(),
     ownerUid: currentUser.uid || '',
@@ -1627,9 +1589,7 @@ async function editJournal(seatNo, sem, month) {
   document.getElementById('write-mentor').value = j.mentor || '';
   document.getElementById('write-reflection').value = j.reflection || '';
   if (j.salaryPhoto) {
-    const _existingPath = j.salaryPhotoStoragePath || '';
-    const _lockBadge = _existingPath ? '<span style="font-size:10px;color:var(--accent-green);display:block;margin-top:4px">🔒 已安全儲存（僅老師可查看）</span>' : '';
-    document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img id="edit-salary-preview-img" src="${resolveImgSrc(j.salaryPhoto)}" data-storage-url="${j.salaryPhoto}" data-storage-path="${_existingPath}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button>${_lockBadge}</div>`;
+    document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img src="${resolveImgSrc(j.salaryPhoto)}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
   }
   const container = document.getElementById('work-entries-container');
   container.innerHTML = '';
