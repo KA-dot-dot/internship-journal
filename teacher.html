@@ -1151,6 +1151,28 @@ async function googleTeacherLogin() {
       return;
     }
 
+    // ★ uid 升級：若管理員文件是用 emailKey 格式存的，自動建立 uid 格式文件
+    // 這確保 isAdmin() 在 Firestore Rules 裡的 exists(admins/uid) 能通過，
+    // 讓後續 create / list 等操作不因 Rules 無法比對 uid 而失敗
+    try {
+      const uidSnap = await getDoc(doc(db, 'admins', user.uid));
+      if (!uidSnap.exists()) {
+        // uid 文件不存在 → 用現有資料建立（不刪舊的 emailKey 文件，向下相容）
+        const baseData = adminDocData || {};
+        await setDoc(doc(db, 'admins', user.uid), {
+          email,
+          name: user.displayName || baseData.name || email.split('@')[0],
+          addedAt: baseData.addedAt || new Date().toISOString(),
+          addedBy: baseData.addedBy || 'system-auto-upgrade',
+          ...(baseData.protected ? { protected: true } : {})
+        });
+        console.log('✅ 管理員帳號已自動升級為 uid 格式');
+      }
+    } catch(upgradeErr) {
+      // 升級失敗不中斷登入，僅記錄 warning
+      console.warn('管理員 uid 升級失敗（不影響本次登入）:', upgradeErr);
+    }
+
     currentUser = {
       role: 'teacher',
       uid: user.uid,
@@ -1266,7 +1288,8 @@ async function addAdmin() {
 
   showLoading();
   try {
-    const { collection, collectionGroup, getDocs, doc, setDoc } = firebase_funcs;
+    // ★ 只需 getDoc（不需 getDocs list），避免 list 權限問題
+    const { doc, getDoc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1274,13 +1297,13 @@ async function addAdmin() {
       toast('新增老師失敗：目前帳號已不是管理員', 'error');
       return;
     }
-    // 找是否已存在
-    const snap = await getDocs(collection(db, 'admins'));
-    const existing = snap.docs.find(d => d.data().email === email);
-    if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
 
-    // 用 email 作為暫時文件 ID（登入後再換成 uid）
+    // 查重：直接 getDoc emailKey 格式文件，不依賴 list 權限
     const safeId = email.replace(/[@.]/g, '_');
+    const existSnap = await getDoc(doc(db, 'admins', safeId));
+    if (existSnap.exists()) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
+
+    // 建立 emailKey 格式文件（對方登入後自動升級成 uid 格式）
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
