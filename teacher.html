@@ -1123,24 +1123,21 @@ async function googleTeacherLogin() {
       return;
     }
 
-    // 2. 檢查 admins，只用 getDoc 查自己的 uid 和 emailKey
-    //    不使用 getDocs(admins)，避免 Rules 要求 list 權限造成雞生蛋問題
-    const { doc, getDoc, setDoc } = firebase_funcs;
+    // 2. 檢查 admins：先查 uid，找不到再查 emailKey
+    //    Rules 已設定 allow get: if schoolUser()，不需先是管理員即可查
+    //    ★ 不在此處寫入 admins（setDoc uid 升級已移除）
+    //      新老師由已登入管理員在帳號管理頁面新增即可
+    const { doc, getDoc } = firebase_funcs;
     let isAdmin = false;
-    let adminDocData = null;
 
-    // 先查 uid（最新格式）
     const byUid = await getDoc(doc(db, 'admins', user.uid));
     if (byUid.exists()) {
       isAdmin = true;
-      adminDocData = byUid.data();
     } else {
-      // 向下相容：查 emailKey 格式（舊版建立的管理員）
       const emailKey = email.replace(/[@.]/g, '_');
       const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
       if (byEmailKey.exists()) {
         isAdmin = true;
-        adminDocData = byEmailKey.data();
       }
     }
 
@@ -1149,28 +1146,6 @@ async function googleTeacherLogin() {
       hideLoading();
       toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
       return;
-    }
-
-    // ★ uid 升級：若管理員文件是用 emailKey 格式存的，自動建立 uid 格式文件
-    // 這確保 isAdmin() 在 Firestore Rules 裡的 exists(admins/uid) 能通過，
-    // 讓後續 create / list 等操作不因 Rules 無法比對 uid 而失敗
-    try {
-      const uidSnap = await getDoc(doc(db, 'admins', user.uid));
-      if (!uidSnap.exists()) {
-        // uid 文件不存在 → 用現有資料建立（不刪舊的 emailKey 文件，向下相容）
-        const baseData = adminDocData || {};
-        await setDoc(doc(db, 'admins', user.uid), {
-          email,
-          name: user.displayName || baseData.name || email.split('@')[0],
-          addedAt: baseData.addedAt || new Date().toISOString(),
-          addedBy: baseData.addedBy || 'system-auto-upgrade',
-          ...(baseData.protected ? { protected: true } : {})
-        });
-        console.log('✅ 管理員帳號已自動升級為 uid 格式');
-      }
-    } catch(upgradeErr) {
-      // 升級失敗不中斷登入，僅記錄 warning
-      console.warn('管理員 uid 升級失敗（不影響本次登入）:', upgradeErr);
     }
 
     currentUser = {
@@ -3224,6 +3199,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
         try {
+          // ★ setDoc uid 升級已移除（會觸發 Rules create 拒絕）
+          //   只用 getDoc 查 uid 或 emailKey，找到即為管理員
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
           const byUid = await getDoc(doc(db, 'admins', user.uid));
@@ -3237,25 +3214,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
           if (isAdmin) {
-            // ★ uid 升級：確保 admins/{uid} 文件存在，讓 Rules isAdmin() 靠 uid 穩定通過
-            try {
-              const { setDoc } = firebase_funcs;
-              const uidSnap = await getDoc(doc(db, 'admins', user.uid));
-              if (!uidSnap.exists()) {
-                const emailKey2 = email.replace(/[@.]/g, '_');
-                const emailSnap = await getDoc(doc(db, 'admins', emailKey2));
-                const base = emailSnap.exists() ? emailSnap.data() : {};
-                await setDoc(doc(db, 'admins', user.uid), {
-                  email,
-                  name: user.displayName || base.name || email.split('@')[0],
-                  addedAt: base.addedAt || new Date().toISOString(),
-                  addedBy: base.addedBy || 'system-auto-upgrade',
-                  ...(base.protected ? { protected: true } : {})
-                });
-              }
-            } catch(upgradeErr) {
-              console.warn('uid 升級失敗（不影響登入）:', upgradeErr);
-            }
             currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
             enterApp();
           }
