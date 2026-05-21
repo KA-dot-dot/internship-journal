@@ -997,6 +997,18 @@ let _batchReviewJournals = [];
 // ===== 學校網域限制 =====
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 
+function normalizeEmail(email) {
+  return (email || '').trim().toLowerCase();
+}
+
+function isSchoolEmail(email) {
+  return normalizeEmail(email).endsWith('@' + SCHOOL_DOMAIN);
+}
+
+function emailToDocId(email) {
+  return normalizeEmail(email).replace(/[@.]/g, '_');
+}
+
 // ============ 深色/淺色切換 ============
 function toggleTheme() {
   const isLight = document.body.classList.toggle('light-mode');
@@ -1105,6 +1117,21 @@ async function getDocsWithFallback(refOrQuery, label = '資料', timeoutMs = 200
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+async function ensureAdminUidDocument(user, adminDocData = {}) {
+  if (!user?.uid || !isSchoolEmail(user.email)) return;
+  const { doc, setDoc } = firebase_funcs;
+  const email = normalizeEmail(user.email);
+  const payload = {
+    email,
+    uid: user.uid,
+    name: adminDocData.name || user.displayName || email.split('@')[0],
+    lastLoginAt: new Date().toISOString(),
+    migratedFrom: emailToDocId(email)
+  };
+  if (adminDocData.protected === true) payload.protected = true;
+  await setDoc(doc(db, 'admins', user.uid), payload, { merge: true });
+}
+
 // ============ Google 老師登入 ============
 async function googleTeacherLogin() {
   showLoading();
@@ -1113,10 +1140,10 @@ async function googleTeacherLogin() {
     const { auth, provider, signInWithPopup } = window._auth;
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
-    const email = user.email || '';
+    const email = normalizeEmail(user.email);
 
     // 1. 驗證學校網域
-    if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
+    if (!isSchoolEmail(email)) {
       await window._auth.signOut(auth);
       hideLoading();
       toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
@@ -1136,7 +1163,7 @@ async function googleTeacherLogin() {
       adminDocData = byUid.data();
     } else {
       // 向下相容：查 emailKey 格式（舊版建立的管理員）
-      const emailKey = email.replace(/[@.]/g, '_');
+      const emailKey = emailToDocId(email);
       const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
       if (byEmailKey.exists()) {
         isAdmin = true;
@@ -1157,6 +1184,11 @@ async function googleTeacherLogin() {
       name: user.displayName || email.split('@')[0],
       email
     };
+    try {
+      await ensureAdminUidDocument(user, adminDocData || {});
+    } catch (syncErr) {
+      console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
+    }
     enterApp();
   } catch(e) {
     hideLoading();
@@ -1217,41 +1249,47 @@ function showPage(pageId) {
 
 async function loadAdminPage() {
   await waitForFirebaseAsync();
-  const { collection, collectionGroup, getDocs } = firebase_funcs;
-
-  // 載入老師清單
-  const adminSnap = await getDocs(collection(db, 'admins'));
+  const { collection, getDocs } = firebase_funcs;
   const adminList = document.getElementById('admin-list');
-  if (adminSnap.empty) {
-    adminList.innerHTML = '<div style="color:var(--text2);font-size:13px">尚無管理員</div>';
-  } else {
-    const adminMap = new Map();
-    adminSnap.docs.forEach(d => {
-      const a = d.data();
-      const email = (a.email || '').toLowerCase();
-      const key = email || d.id;
-      if (!adminMap.has(key)) adminMap.set(key, { ids: [], email, label: a.email || a.name || d.id, isSelf: false, protected: false });
-      const item = adminMap.get(key);
-      item.ids.push(d.id);
-      if (currentUser && (d.id === currentUser.uid || email === currentUser.email)) item.isSelf = true;
-      if (email) item.label = a.email;
-      if (a.protected) item.protected = true;
-    });
-    adminList.innerHTML = Array.from(adminMap.values()).map(a => {
-      const ids = a.ids.join('|').replace(/'/g, "\\'");
-      const safeEmail = (a.email || '').replace(/'/g, "\\'");
-      return `<span class="admin-tag">
-        👨‍🏫 ${a.label}
-        ${!a.isSelf ? (a.protected ? '<span style="font-size:11px;color:var(--accent-yellow)">🔒</span>' : `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>`) : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
-      </span>`;
-    }).join('');
+  if (!adminList) return;
+  adminList.innerHTML = '<div style="color:var(--text2);font-size:13px">載入中...</div>';
+  try {
+    // 載入老師清單
+    const adminSnap = await getDocs(collection(db, 'admins'));
+    if (adminSnap.empty) {
+      adminList.innerHTML = '<div style="color:var(--text2);font-size:13px">尚無管理員</div>';
+    } else {
+      const adminMap = new Map();
+      adminSnap.docs.forEach(d => {
+        const a = d.data();
+        const email = normalizeEmail(a.email);
+        const key = email || d.id;
+        if (!adminMap.has(key)) adminMap.set(key, { ids: [], email, label: a.email || a.name || d.id, isSelf: false, protected: false });
+        const item = adminMap.get(key);
+        item.ids.push(d.id);
+        if (currentUser && (d.id === currentUser.uid || email === currentUser.email)) item.isSelf = true;
+        if (email) item.label = email;
+        if (a.protected) item.protected = true;
+      });
+      adminList.innerHTML = Array.from(adminMap.values()).map(a => {
+        const ids = a.ids.join('|').replace(/'/g, "\\'");
+        const safeEmail = (a.email || '').replace(/'/g, "\\'");
+        return `<span class="admin-tag">
+          👨‍🏫 ${a.label}
+          ${!a.isSelf ? (a.protected ? '<span style="font-size:11px;color:var(--accent-yellow)">🔒</span>' : `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>`) : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
+        </span>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.error('載入老師帳號清單失敗', e);
+    adminList.innerHTML = '<div style="color:var(--accent-red);font-size:13px">老師帳號清單讀取失敗，請重新登入後再試。</div>';
   }
 }
 
 async function verifyCurrentAdmin() {
   if (!currentUser?.email || !currentUser?.uid) return false;
   const { doc, getDoc } = firebase_funcs;
-  const emailKey = currentUser.email.replace(/[@.]/g, '_');
+  const emailKey = emailToDocId(currentUser.email);
   const [uidSnap, emailSnap] = await Promise.all([
     getDoc(doc(db, 'admins', currentUser.uid)),
     getDoc(doc(db, 'admins', emailKey))
@@ -1260,13 +1298,13 @@ async function verifyCurrentAdmin() {
 }
 
 async function addAdmin() {
-  const email = document.getElementById('new-admin-email').value.trim().toLowerCase();
+  const email = normalizeEmail(document.getElementById('new-admin-email').value);
   if (!email) return toast('請輸入 email', 'error');
-  if (!email.endsWith('@' + SCHOOL_DOMAIN)) return toast(`請輸入 @${SCHOOL_DOMAIN} 的學校帳號`, 'error');
+  if (!isSchoolEmail(email)) return toast(`請輸入 @${SCHOOL_DOMAIN} 的學校帳號`, 'error');
 
   showLoading();
   try {
-    const { collection, collectionGroup, getDocs, doc, setDoc } = firebase_funcs;
+    const { collection, getDocs, doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1275,18 +1313,18 @@ async function addAdmin() {
       return;
     }
     // 找是否已存在
+    const safeId = emailToDocId(email);
     const snap = await getDocs(collection(db, 'admins'));
-    const existing = snap.docs.find(d => d.data().email === email);
+    const existing = snap.docs.find(d => normalizeEmail(d.data().email) === email || d.id === safeId);
     if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
 
     // 用 email 作為暫時文件 ID（登入後再換成 uid）
-    const safeId = email.replace(/[@.]/g, '_');
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
       addedAt: new Date().toISOString(),
       addedBy: currentUser.email
-    });
+    }, { merge: true });
     hideLoading();
     document.getElementById('new-admin-email').value = '';
     toast('✅ 老師帳號已新增，對方下次登入後生效', 'success');
@@ -3199,23 +3237,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
-        const email = user.email || '';
-        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
+        const email = normalizeEmail(user.email);
+        if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
         try {
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
+          let adminDocData = null;
           const byUid = await getDoc(doc(db, 'admins', user.uid));
           if (byUid.exists()) {
             isAdmin = true;
+            adminDocData = byUid.data();
           } else {
-            const emailKey = email.replace(/[@.]/g, '_');
+            const emailKey = emailToDocId(email);
             const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
             if (byEmailKey.exists()) {
               isAdmin = true;
+              adminDocData = byEmailKey.data();
             }
           }
           if (isAdmin) {
             currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
+            try {
+              await ensureAdminUidDocument(user, adminDocData || {});
+            } catch (syncErr) {
+              console.warn('自動同步老師 UID 權限文件失敗，保留既有登入', syncErr);
+            }
             enterApp();
           }
         } catch(e) {
