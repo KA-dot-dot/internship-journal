@@ -1296,20 +1296,25 @@ async function addAdmin() {
 
 async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
-  const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  const stillAdmin = await verifyCurrentAdmin();
-  if (!stillAdmin) {
+  try {
+    const { doc, deleteDoc } = firebase_funcs;
+    const stillAdmin = await verifyCurrentAdmin();
+    if (!stillAdmin) {
+      await window._auth.signOut(window._auth.auth);
+      toast('移除老師失敗：目前帳號已不是管理員', 'error');
+      return;
+    }
+    const ids = String(docId || '').split('|').filter(Boolean);
+    await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
+    toast('已移除', 'success');
+    loadAdminPage();
+  } catch(e) {
+    console.error('removeAdmin 失敗', e);
+    toast('移除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
     hideLoading();
-    await window._auth.signOut(window._auth.auth);
-    toast('移除老師失敗：目前帳號已不是管理員', 'error');
-    return;
   }
-  const ids = String(docId || '').split('|').filter(Boolean);
-  await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
-  hideLoading();
-  toast('已移除', 'success');
-  loadAdminPage();
 }
 
 async function bindStudent() {
