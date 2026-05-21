@@ -1288,8 +1288,7 @@ async function addAdmin() {
 
   showLoading();
   try {
-    // ★ 只需 getDoc（不需 getDocs list），避免 list 權限問題
-    const { doc, getDoc, setDoc } = firebase_funcs;
+    const { collection, getDocs, doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1297,13 +1296,13 @@ async function addAdmin() {
       toast('新增老師失敗：目前帳號已不是管理員', 'error');
       return;
     }
+    // list 查重（Rules allow list: if isAdmin()，登入後 uid 升級確保 isAdmin 穩定通過）
+    const snap = await getDocs(collection(db, 'admins'));
+    const existing = snap.docs.find(d => d.data().email === email);
+    if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
 
-    // 查重：直接 getDoc emailKey 格式文件，不依賴 list 權限
+    // 用 emailKey 建立文件（對方登入後自動升級成 uid 格式）
     const safeId = email.replace(/[@.]/g, '_');
-    const existSnap = await getDoc(doc(db, 'admins', safeId));
-    if (existSnap.exists()) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
-
-    // 建立 emailKey 格式文件（對方登入後自動升級成 uid 格式）
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
@@ -3238,6 +3237,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
           if (isAdmin) {
+            // ★ uid 升級：確保 admins/{uid} 文件存在，讓 Rules isAdmin() 靠 uid 穩定通過
+            try {
+              const { setDoc } = firebase_funcs;
+              const uidSnap = await getDoc(doc(db, 'admins', user.uid));
+              if (!uidSnap.exists()) {
+                const emailKey2 = email.replace(/[@.]/g, '_');
+                const emailSnap = await getDoc(doc(db, 'admins', emailKey2));
+                const base = emailSnap.exists() ? emailSnap.data() : {};
+                await setDoc(doc(db, 'admins', user.uid), {
+                  email,
+                  name: user.displayName || base.name || email.split('@')[0],
+                  addedAt: base.addedAt || new Date().toISOString(),
+                  addedBy: base.addedBy || 'system-auto-upgrade',
+                  ...(base.protected ? { protected: true } : {})
+                });
+              }
+            } catch(upgradeErr) {
+              console.warn('uid 升級失敗（不影響登入）:', upgradeErr);
+            }
             currentUser = { role: 'teacher', uid: user.uid, name: user.displayName || email.split('@')[0], email };
             enterApp();
           }
