@@ -1266,7 +1266,7 @@ async function addAdmin() {
 
   showLoading();
   try {
-    const { collection, collectionGroup, getDocs, doc, setDoc } = firebase_funcs;
+    const { doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1274,26 +1274,24 @@ async function addAdmin() {
       toast('新增老師失敗：目前帳號已不是管理員', 'error');
       return;
     }
-    // 找是否已存在
-    const snap = await getDocs(collection(db, 'admins'));
-    const existing = snap.docs.find(d => d.data().email === email);
-    if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
 
-    // 用 email 作為暫時文件 ID（登入後再換成 uid）
+    // 不在新增前掃描整個 admins 集合，避免部署中的 list 規則造成誤判。
+    // 真正權限仍由 Firestore Rules 的 isAdmin() 擋住；merge 也會保留既有 protected 欄位。
     const safeId = email.replace(/[@.]/g, '_');
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
       addedAt: new Date().toISOString(),
       addedBy: currentUser.email
-    });
+    }, { merge: true });
     hideLoading();
     document.getElementById('new-admin-email').value = '';
     toast('✅ 老師帳號已新增，對方下次登入後生效', 'success');
     loadAdminPage();
   } catch(e) {
     hideLoading();
-    toast('新增失敗：' + e.message, 'error');
+    console.error('新增老師失敗', e);
+    toast('新增失敗：' + (e.message || '請確認目前帳號仍有老師權限'), 'error');
   }
 }
 
@@ -3228,3 +3226,4 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+
