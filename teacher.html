@@ -1287,11 +1287,19 @@ async function addAdmin() {
     hideLoading();
     document.getElementById('new-admin-email').value = '';
     toast('✅ 老師帳號已新增，對方下次登入後生效', 'success');
-    loadAdminPage();
+    try {
+      await loadAdminPage();
+    } catch (reloadError) {
+      console.warn('老師清單重新載入失敗，但新增寫入已完成', reloadError);
+      toast('✅ 老師已新增；清單重新載入失敗，請重新整理頁面確認', 'success');
+    }
   } catch(e) {
     hideLoading();
-    console.error('新增老師失敗', e);
-    toast('新增失敗：' + (e.message || '請確認目前帳號仍有老師權限'), 'error');
+    console.error('新增老師寫入失敗', e);
+    const msg = e?.code === 'permission-denied'
+      ? 'Firestore 拒絕寫入：請確認 Firebase Console 已部署允許 admins create/update 的最新版 Rules'
+      : (e.message || '請確認目前帳號仍有老師權限');
+    toast('新增失敗：' + msg, 'error');
   }
 }
 
@@ -3226,4 +3234,5 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+
 
