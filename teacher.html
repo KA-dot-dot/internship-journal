@@ -1075,6 +1075,13 @@ function toast(msg, type = 'info') {
 function showLoading() { document.getElementById('loading-overlay').classList.remove('hidden'); }
 function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
 
+// ★ 全域安全網：任何未捕獲的 Promise rejection 都確保關閉 loading
+window.addEventListener('unhandledrejection', function(e) {
+  hideLoading();
+  console.error('[unhandledrejection]', e.reason);
+  if (typeof toast === 'function') toast('操作失敗：' + (e.reason?.message || '請重試'), 'error');
+});
+
 function withTimeout(promise, ms, message) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -1123,24 +1130,21 @@ async function googleTeacherLogin() {
       return;
     }
 
-    // 2. 檢查 admins，只用 getDoc 查自己的 uid 和 emailKey
-    //    不使用 getDocs(admins)，避免 Rules 要求 list 權限造成雞生蛋問題
-    const { doc, getDoc, setDoc } = firebase_funcs;
+    // 2. 檢查 admins：先查 uid，找不到再查 emailKey
+    //    Rules 已設定 allow get: if schoolUser()，不需先是管理員即可查
+    //    ★ 不在此處寫入 admins（setDoc uid 升級已移除）
+    //      新老師由已登入管理員在帳號管理頁面新增即可
+    const { doc, getDoc } = firebase_funcs;
     let isAdmin = false;
-    let adminDocData = null;
 
-    // 先查 uid（最新格式）
     const byUid = await getDoc(doc(db, 'admins', user.uid));
     if (byUid.exists()) {
       isAdmin = true;
-      adminDocData = byUid.data();
     } else {
-      // 向下相容：查 emailKey 格式（舊版建立的管理員）
       const emailKey = email.replace(/[@.]/g, '_');
       const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
       if (byEmailKey.exists()) {
         isAdmin = true;
-        adminDocData = byEmailKey.data();
       }
     }
 
@@ -1266,7 +1270,7 @@ async function addAdmin() {
 
   showLoading();
   try {
-    const { collection, collectionGroup, getDocs, doc, setDoc } = firebase_funcs;
+    const { collection, getDocs, doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
       hideLoading();
@@ -1274,12 +1278,12 @@ async function addAdmin() {
       toast('新增老師失敗：目前帳號已不是管理員', 'error');
       return;
     }
-    // 找是否已存在
+    // list 查重（Rules allow list: if isAdmin()，登入後 uid 升級確保 isAdmin 穩定通過）
     const snap = await getDocs(collection(db, 'admins'));
     const existing = snap.docs.find(d => d.data().email === email);
     if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
 
-    // 用 email 作為暫時文件 ID（登入後再換成 uid）
+    // 用 emailKey 建立文件（對方登入後自動升級成 uid 格式）
     const safeId = email.replace(/[@.]/g, '_');
     await setDoc(doc(db, 'admins', safeId), {
       email,
@@ -1299,20 +1303,25 @@ async function addAdmin() {
 
 async function removeAdmin(docId, email) {
   if (!confirm(`確定要移除老師帳號「${email}」嗎？`)) return;
-  const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  const stillAdmin = await verifyCurrentAdmin();
-  if (!stillAdmin) {
+  try {
+    const { doc, deleteDoc } = firebase_funcs;
+    const stillAdmin = await verifyCurrentAdmin();
+    if (!stillAdmin) {
+      await window._auth.signOut(window._auth.auth);
+      toast('移除老師失敗：目前帳號已不是管理員', 'error');
+      return;
+    }
+    const ids = String(docId || '').split('|').filter(Boolean);
+    await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
+    toast('已移除', 'success');
+    loadAdminPage();
+  } catch(e) {
+    console.error('removeAdmin 失敗', e);
+    toast('移除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
     hideLoading();
-    await window._auth.signOut(window._auth.auth);
-    toast('移除老師失敗：目前帳號已不是管理員', 'error');
-    return;
   }
-  const ids = String(docId || '').split('|').filter(Boolean);
-  await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
-  hideLoading();
-  toast('已移除', 'success');
-  loadAdminPage();
 }
 
 async function bindStudent() {
@@ -1560,6 +1569,7 @@ async function saveStudent() {
     updatedAt: new Date().toISOString()
   };
   showLoading();
+  try {
   const { collection, collectionGroup, doc, getDoc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
   const existingStudentSnap = await getDoc(doc(db, 'students', seat));
   const bindingSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seat)));
@@ -1608,15 +1618,21 @@ async function saveStudent() {
       boundAt: new Date().toISOString(), boundBy: currentUser.email
     });
   }
-  hideLoading();
   closeModal('add-student-modal');
   toast('學生資料已儲存', 'success');
   loadStudentsTable();
+  } catch(e) {
+    console.error('saveStudentForm 失敗', e);
+    toast('儲存失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 async function deleteStudent(seatNo, name) {
   if (!confirm(`確定要刪除學生「${name}」嗎？`)) return;
   const { collection, collectionGroup, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
   showLoading();
+  try {
   const [journalSnap, bindingSnap] = await Promise.all([
     getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seatNo))),
     getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)))
@@ -1626,9 +1642,14 @@ async function deleteStudent(seatNo, name) {
     ...bindingSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, 'students', seatNo))
   ]);
-  hideLoading();
   toast(`✅ 已刪除學生「${name}」，清除 ${userJournalDocs(journalSnap).length} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
   loadStudentsTable();
+  } catch(e) {
+    console.error('deleteStudent 失敗', e);
+    toast('刪除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 function openImportModal() {
@@ -1777,21 +1798,33 @@ async function saveAllDeadlines() {
   }
   if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
-  const { doc, setDoc } = firebase_funcs;
-  for (const { id, data } of entries) await setDoc(doc(db, 'deadlines', id), data);
-  hideLoading();
-  toast(`✅ 已儲存 ${entries.length} 個月份的期限設定`, 'success');
-  loadDeadlinesTable();
+  try {
+    const { doc, setDoc } = firebase_funcs;
+    for (const { id, data } of entries) await setDoc(doc(db, 'deadlines', id), data);
+    toast(`✅ 已儲存 ${entries.length} 個月份的期限設定`, 'success');
+    loadDeadlinesTable();
+  } catch(e) {
+    console.error('saveDeadlines 失敗', e);
+    toast('儲存失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 async function deleteDeadline(id) {
   if (!confirm('確定要刪除這個期限設定嗎？')) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'deadlines', id));
-  hideLoading();
-  toast('已刪除', 'success');
-  loadDeadlinesTable();
+  try {
+    await deleteDoc(doc(db, 'deadlines', id));
+    toast('已刪除', 'success');
+    loadDeadlinesTable();
+  } catch(e) {
+    console.error('deleteDeadline 失敗', e);
+    toast('刪除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ---- 統計 ----
@@ -3202,6 +3235,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); return; }
         try {
+          // ★ setDoc uid 升級已移除（會觸發 Rules create 拒絕）
+          //   只用 getDoc 查 uid 或 emailKey，找到即為管理員
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
           const byUid = await getDoc(doc(db, 'admins', user.uid));
