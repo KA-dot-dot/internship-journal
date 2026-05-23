@@ -1659,13 +1659,14 @@ async function deleteStudent(seatNo, name) {
     getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seatNo))),
     getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)))
   ]);
+  // ★ 2026-05-23 修正：同時刪除新路徑(/users/{uid}/journals/)與舊路徑(/journals/)的月記
   await Promise.all([
-    ...userJournalDocs(journalSnap).map(d => deleteDoc(d.ref)),
+    ...journalSnap.docs.map(d => deleteDoc(d.ref)),   // 新舊路徑全刪
     ...bindingSnap.docs.map(d => deleteDoc(d.ref)),
     deleteDoc(doc(db, 'students', seatNo))
   ]);
   hideLoading();
-  toast(`✅ 已刪除學生「${name}」，清除 ${userJournalDocs(journalSnap).length} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
+  toast(`✅ 已刪除學生「${name}」，清除 ${journalSnap.size} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
   loadStudentsTable();
 }
 
@@ -2795,11 +2796,52 @@ function initStatsDateSelects() {
 const JOURNAL_CACHE_KEY  = 'tcivs_teacher_journals_cache';
 const JOURNAL_CACHE_TTL  = 5 * 60 * 1000; // 5 分鐘
 
+// ★ 2026-05-23 修正：存快取前剔除 salaryPhoto base64
+//    30人×10月×200KB ≈ 60MB > localStorage 5MB 上限，會導致 QuotaExceededError
+//    改存 hasSalaryPhoto 布林旗標，老師點擊「載入照片」時才按需從 Firestore 拉取
 function saveJournalsToCache(journals) {
   try {
-    localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: journals }));
+    const slim = journals.map(j => {
+      const { salaryPhoto, ...rest } = j;
+      return { ...rest, hasSalaryPhoto: !!salaryPhoto };
+    });
+    localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: slim }));
   } catch(e) { /* localStorage 已滿則跳過 */ }
 }
+
+// ★ 2026-05-23 新增：按需載入薪資照片（快取中僅有 hasSalaryPhoto 旗標時使用）
+window.loadSalaryPhotoOnDemand = async function(seatNo, semester, month, ownerUid, btnId) {
+  const btn = document.getElementById(btnId);
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = '⏳ 載入中...';
+  try {
+    const { doc, getDoc } = firebase_funcs;
+    if (!ownerUid) {
+      const j = (window._teacherJournalsCache || []).find(
+        x => x.seatNo === seatNo && x.semester === semester && String(x.month) === String(month)
+      );
+      ownerUid = j ? j.ownerUid : '';
+    }
+    if (!ownerUid) throw new Error('找不到學生 UID');
+    const docId = `${seatNo}-${semester}-${month}`;
+    const snap = await getDoc(doc(db, 'users', ownerUid, 'journals', docId));
+    if (snap.exists() && snap.data().salaryPhoto) {
+      const src = resolveImgSrc(snap.data().salaryPhoto);
+      btn.parentElement.innerHTML = `<img src="${src}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單">`;
+    } else {
+      alert('查無薪資單照片');
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  } catch(e) {
+    console.error(e);
+    alert('載入失敗：' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+};
 
 function loadJournalsFromCache() {
   try {
@@ -2859,19 +2901,27 @@ function renderJournalCard(j, isTeacher) {
       <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${j.submittedAt?.slice(0,10)||'-'}</div>
     </div>`;
   }
+  // ★ 2026-05-23 修正：所有使用者輸入欄位套用 escapeHtml 防 XSS
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
-      <div class="entry-date">${e.date || ''} ${e.type ? '｜'+e.type : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km` : ''}</div>` : ''}
-      <div class="entry-content">${e.content || ''}</div>
+      <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km` : ''}</div>` : ''}
+      <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
     </div>
   `).join('');
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${j.salary.toLocaleString()} 元</span>` : '';
-  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${j.mentor}</span>` : '';
-  const _sp = resolveImgSrc(j.salaryPhoto);
-  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
+  // ★ 2026-05-23 修正：salaryPhoto 從快取移除後，以按需載入按鈕取代直接顯示
+  let salaryPhotoHtml = '';
+  if (j.salaryPhoto) {
+    const _sp = resolveImgSrc(j.salaryPhoto);
+    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
+  } else if (j.hasSalaryPhoto) {
+    const btnId = `sp-btn-${j.seatNo}-${j.semester}-${j.month}`;
+    salaryPhotoHtml = `<div style="margin-top:8px"><button id="${btnId}" class="btn btn-sm" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand('${escapeHtml(j.seatNo)}','${escapeHtml(j.semester)}','${j.month}','${escapeHtml(j.ownerUid||'')}','${btnId}')">🔒 薪資單（點擊安全載入）</button></div>`;
+  }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
   const isReviewed = !!(j.teacherReviewed);
@@ -2894,9 +2944,11 @@ function renderJournalCard(j, isTeacher) {
     </div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${j.company||'-'}</span><span>繳交：${j.submittedAt?.slice(0,10)||'-'}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
-    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${j.reflection||''}</div>
+    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
-    ${commentSection}
+    ${(isTeacher && hasComment)
+      ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${escapeHtml(j.teacherComment)}</div>`
+      : ''}
   </div>`;
 }
 
