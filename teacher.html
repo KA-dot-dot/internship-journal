@@ -505,13 +505,19 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">已審閱</div>
             <div class="stat-value" style="color:var(--accent-green)" id="stat-reviewed">-</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">未審閱</div>
+          <div class="stat-card" id="stat-unreviewed-card" onclick="toggleUnreviewedList()" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">未審閱 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent-yellow)" id="stat-unreviewed">-</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">有評語</div>
             <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
+          </div>
+        </div>
+        <div id="unreviewed-list-panel" style="display:none;margin-bottom:16px">
+          <div class="card" style="border-left:3px solid var(--accent-yellow);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-yellow);margin-bottom:10px">📋 本月未審閱名單</div>
+            <div id="unreviewed-names" style="display:flex;flex-wrap:wrap;gap:6px;font-size:13px"></div>
           </div>
         </div>
         <div class="card" style="margin-bottom:20px">
@@ -1475,6 +1481,12 @@ async function loadTeacherDashboard() {
   document.getElementById('stat-reviewed').textContent = reviewed;
   document.getElementById('stat-unreviewed').textContent = unreviewed;
   document.getElementById('stat-commented').textContent = commented;
+  // 未審閱名單（供點擊展開）
+  const unreviewedJournals = activeJournals.filter(j => !j.teacherReviewed);
+  window._unreviewedList = unreviewedJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`);
+  // 重設展開狀態
+  const panel = document.getElementById('unreviewed-list-panel');
+  if (panel) panel.style.display = 'none';
   await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
   const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
   const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id)).map(d => d.data().name);
@@ -1483,6 +1495,24 @@ async function loadTeacherDashboard() {
     el.innerHTML = '<span style="color:var(--accent-green)">✅ 本月所有學生皆已繳交！</span>';
   } else {
     el.innerHTML = missingStudents.map(n => `<span class="badge badge-red" style="margin:3px">${n}</span>`).join('');
+  }
+}
+
+function toggleUnreviewedList() {
+  const panel = document.getElementById('unreviewed-list-panel');
+  const namesEl = document.getElementById('unreviewed-names');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none';
+  if (isHidden) {
+    const list = window._unreviewedList || [];
+    if (list.length === 0) {
+      namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 本月所有已繳月記均已審閱！</span>';
+    } else {
+      namesEl.innerHTML = list.map(n => `<span style="background:rgba(234,179,8,0.12);color:var(--accent-yellow);border:1px solid rgba(234,179,8,0.3);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+    }
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
   }
 }
 
