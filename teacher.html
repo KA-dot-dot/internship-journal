@@ -606,7 +606,7 @@ tr:last-child td { border-bottom: none; }
               <div class="form-group" style="margin-bottom:0"><label>結束日期</label><input type="date" id="stats-date-end"></div>
               <div style="position:relative;flex:1 1 180px;min-width:180px">
                 <label>公司</label>
-                <button id="company-filter-btn" onclick="toggleCompanyFilter(event)" class="btn btn-secondary btn-sm" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center">
+                <button id="company-filter-btn" onclick="toggleCompanyFilter(event)" class="btn btn-secondary" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;font-size:14px">
                   <span id="company-filter-label">🏭 全選所有公司</span><span id="company-filter-arrow">▾</span>
                 </button>
                 <div id="company-filter-panel" class="company-filter-panel hidden">
@@ -640,7 +640,7 @@ tr:last-child td { border-bottom: none; }
                 </div>
                 <div class="card">
                   <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工距離</div>
-                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">依公司勾選同步更新，以各公司工作紀錄距離平均後分桶統計</div>
+                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">依公司勾選同步更新，以各公司工作紀錄距離平均後分桶統計｜⚠️ 距離為直線距離（km），非實際行車里程</div>
                   <div id="distance-chart" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📏</div><p>查詢後顯示</p></div></div>
                   <div id="distance-company-detail" style="margin-top:14px"></div>
                 </div>
@@ -2396,7 +2396,7 @@ function renderLocationDetailTable(journals, selectedCompanies) {
         <span>🏭 ${escapeHtml(company)}</span><span>${rows.length} 筆 ▾</span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
-        <table><thead><tr><th>座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(km)</th></tr></thead><tbody>
+        <table><thead><tr><th>座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(直線km)</th></tr></thead><tbody>
           ${rows.map(r => `<tr><td>${escapeHtml(r.seatNo)}</td><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(r.date || '-')}</td><td>${escapeHtml(r.address)}</td><td>${escapeHtml(r.distance ?? '-')}</td></tr>`).join('')}
         </tbody></table>
       </div>
