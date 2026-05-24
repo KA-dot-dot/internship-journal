@@ -563,6 +563,18 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-students" class="hidden fade-in">
         <div class="page-title">👥 學生管理</div>
         <div class="page-subtitle">管理學生基本資料與實習公司</div>
+        <div class="card" style="margin-bottom:16px">
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0;min-width:220px">
+              <label>管理學期</label>
+              <select id="student-term-select" onchange="onStudentTermChanged()"></select>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="copyPreviousTermRoster()">複製上一學期名單</button>
+            <button class="btn btn-primary btn-sm" onclick="activateSelectedTermRoster()">設為目前登入名單</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSelectedSemesterData()">刪除此學期資料</button>
+          </div>
+          <div id="student-term-status" style="margin-top:10px;font-size:12px;color:var(--text2)">載入中...</div>
+        </div>
         <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="openAddStudentModal()">➕ 新增學生</button>
           <button class="btn btn-secondary" onclick="openImportModal()">📥 批次匯入</button>
@@ -1058,6 +1070,8 @@ let currentUser = null; // { role:'teacher', uid, name, email }
 let db, firebase_funcs;
 let _currentCommentJournal = null;
 let _batchReviewJournals = [];
+let _activeRosterSemester = null;
+let _studentTermInitialized = false;
 
 // ===== 學校網域限制 =====
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
@@ -1136,6 +1150,290 @@ function populateSemesterSelects(selectId) {
   el.innerHTML = sems.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
   const cur = getCurrentSemester();
   if (sems.find(s => s.key === cur)) el.value = cur;
+}
+
+
+const TERM_ROSTER_PREFIX = 'termRoster_';
+const ACTIVE_TERM_SETTING_ID = 'activeSemester';
+
+function semesterLabel(semKey) {
+  const [y, half] = String(semKey || '').split('-').map(Number);
+  return y && half ? `${y}學年第${half}學期` : String(semKey || '');
+}
+
+function previousSemesterKey(semKey) {
+  const [y, half] = String(semKey || '').split('-').map(Number);
+  if (!y || !half) return '';
+  return half === 2 ? `${y}-1` : `${y - 1}-2`;
+}
+
+function termRosterDocId(semKey) {
+  return TERM_ROSTER_PREFIX + semKey;
+}
+
+function getSelectedStudentSemester() {
+  return document.getElementById('student-term-select')?.value || getCurrentSemester();
+}
+
+function normalizeRosterStudent(s, semester = '') {
+  const seatNo = String(s.seatNo || s.id || '').trim().padStart(2, '0');
+  return {
+    seatNo,
+    id: seatNo,
+    studentId: String(s.studentId || '').trim(),
+    name: String(s.name || s.studentName || '').trim(),
+    company: String(s.company || '').trim(),
+    email: normalizeEmail(s.email || ''),
+    semester: semester || s.semester || ''
+  };
+}
+
+async function getActiveRosterSemester() {
+  if (_activeRosterSemester) return _activeRosterSemester;
+  const { doc, getDoc } = firebase_funcs;
+  try {
+    const snap = await getDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID));
+    _activeRosterSemester = snap.exists() && snap.data().semester ? snap.data().semester : getCurrentSemester();
+  } catch(e) {
+    _activeRosterSemester = getCurrentSemester();
+  }
+  return _activeRosterSemester;
+}
+
+async function setActiveRosterSemester(semester) {
+  const { doc, setDoc } = firebase_funcs;
+  _activeRosterSemester = semester;
+  await setDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID), {
+    semester,
+    semesterLabel: semesterLabel(semester),
+    updatedAt: new Date().toISOString(),
+    updatedBy: currentUser?.email || ''
+  }, { merge: true });
+}
+
+async function loadRootRoster() {
+  const { collection, getDocs } = firebase_funcs;
+  const [stuSnap, bindSnap] = await Promise.all([
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'studentBindings'))
+  ]);
+  const bindMap = {};
+  bindSnap.docs.forEach(d => {
+    const b = d.data();
+    if (b.seatNo) bindMap[String(b.seatNo).padStart(2, '0')] = { docId: d.id, email: normalizeEmail(b.email || '') };
+  });
+  return stuSnap.docs.map(d => {
+    const s = d.data();
+    const seatNo = String(s.seatNo || d.id).padStart(2, '0');
+    return normalizeRosterStudent({ ...s, seatNo, email: bindMap[seatNo]?.email || '' });
+  }).sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+}
+
+async function saveTermRosterSnapshot(semester, roster) {
+  const { doc, setDoc } = firebase_funcs;
+  const students = (roster || [])
+    .map(s => normalizeRosterStudent(s, semester))
+    .filter(s => s.seatNo && s.name)
+    .sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+  await setDoc(doc(db, 'settings', termRosterDocId(semester)), {
+    semester,
+    semesterLabel: semesterLabel(semester),
+    students,
+    updatedAt: new Date().toISOString(),
+    updatedBy: currentUser?.email || ''
+  }, { merge: true });
+  return students;
+}
+
+async function loadTermRoster(semester, options = {}) {
+  const { fallbackRoot = false } = options;
+  const { doc, getDoc } = firebase_funcs;
+  try {
+    const snap = await getDoc(doc(db, 'settings', termRosterDocId(semester)));
+    if (snap.exists()) {
+      const students = Array.isArray(snap.data().students) ? snap.data().students : [];
+      return students.map(s => normalizeRosterStudent(s, semester)).sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+    }
+  } catch(e) {
+    console.warn('讀取學期名單快照失敗', semester, e);
+  }
+  if (fallbackRoot) {
+    const root = await loadRootRoster();
+    return root.map(s => ({ ...s, semester }));
+  }
+  return [];
+}
+
+async function getRosterForSelectedTerm() {
+  const semester = getSelectedStudentSemester();
+  const active = await getActiveRosterSemester();
+  return loadTermRoster(semester, { fallbackRoot: semester === active });
+}
+
+async function updateSelectedTermSnapshot(mutator) {
+  const semester = getSelectedStudentSemester();
+  const active = await getActiveRosterSemester();
+  const roster = await loadTermRoster(semester, { fallbackRoot: semester === active });
+  const next = mutator([...roster]).map(s => normalizeRosterStudent(s, semester));
+  await saveTermRosterSnapshot(semester, next);
+  return next;
+}
+
+async function syncActiveRootFromRoster(semester, roster) {
+  const { collection, doc, getDocs, setDoc, deleteDoc } = firebase_funcs;
+  const students = (roster || []).map(s => normalizeRosterStudent(s, semester)).filter(s => s.seatNo && s.name);
+  const [oldStuSnap, oldBindSnap] = await Promise.all([
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'studentBindings'))
+  ]);
+  await Promise.all([
+    ...oldStuSnap.docs.map(d => deleteDoc(d.ref)),
+    ...oldBindSnap.docs.map(d => deleteDoc(d.ref))
+  ]);
+  for (const s of students) {
+    await setDoc(doc(db, 'students', s.seatNo), {
+      seatNo: s.seatNo,
+      studentId: s.studentId || '',
+      name: s.name || '',
+      company: s.company || '',
+      updatedAt: new Date().toISOString()
+    });
+    if (s.email) {
+      await setDoc(doc(db, 'studentBindings', emailToDocId(s.email)), {
+        email: s.email,
+        seatNo: s.seatNo,
+        studentName: s.name || '',
+        boundAt: new Date().toISOString(),
+        boundBy: currentUser?.email || ''
+      }, { merge: true });
+    }
+  }
+}
+
+async function initStudentTermControls() {
+  const sel = document.getElementById('student-term-select');
+  if (!sel) return;
+  if (!sel.options.length) {
+    sel.innerHTML = getSemesters(6).map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  }
+  const active = await getActiveRosterSemester();
+  if (!_studentTermInitialized) {
+    sel.value = getSemesters(6).some(s => s.key === active) ? active : getCurrentSemester();
+    _studentTermInitialized = true;
+  }
+  updateStudentTermStatus();
+}
+
+async function updateStudentTermStatus() {
+  const el = document.getElementById('student-term-status');
+  if (!el) return;
+  const selected = getSelectedStudentSemester();
+  const active = await getActiveRosterSemester();
+  const roster = await loadTermRoster(selected, { fallbackRoot: selected === active });
+  const isActive = selected === active;
+  el.innerHTML = `目前登入名單：<strong>${escapeHtml(semesterLabel(active))}</strong>　｜　正在管理：<strong>${escapeHtml(semesterLabel(selected))}</strong>　｜　名單 <strong>${roster.length}</strong> 人${isActive ? '　<span class="badge badge-green">登入中</span>' : ''}`;
+}
+
+async function onStudentTermChanged() {
+  await updateStudentTermStatus();
+  await loadStudentsTable();
+}
+
+async function copyPreviousTermRoster() {
+  const target = getSelectedStudentSemester();
+  const source = previousSemesterKey(target);
+  if (!source) return toast('找不到上一學期', 'error');
+  const active = await getActiveRosterSemester();
+  const roster = await loadTermRoster(source, { fallbackRoot: source === active });
+  if (!roster.length) return toast(`${semesterLabel(source)} 沒有可複製的學生名單`, 'error');
+  if (!confirm(`將 ${semesterLabel(source)} 的 ${roster.length} 位學生複製到 ${semesterLabel(target)}？\n現有 ${semesterLabel(target)} 名單會被覆蓋。`)) return;
+  showLoading();
+  await saveTermRosterSnapshot(target, roster.map(s => ({ ...s, semester: target })));
+  hideLoading();
+  toast('✅ 已複製上一學期名單', 'success');
+  await updateStudentTermStatus();
+  await loadStudentsTable();
+}
+
+async function activateSelectedTermRoster() {
+  const semester = getSelectedStudentSemester();
+  const roster = await loadTermRoster(semester, { fallbackRoot: true });
+  if (!roster.length) return toast('此學期沒有學生名單，請先新增或匯入', 'error');
+  if (!confirm(`將 ${semesterLabel(semester)} 設為目前可登入學生名單？\n這會取代目前 students / studentBindings 內容，但不會刪除任何月記。`)) return;
+  showLoading();
+  await saveTermRosterSnapshot(semester, roster);
+  await syncActiveRootFromRoster(semester, roster);
+  await setActiveRosterSemester(semester);
+  hideLoading();
+  toast('✅ 已設為目前登入名單', 'success');
+  await updateStudentTermStatus();
+  await loadStudentsTable();
+  loadExportStudents();
+}
+
+async function deleteSelectedSemesterData() {
+  const semester = getSelectedStudentSemester();
+  const typed = prompt(`將刪除 ${semesterLabel(semester)} 的 Firestore 資料：學期名單、截止日、該學期所有月記。\nCloudinary 工作照片需手動刪除。\n\n若確定刪除，請輸入：DELETE ${semester}`);
+  if (typed !== `DELETE ${semester}`) return toast('已取消刪除', 'info');
+  const { collection, collectionGroup, doc, getDocs, deleteDoc } = firebase_funcs;
+  showLoading();
+  try {
+    const active = await getActiveRosterSemester();
+    const [jSnap, dlSnap] = await Promise.all([
+      getDocs(collectionGroup(db, 'journals')),
+      getDocs(collection(db, 'deadlines'))
+    ]);
+    const journalDocs = userJournalDocs(jSnap).filter(d => d.data().semester === semester);
+    const deadlineDocs = dlSnap.docs.filter(d => d.id.startsWith(semester + '-') || d.data().semester === semester);
+    const deletes = [
+      ...journalDocs.map(d => deleteDoc(d.ref)),
+      ...deadlineDocs.map(d => deleteDoc(d.ref)),
+      deleteDoc(doc(db, 'settings', termRosterDocId(semester)))
+    ];
+    if (active === semester) {
+      const [stuSnap, bindSnap] = await Promise.all([
+        getDocs(collection(db, 'students')),
+        getDocs(collection(db, 'studentBindings'))
+      ]);
+      deletes.push(...stuSnap.docs.map(d => deleteDoc(d.ref)));
+      deletes.push(...bindSnap.docs.map(d => deleteDoc(d.ref)));
+      _activeRosterSemester = null;
+      deletes.push(deleteDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID)));
+    }
+    await Promise.all(deletes);
+    localStorage.removeItem(JOURNAL_CACHE_KEY);
+    hideLoading();
+    toast(`✅ 已刪除 ${semesterLabel(semester)}：月記 ${journalDocs.length} 筆、截止日 ${deadlineDocs.length} 筆`, 'success');
+    await updateStudentTermStatus();
+    await loadStudentsTable();
+    loadDeadlinesTable();
+  } catch(e) {
+    hideLoading();
+    toast('刪除學期失敗：' + e.message, 'error');
+  }
+}
+
+async function loadRosterStudentsForSemesters(semesters, journals = []) {
+  const unique = [...new Set((semesters || []).filter(Boolean))];
+  const active = await getActiveRosterSemester();
+  const groups = await Promise.all(unique.map(async sem => {
+    let roster = await loadTermRoster(sem, { fallbackRoot: sem === active });
+    if (!roster.length) {
+      const bySeat = {};
+      journals.filter(j => j.semester === sem).forEach(j => {
+        const seatNo = String(j.seatNo || '').padStart(2, '0');
+        if (!seatNo || bySeat[seatNo]) return;
+        bySeat[seatNo] = normalizeRosterStudent({
+          seatNo,
+          name: j.studentName || '',
+          company: j.company || ''
+        }, sem);
+      });
+      roster = Object.values(bySeat);
+    }
+    return roster.map(s => normalizeRosterStudent(s, sem));
+  }));
+  return groups.flat().sort((a,b) => (a.semester || '').localeCompare(b.semester || '') || a.seatNo.localeCompare(b.seatNo));
 }
 
 // ============ Toast ============
@@ -1297,7 +1595,7 @@ function showPage(pageId) {
   });
   const loaders = {
     't-dashboard': loadTeacherDashboard,
-    't-students': loadStudentsTable,
+    't-students': async () => { await initStudentTermControls(); await loadStudentsTable(); },
     't-deadline': loadDeadlinesTable,
     't-stats': () => { initStatsDateSelects(); ensureStatsCompanyFilterReady(); },
     't-journals': () => { initStatsDateSelects(); },
@@ -1582,69 +1880,56 @@ function viewStudentJournals(seatNo, name) {
 
 async function loadStudentsTable() {
   showLoading();
-  const { collection, collectionGroup, getDocs } = firebase_funcs;
-  const [stuSnap, bindSnap] = await Promise.all([
-    getDocs(collection(db, 'students')),
-    getDocs(collection(db, 'studentBindings'))
-  ]);
-  hideLoading();
-
-  // 建立 seatNo → binding 對應表
-  const bindMap = {};
-  bindSnap.docs.forEach(d => {
-    const b = d.data();
-    if (b.seatNo) bindMap[b.seatNo] = { docId: d.id, email: b.email };
-  });
-
-  const rows = stuSnap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
-    const s = d.data();
-    const seatNo = d.id;
-    const binding = bindMap[seatNo];
-    const safeName = (s.name||'').replace(/'/g, "\\'");
-
-    let googleCell;
-    if (binding) {
-      googleCell = `<div style="display:flex;align-items:center;gap:6px">
-        <span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${binding.email}">✅ ${binding.email}</span>
-      </div>`;
-    } else {
-      googleCell = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span style="color:var(--text3);font-size:12px">未綁定</span>
-        <input type="text" id="bind-inline-${seatNo}" placeholder="輸入 Google email" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text)">
-        <button class="btn btn-primary btn-sm" onclick="bindStudentInline('${seatNo}','${safeName}')">綁定</button>
-      </div>`;
-    }
-
-    return `<tr>
-      <td><strong>${s.seatNo}</strong></td>
-      <td>${s.name}</td>
-      <td>${s.company||'-'}</td>
-      <td>${googleCell}</td>
-      <td>
-        <button class="btn btn-secondary btn-sm" onclick="editStudent('${seatNo}')">編輯</button>
-        <button class="btn btn-secondary btn-sm" onclick="viewStudentJournals('${seatNo}','${safeName}')">📖 月記</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteStudent('${seatNo}','${s.name}')">刪除</button>
-      </td>
-    </tr>`;
-  }).join('');
-  document.getElementById('students-table-body').innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">尚無學生資料</td></tr>';
+  try {
+    await initStudentTermControls();
+    const semester = getSelectedStudentSemester();
+    const roster = await getRosterForSelectedTerm();
+    hideLoading();
+    const rows = roster.map(s => {
+      const seatNo = s.seatNo;
+      const safeSeat = jsArg(seatNo);
+      const safeNameArg = jsArg(s.name || '');
+      const googleCell = s.email
+        ? `<span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.email)}">✅ ${escapeHtml(s.email)}</span>`
+        : `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="color:var(--text3);font-size:12px">未綁定</span>
+          <input type="text" id="bind-inline-${escapeHtml(seatNo)}" placeholder="輸入 Google email" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="bindStudentInline(${safeSeat},${safeNameArg})">綁定</button>
+        </div>`;
+      return `<tr>
+        <td><strong>${escapeHtml(seatNo)}</strong></td>
+        <td>${escapeHtml(s.name)}</td>
+        <td>${escapeHtml(s.company || '-')}</td>
+        <td>${googleCell}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="editStudent(${safeSeat})">編輯</button>
+          <button class="btn btn-secondary btn-sm" onclick="viewStudentJournals(${safeSeat},${safeNameArg})">📖 月記</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteStudent(${safeSeat},${safeNameArg})">刪除</button>
+        </td>
+      </tr>`;
+    }).join('');
+    document.getElementById('students-table-body').innerHTML = rows || `<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">${escapeHtml(semesterLabel(semester))} 尚無學生資料</td></tr>`;
+    await updateStudentTermStatus();
+  } catch(e) {
+    hideLoading();
+    toast('載入學生名單失敗：' + e.message, 'error');
+  }
 }
 
 async function bindStudentInline(seatNo, name) {
   const emailEl = document.getElementById('bind-inline-' + seatNo);
   if (!emailEl) return;
-  const email = emailEl.value.trim().toLowerCase();
+  const email = normalizeEmail(emailEl.value);
   if (!email) return toast('請輸入學生 email', 'error');
   if (!email.endsWith('@' + SCHOOL_DOMAIN)) return toast(`學生 email 須為 @${SCHOOL_DOMAIN}`, 'error');
   showLoading();
   try {
-    const { doc, setDoc } = firebase_funcs;
-    await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
-      email, seatNo,
-      studentName: name,
-      boundAt: new Date().toISOString(),
-      boundBy: currentUser.email
-    });
+    const semester = getSelectedStudentSemester();
+    const active = await getActiveRosterSemester();
+    const next = await updateSelectedTermSnapshot(roster => roster.map(s =>
+      s.seatNo === seatNo ? { ...s, email, studentName: name } : s
+    ));
+    if (semester === active) await syncActiveRootFromRoster(semester, next);
     hideLoading();
     toast(`✅ 已綁定 ${name}（${seatNo}）→ ${email}`, 'success');
     loadStudentsTable();
@@ -1671,17 +1956,15 @@ function openAddStudentModal() {
 }
 
 async function editStudent(seatNo) {
-  const { collection, collectionGroup, doc, getDoc, getDocs, query, where } = firebase_funcs;
-  const snap = await getDoc(doc(db, 'students', seatNo));
-  if (!snap.exists()) return;
-  const s = snap.data();
+  const roster = await getRosterForSelectedTerm();
+  const s = roster.find(x => x.seatNo === seatNo);
+  if (!s) return;
   document.getElementById('add-seat').value = s.seatNo;
   document.getElementById('add-student-id').value = s.studentId || '';
-  document.getElementById('add-name').value = s.name;
+  document.getElementById('add-name').value = s.name || '';
   document.getElementById('add-company').value = s.company || '';
-  const bindSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)));
   const googleEl = document.getElementById('add-google-email');
-  if (googleEl) googleEl.value = bindSnap.empty ? '' : (bindSnap.docs[0].data().email || '');
+  if (googleEl) googleEl.value = s.email || '';
   document.getElementById('add-student-modal').dataset.editId = seatNo;
   openModal('add-student-modal');
 }
@@ -1690,84 +1973,58 @@ async function saveStudent() {
   const seat = document.getElementById('add-seat').value.trim().padStart(2,'0');
   const name = document.getElementById('add-name').value.trim();
   if (!seat || !name) return toast('座號和姓名為必填', 'error');
-  const googleEmail = (document.getElementById('add-google-email')?.value || '').trim().toLowerCase();
+  const googleEmail = normalizeEmail(document.getElementById('add-google-email')?.value || '');
   if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
-  const data = {
-    seatNo: seat, studentId: document.getElementById('add-student-id').value.trim(),
-    name, company: document.getElementById('add-company').value.trim(),
-    updatedAt: new Date().toISOString()
-  };
+  const semester = getSelectedStudentSemester();
+  const active = await getActiveRosterSemester();
+  const data = normalizeRosterStudent({
+    seatNo: seat,
+    studentId: document.getElementById('add-student-id').value.trim(),
+    name,
+    company: document.getElementById('add-company').value.trim(),
+    email: googleEmail
+  }, semester);
   showLoading();
-  const { collection, collectionGroup, doc, getDoc, setDoc, deleteDoc, getDocs, query, where } = firebase_funcs;
-  const existingStudentSnap = await getDoc(doc(db, 'students', seat));
-  const bindingSnap = await getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seat)));
-  const oldEmails = bindingSnap.docs.map(d => (d.data().email || '').toLowerCase()).filter(Boolean);
-  let clearOldJournals = false;
-
-  if (existingStudentSnap.exists()) {
-    const old = existingStudentSnap.data();
-    const oldStudentId = (old.studentId || '').trim();
-    const newStudentId = (data.studentId || '').trim();
-    const oldName = (old.name || '').trim();
-    const isDifferentPerson =
-      (oldName && oldName !== name) ||
-      (oldStudentId && newStudentId && oldStudentId !== newStudentId) ||
-      (googleEmail && oldEmails.length && !oldEmails.includes(googleEmail));
-
-    if (isDifferentPerson) {
-      const journalSnap = await getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)));
-      hideLoading();
-      if (userJournalDocs(journalSnap).length > 0) {
-        const ok = confirm(
-          '座號 ' + seat + ' 原本是「' + (oldName || '舊學生') + '」，現在要改成「' + name + '」。\n\n' +
-          '系統找到此座號還有 ' + userJournalDocs(journalSnap).length + ' 筆舊月記。為避免舊月記出現在新學生帳號下，建議刪除舊月記後再儲存。\n\n' +
-          '按「確定」：刪除舊月記並儲存新學生\n按「取消」：不儲存，先返回檢查'
-        );
-        if (!ok) return toast('已取消儲存，舊月記未刪除', 'info');
-        clearOldJournals = true;
-      }
-      showLoading();
-    }
-  }
-
-  if (clearOldJournals) {
-    const journalSnap = await getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seat)));
-    await Promise.all(userJournalDocs(journalSnap).map(d => deleteDoc(d.ref)));
-  }
-
-  await setDoc(doc(db, 'students', seat), data);
-  const staleDeletes = bindingSnap.docs
-    .filter(d => d.data().email !== googleEmail)
-    .map(d => deleteDoc(d.ref));
-  await Promise.all(staleDeletes);
-  if (googleEmail) {
-    await setDoc(doc(db, 'studentBindings', googleEmail.replace(/[@.]/g, '_')), {
-      email: googleEmail, seatNo: seat, studentName: name,
-      boundAt: new Date().toISOString(), boundBy: currentUser.email
+  try {
+    const next = await updateSelectedTermSnapshot(roster => {
+      const others = roster.filter(s => s.seatNo !== seat);
+      return [...others, data].sort((a,b) => a.seatNo.localeCompare(b.seatNo));
     });
+    if (semester === active) await syncActiveRootFromRoster(semester, next);
+    hideLoading();
+    closeModal('add-student-modal');
+    toast('學生資料已儲存', 'success');
+    loadStudentsTable();
+    loadExportStudents();
+  } catch(e) {
+    hideLoading();
+    toast('儲存失敗：' + e.message, 'error');
   }
-  hideLoading();
-  closeModal('add-student-modal');
-  toast('學生資料已儲存', 'success');
-  loadStudentsTable();
 }
 async function deleteStudent(seatNo, name) {
-  if (!confirm(`確定要刪除學生「${name}」嗎？`)) return;
-  const { collection, collectionGroup, doc, deleteDoc, getDocs, query, where } = firebase_funcs;
+  const semester = getSelectedStudentSemester();
+  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n只會刪除此學期月記，不會刪其他學期舊資料。`)) return;
+  const { collectionGroup, getDocs, deleteDoc } = firebase_funcs;
   showLoading();
-  const [journalSnap, bindingSnap] = await Promise.all([
-    getDocs(query(collectionGroup(db, 'journals'), where('seatNo', '==', seatNo))),
-    getDocs(query(collection(db, 'studentBindings'), where('seatNo', '==', seatNo)))
-  ]);
-  // ★ 2026-05-23 修正：同時刪除新路徑(/users/{uid}/journals/)與舊路徑(/journals/)的月記
-  await Promise.all([
-    ...journalSnap.docs.map(d => deleteDoc(d.ref)),   // 新舊路徑全刪
-    ...bindingSnap.docs.map(d => deleteDoc(d.ref)),
-    deleteDoc(doc(db, 'students', seatNo))
-  ]);
-  hideLoading();
-  toast(`✅ 已刪除學生「${name}」，清除 ${journalSnap.size} 筆月記、${bindingSnap.size} 筆帳號綁定`, 'success');
-  loadStudentsTable();
+  try {
+    const active = await getActiveRosterSemester();
+    const next = await updateSelectedTermSnapshot(roster => roster.filter(s => s.seatNo !== seatNo));
+    const journalSnap = await getDocs(collectionGroup(db, 'journals'));
+    const termJournalDocs = userJournalDocs(journalSnap).filter(d => {
+      const j = d.data();
+      return j.seatNo === seatNo && j.semester === semester;
+    });
+    await Promise.all(termJournalDocs.map(d => deleteDoc(d.ref)));
+    if (semester === active) await syncActiveRootFromRoster(semester, next);
+    hideLoading();
+    toast(`✅ 已刪除「${name}」於 ${semesterLabel(semester)} 的資料，清除 ${termJournalDocs.length} 筆月記`, 'success');
+    loadStudentsTable();
+    loadTeacherJournals(true);
+    loadExportStudents();
+  } catch(e) {
+    hideLoading();
+    toast('刪除學生失敗：' + e.message, 'error');
+  }
 }
 
 function openImportModal() {
@@ -1780,11 +2037,8 @@ async function importStudents() {
   const raw = document.getElementById('import-data').value.trim();
   if (!raw) return toast('請貼上資料', 'error');
   const lines = raw.split('\n').filter(l => l.trim());
-  const { doc, setDoc } = firebase_funcs;
   const firstLine = lines[0];
-  // 優先用 Tab 分隔（Excel 複製預設是 Tab）
   const sep = firstLine.includes('\t') ? '\t' : ',';
-  // 排除標題行（第一欄包含任一關鍵字）
   const HEADER_KEYWORDS = ['姓名','座號','學號','名稱','公司','錄取','實習','Google'];
   const dataLines = lines.filter(l => {
     const first = l.split(sep)[0].trim();
@@ -1792,44 +2046,51 @@ async function importStudents() {
   });
   showLoading();
   let ok = 0, bindOk = 0, errors = [];
+  const semester = getSelectedStudentSemester();
+  const imported = [];
   for (const line of dataLines) {
-    // Tab 分隔時用 split(\t)，保留公司名稱中的逗號
     const cols = line.split(sep).map(s => s.trim());
-    // 欄位：姓名、座號、學號、實習公司、Google帳號綁定（Google帳號可留空）
     const name = cols[0] || '';
     const seat = cols[1] || '';
     const sid = cols[2] || '';
     const emailIdx = cols.findIndex((v, idx) => idx >= 4 && v.includes('@'));
-    const email = emailIdx >= 0 ? cols[emailIdx].toLowerCase() : '';
+    const email = emailIdx >= 0 ? normalizeEmail(cols[emailIdx]) : '';
     const companyCols = emailIdx >= 0 ? cols.slice(3, emailIdx) : cols.slice(3);
     const company = companyCols.join(sep === '\t' ? '' : ',').trim();
     if (!seat || !name) { errors.push('跳過（資料不足）：' + line.slice(0,30)); continue; }
     const seatNo = String(parseInt(seat) || 0).padStart(2,'0');
-    await setDoc(doc(db, 'students', seatNo), {
-      seatNo, studentId: sid, name, company,
-      updatedAt: new Date().toISOString()
-    });
-    if (email) {
-      if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
-        errors.push(`${seatNo} ${name} 帳號非學校網域：${email}`);
-      } else {
-        await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
-          email, seatNo, studentName: name,
-          boundAt: new Date().toISOString(), boundBy: currentUser.email
-        });
-        bindOk++;
-      }
+    if (email && !email.endsWith('@' + SCHOOL_DOMAIN)) {
+      errors.push(`${seatNo} ${name} 帳號非學校網域：${email}`);
     }
+    imported.push(normalizeRosterStudent({
+      seatNo,
+      studentId: sid,
+      name,
+      company,
+      email: email && email.endsWith('@' + SCHOOL_DOMAIN) ? email : ''
+    }, semester));
+    if (email && email.endsWith('@' + SCHOOL_DOMAIN)) bindOk++;
     ok++;
   }
-  hideLoading();
-  const resultEl = document.getElementById('import-result');
-  if (resultEl) {
-    resultEl.innerHTML = `<div style="color:var(--accent-green)">✅ 成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}</div>` +
-      (errors.length ? `<div style="color:var(--accent-red);margin-top:4px">${errors.map(e=>`⚠️ ${e}`).join('<br>')}</div>` : '');
+  try {
+    const active = await getActiveRosterSemester();
+    const next = await updateSelectedTermSnapshot(roster => {
+      const importedSeats = new Set(imported.map(s => s.seatNo));
+      return [...roster.filter(s => !importedSeats.has(s.seatNo)), ...imported].sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+    });
+    if (semester === active) await syncActiveRootFromRoster(semester, next);
+    hideLoading();
+    const resultEl = document.getElementById('import-result');
+    if (resultEl) {
+      resultEl.innerHTML = `<div style="color:var(--accent-green)">✅ 成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}</div>` +
+        (errors.length ? `<div style="color:var(--accent-red);margin-top:4px">${errors.map(e=>`⚠️ ${escapeHtml(e)}`).join('<br>')}</div>` : '');
+    }
+    if (ok > 0) { toast(`成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}`, 'success'); loadStudentsTable(); loadExportStudents(); }
+    else toast('匯入失敗，請確認格式', 'error');
+  } catch(e) {
+    hideLoading();
+    toast('匯入失敗：' + e.message, 'error');
   }
-  if (ok > 0) { toast(`成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}`, 'success'); loadStudentsTable(); }
-  else toast('匯入失敗，請確認格式', 'error');
 }
 
 // ---- 截止日期 ----
@@ -1938,37 +2199,37 @@ async function loadSubmitStats() {
   const { start, end } = getStatsDateRange('submit-stats');
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   showLoading();
-  const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
-    getDocs(collection(db, 'students')),
+  const [jSnap, deadlineSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
   ]);
-  hideLoading();
-  const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
+  const allJournals = userJournalData(jSnap);
+  let journals = [...allJournals];
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   const monthSlots = getStatsMonthSlots(start, end, journals);
+  const students = await loadRosterStudentsForSemesters(monthSlots.map(s => s.sem), allJournals);
+  hideLoading();
   if (!monthSlots.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>請選擇日期區間後查詢</p></div>'; return; }
   const deadlineMap = buildDeadlineMap(deadlineSnap);
   const journalMap = {};
-  journals.forEach(j => { journalMap[`${j.seatNo}-${j.semester}-${j.month}`] = j; });
+  journals.forEach(j => { journalMap[`${j.semester}-${j.seatNo}-${j.month}`] = j; });
   const colCount = monthSlots.length + 1;
   const minWidth = Math.max(600, colCount * 72) + 'px';
   let html = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
   <div style="min-width:${minWidth}">
-  <div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))">
+  <div class="submit-grid" style="grid-template-columns:170px repeat(${monthSlots.length},minmax(64px,1fr))">
     <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
     <div class="submit-grid-header">姓名</div>
     ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
   </div>`;
   html += students.map(s => {
     const cells = monthSlots.map(slot => {
-      const j = journalMap[`${s.id}-${slot.sem}-${slot.month}`];
+      if (slot.sem !== s.semester) return '<div class="submit-cell" style="color:var(--text3)">-</div>';
+      const j = journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`];
       if (!j) return '<div class="submit-cell miss">✗</div>';
       return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
     }).join('');
-    return `<div class="submit-grid" style="grid-template-columns:140px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-name-cell">${s.seatNo} ${s.name}</div>${cells}</div>`;
+    return `<div class="submit-grid" style="grid-template-columns:170px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-name-cell">${escapeHtml(semesterLabel(s.semester).replace('學年',''))} ${escapeHtml(s.seatNo)} ${escapeHtml(s.name)}</div>${cells}</div>`;
   }).join('');
   html += '</div></div>';
   document.getElementById('submit-stats-content').innerHTML = html;
@@ -2143,22 +2404,22 @@ async function exportAllStatsExcel() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('export-stats');
   showLoading();
-  const [stuSnap, jSnap, deadlineSnap] = await Promise.all([
-    getDocs(collection(db, 'students')),
+  const [jSnap, deadlineSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
   ]);
-  hideLoading();
-  const students = stuSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.id.localeCompare(b.id));
-  const studentMap = {};
-  students.forEach(s => { studentMap[s.id] = s; });
-  let journals = userJournalData(jSnap).filter(j => studentMap[j.seatNo]);
+  const allJournals = userJournalData(jSnap);
+  let journals = [...allJournals];
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
-  journals.sort((a,b) => (a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0')));
+  journals.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
   const monthSlots = getStatsMonthSlots(start, end, journals);
+  const students = await loadRosterStudentsForSemesters(monthSlots.map(s => s.sem), allJournals);
+  hideLoading();
+  const studentMap = {};
+  students.forEach(s => { studentMap[`${s.semester}-${s.seatNo}`] = s; });
   const deadlineMap = buildDeadlineMap(deadlineSnap);
   const journalMap = {};
-  journals.forEach(j => { journalMap[`${j.seatNo}-${j.semester}-${j.month}`] = j; });
+  journals.forEach(j => { journalMap[`${j.semester}-${j.seatNo}-${j.month}`] = j; });
 
   const submitAoA = [
     ['符號說明', '✓：已繳', '▲：遲繳', '✗：未繳'],
@@ -2168,16 +2429,17 @@ async function exportAllStatsExcel() {
   students.forEach(s => {
     let submitted = 0;
     const cells = monthSlots.map(slot => {
-      const j = journalMap[`${s.id}-${slot.sem}-${slot.month}`];
+      const j = slot.sem === s.semester ? journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`] : null;
       if (j) submitted++;
       return statusSymbolForJournal(j, deadlineMap);
     });
-    submitAoA.push([s.seatNo || s.id, s.name || '', ...cells, `${submitted}/${monthSlots.length}`]);
+    const totalSlots = monthSlots.filter(slot => slot.sem === s.semester).length;
+    submitAoA.push([`${s.semester} ${s.seatNo}`, s.name || '', ...cells, `${submitted}/${totalSlots}`]);
   });
 
   const locationRows = [];
   journals.forEach(j => {
-    const s = studentMap[j.seatNo] || {};
+    const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
     (j.entries || []).forEach(e => {
       const address = (e.address || '').trim();
       if (!address) return;
@@ -2198,7 +2460,7 @@ async function exportAllStatsExcel() {
   const salaryRows = journals
     .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
     .map(j => {
-      const s = studentMap[j.seatNo] || {};
+      const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
       return {
         座號: j.seatNo || '',
         姓名: s.name || j.studentName || '',
@@ -2220,7 +2482,7 @@ async function exportAllStatsExcel() {
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
   journals.filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary))).forEach(j => {
-    const c = (studentMap[j.seatNo]?.company) || j.company || '未填寫';
+    const c = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
     companyAggMap[c].studentSet.add(j.seatNo);
     companyAggMap[c].salaries.push(Number(j.salary));
@@ -2262,8 +2524,8 @@ async function exportAllStatsExcel() {
   salaryStudentList.filter(s => highThreshold && s.avg > highThreshold).sort((a,b)=>b.avg-a.avg).forEach(s => {
     salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
   });
-  journals.filter(j => studentMap[j.seatNo] && (j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)))).forEach(j => {
-    const s = studentMap[j.seatNo] || {};
+  journals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))).forEach(j => {
+    const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
     salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:s.name || j.studentName || '', 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白` });
   });
   salaryCompanyList.map(c => {
@@ -2277,11 +2539,11 @@ async function exportAllStatsExcel() {
     salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:c.name, 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
   });
   // ── 工作表 4：月記清單（含評語、已審閱）──
-  let allJournals = userJournalData(jSnap).filter(j => studentMap[j.seatNo]);
-  if (start && end) allJournals = allJournals.filter(j => journalMonthInRange(j, start, end));
-  const journalListRows = allJournals.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
+  let journalListSource = userJournalData(jSnap);
+  if (start && end) journalListSource = journalListSource.filter(j => journalMonthInRange(j, start, end));
+  const journalListRows = journalListSource.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
     座號: j.seatNo || '',
-    姓名: (studentMap[j.seatNo]?.name) || j.studentName || '',
+    姓名: (studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || '',
     學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
     月份: `${j.month}月`,
     繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
@@ -2334,16 +2596,15 @@ async function loadLocationStats() {
   hideLoading();
   const studentMap = {};
   stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
-  const activeSeatNos = new Set(Object.keys(studentMap));
   let journals = userJournalDocs(snap).map(d => {
     const data = d.data();
     const s = studentMap[data.seatNo] || {};
     return {
       ...data,
-      studentName: s.name || data.studentName || '',
-      company: s.company || data.company || '未填寫'
+      studentName: data.studentName || s.name || '',
+      company: data.company || s.company || '未填寫'
     };
-  }).filter(j => activeSeatNos.has(j.seatNo));
+  });
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
 
   // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
@@ -2679,11 +2940,10 @@ async function loadSalaryStats() {
   });
 
   let allActiveJournals = userJournalData(snap)
-    .filter(j => Object.prototype.hasOwnProperty.call(stuCompanyMap, j.seatNo))
     .map(j => ({
       ...j,
       studentName: j.studentName || stuInfoMap[j.seatNo]?.name || '',
-      company: getJournalCompany(j, stuCompanyMap)
+      company: j.company || getJournalCompany(j, stuCompanyMap)
     }));
   if (start && end) allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
 
@@ -2701,7 +2961,7 @@ async function loadSalaryStats() {
 }
 
 // ---- 月記總覽 ----
-// 從 Firestore 拉全量，回傳 journals 陣列（含 isDeletedStudent 過濾）
+// 從 Firestore 拉全量，保留舊學期與已不在目前名單中的月記
 async function fetchJournalsFromServer() {
   const { collection, collectionGroup } = firebase_funcs;
   const [snap, stuSnap] = await Promise.all([
@@ -2710,17 +2970,15 @@ async function fetchJournalsFromServer() {
   ]);
   const studentMap = {};
   stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
-  const journals = userJournalDocs(snap).map(d => {
+  return userJournalDocs(snap).map(d => {
     const j = d.data();
-    if (studentMap[j.seatNo]) return j;
+    const s = studentMap[j.seatNo] || {};
     return {
-      seatNo: j.seatNo || '', semester: j.semester || '', month: j.month || 0,
-      submittedAt: j.submittedAt || '', studentName: '已刪除學生',
-      company: '已刪除學生', reflection: '', entries: [],
-      salary: null, mentor: '', salaryPhoto: '', isDeletedStudent: true
+      ...j,
+      studentName: j.studentName || s.name || '已刪除學生',
+      company: j.company || s.company || '已刪除學生'
     };
   });
-  return journals.filter(j => !j.isDeletedStudent);
 }
 
 // 篩選 + 排序（在前端執行，不走網路）
@@ -2728,7 +2986,7 @@ function filterAndSortJournals(journals, startStr, endStr, search) {
   let result = [...journals];
   if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
-  result.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+  result.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
   return result;
 }
 
@@ -2870,12 +3128,8 @@ async function exportSemesterPDF() {
   const { collection, collectionGroup } = firebase_funcs;
   showLoading();
   try {
-    const [jSnap, stuSnap] = await Promise.all([
-      getDocsWithFallback(collectionGroup(db, 'journals'), '月記資料'),
-      getDocsWithFallback(collection(db, 'students'), '學生名單')
-    ]);
-    const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-    let journals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo));
+    const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '月記資料');
+    let journals = userJournalData(jSnap);
     if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
     journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
     if (!journals.length) return toast('無月記資料可匯出', 'error');
@@ -2894,12 +3148,7 @@ async function exportStudentPDF() {
   const { collection, collectionGroup } = firebase_funcs;
   showLoading();
   try {
-    const [jSnap, stuSnap] = await Promise.all([
-      getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料'),
-      getDocsWithFallback(collection(db, 'students'), '學生名單')
-    ]);
-    const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-    if (!activeSeatNos.has(seat)) return toast('該學生已不存在名單中', 'error');
+    const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料');
     const journals = userJournalData(jSnap)
       .filter(j => String(j.seatNo) === String(seat))
       .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
