@@ -3179,6 +3179,11 @@ function userJournalData(snapshot) {
   return userJournalDocs(snapshot).map(d => d.data());
 }
 async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
+  // ★ 快取競爭防護：快取未就緒時拒絕操作
+  if (!window._teacherJournalsCache) {
+    toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
+    return;
+  }
   const { doc, deleteDoc } = firebase_funcs;
   try {
     await deleteDoc(getTeacherJournalRef(seatNo, semester, month));
@@ -3222,6 +3227,11 @@ function toggleLocDetail(subId) {
 // ============================================================
 
 function openCommentModal(seatNo, semester, month) {
+  // ★ 快取競爭防護：快取未就緒時拒絕操作
+  if (!window._teacherJournalsCache) {
+    toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
+    return;
+  }
   const cachedJournal = findTeacherJournal(seatNo, semester, month);
   _currentCommentJournal = { seatNo, semester, month, ownerUid: cachedJournal?.ownerUid || "" };
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
