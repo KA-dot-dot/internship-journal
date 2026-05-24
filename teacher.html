@@ -243,7 +243,8 @@ tr:last-child td { border-bottom: none; }
 .submit-cell.miss { background: rgba(239,68,68,0.1); color: var(--accent-red); }
 .submit-cell.late { background: rgba(245,158,11,0.12); color: var(--accent-yellow); }
 .submit-cell.na { background: transparent; color: var(--text3); }
-.submit-name-cell { position: sticky; left: 0; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px; font-weight: 600; }
+.submit-name-cell { position: sticky; left: 55px; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px; font-weight: 600; }
+.submit-seat-cell { position: sticky; left: 0; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text2); padding: 6px; text-align: center; }
 
 .config-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
 .config-banner strong { color: var(--accent-yellow); }
@@ -567,7 +568,7 @@ tr:last-child td { border-bottom: none; }
           <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
             <div class="form-group" style="margin-bottom:0;min-width:220px">
               <label>管理學期</label>
-              <select id="student-term-select" onchange="onStudentTermChanged()"></select>
+              <select id="student-term-select" onchange="onStudentTermChanged()" style="padding:6px 14px;font-size:12px;width:auto;min-width:220px"></select>
             </div>
             <button class="btn btn-secondary btn-sm" onclick="copyPreviousTermRoster()">複製上一學期名單</button>
             <button class="btn btn-primary btn-sm" onclick="activateSelectedTermRoster()">設為目前登入名單</button>
@@ -1111,13 +1112,12 @@ function waitForFirebase(cb) {
 }
 
 // ============ 學期工具 ============
-function getSemesters(years = 5) {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const twYear = currentYear - 1911;
-  const month = now.getMonth() + 1;
+function getSemesters() {
+  // 永遠顯示「當下學年 +1」到「當下學年 -10」，每學年各含第1、第2學期
+  // 不論何年執行，皆可提前看到下一學年，往後 10 年無需修改程式
+  const twYear = new Date().getFullYear() - 1911;
   const sems = [];
-  for (let y = twYear; y >= twYear - years; y--) {
+  for (let y = twYear + 1; y >= twYear - 10; y--) {
     sems.push({ key: `${y}-2`, label: `${y}學年第2學期` });
     sems.push({ key: `${y}-1`, label: `${y}學年第1學期` });
   }
@@ -1314,11 +1314,11 @@ async function initStudentTermControls() {
   const sel = document.getElementById('student-term-select');
   if (!sel) return;
   if (!sel.options.length) {
-    sel.innerHTML = getSemesters(6).map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+    sel.innerHTML = getSemesters().map(s => `<option value="${s.key}">${s.label}</option>`).join('');
   }
   const active = await getActiveRosterSemester();
   if (!_studentTermInitialized) {
-    sel.value = getSemesters(6).some(s => s.key === active) ? active : getCurrentSemester();
+    sel.value = getSemesters().some(s => s.key === active) ? active : getCurrentSemester();
     _studentTermInitialized = true;
   }
   updateStudentTermStatus();
@@ -2213,12 +2213,13 @@ async function loadSubmitStats() {
   const deadlineMap = buildDeadlineMap(deadlineSnap);
   const journalMap = {};
   journals.forEach(j => { journalMap[`${j.semester}-${j.seatNo}-${j.month}`] = j; });
-  const colCount = monthSlots.length + 1;
+  const colCount = monthSlots.length + 2;
   const minWidth = Math.max(600, colCount * 72) + 'px';
   let html = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
   <div style="min-width:${minWidth}">
-  <div class="submit-grid" style="grid-template-columns:170px repeat(${monthSlots.length},minmax(64px,1fr))">
+  <div class="submit-grid" style="grid-template-columns:55px 100px repeat(${monthSlots.length},minmax(64px,1fr))">
     <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
+    <div class="submit-grid-header">座號</div>
     <div class="submit-grid-header">姓名</div>
     ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
   </div>`;
@@ -2229,7 +2230,7 @@ async function loadSubmitStats() {
       if (!j) return '<div class="submit-cell miss">✗</div>';
       return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
     }).join('');
-    return `<div class="submit-grid" style="grid-template-columns:170px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-name-cell">${escapeHtml(semesterLabel(s.semester).replace('學年',''))} ${escapeHtml(s.seatNo)} ${escapeHtml(s.name)}</div>${cells}</div>`;
+    return `<div class="submit-grid" style="grid-template-columns:55px 100px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-seat-cell">${escapeHtml(s.seatNo)}</div><div class="submit-name-cell">${escapeHtml(s.name)}</div>${cells}</div>`;
   }).join('');
   html += '</div></div>';
   document.getElementById('submit-stats-content').innerHTML = html;
