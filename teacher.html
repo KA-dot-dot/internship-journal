@@ -245,6 +245,7 @@ tr:last-child td { border-bottom: none; }
 .submit-cell.na { background: transparent; color: var(--text3); }
 .submit-name-cell { position: sticky; left: 55px; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px; font-weight: 600; }
 .submit-seat-cell { position: sticky; left: 0; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text2); padding: 6px; text-align: center; }
+.submit-group-header { grid-column: 1/-1; background: var(--bg3); border-left: 3px solid var(--accent); padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--accent); border-radius: 4px; margin-top: 2px; }
 
 .config-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
 .config-banner strong { color: var(--accent-yellow); }
@@ -1113,11 +1114,11 @@ function waitForFirebase(cb) {
 
 // ============ 學期工具 ============
 function getSemesters() {
-  // 永遠顯示「當下學年 +1」到「當下學年 -10」，每學年各含第1、第2學期
-  // 不論何年執行，皆可提前看到下一學年，往後 10 年無需修改程式
+  // 永遠顯示「當下學年 +1」到「當下學年 -3」，每學年各含第1、第2學期（共10個選項）
+  // 涵蓋：未來1年（備用）+ 當前 + 過去3年，適合3年制職業學校，永久自動滾動不需改程式
   const twYear = new Date().getFullYear() - 1911;
   const sems = [];
-  for (let y = twYear + 1; y >= twYear - 10; y--) {
+  for (let y = twYear + 1; y >= twYear - 3; y--) {
     sems.push({ key: `${y}-2`, label: `${y}學年第2學期` });
     sems.push({ key: `${y}-1`, label: `${y}學年第1學期` });
   }
@@ -2215,22 +2216,37 @@ async function loadSubmitStats() {
   journals.forEach(j => { journalMap[`${j.semester}-${j.seatNo}-${j.month}`] = j; });
   const colCount = monthSlots.length + 2;
   const minWidth = Math.max(600, colCount * 72) + 'px';
+  // 取得所有出現的學期（依 students 順序，不重複）
+  const semOrder = [];
+  const seenSems = new Set();
+  students.forEach(s => { if (!seenSems.has(s.semester)) { seenSems.add(s.semester); semOrder.push(s.semester); } });
+  const isMultiSem = semOrder.length > 1;
+  const gridCols = `55px 100px repeat(${monthSlots.length},minmax(64px,1fr))`;
   let html = `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
   <div style="min-width:${minWidth}">
-  <div class="submit-grid" style="grid-template-columns:55px 100px repeat(${monthSlots.length},minmax(64px,1fr))">
+  <div class="submit-grid" style="grid-template-columns:${gridCols}">
     <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
     <div class="submit-grid-header">座號</div>
-    <div class="submit-grid-header">姓名</div>
+    <div class="submit-grid-header" style="text-align:left">姓名</div>
     ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
   </div>`;
-  html += students.map(s => {
-    const cells = monthSlots.map(slot => {
-      if (slot.sem !== s.semester) return '<div class="submit-cell" style="color:var(--text3)">-</div>';
-      const j = journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`];
-      if (!j) return '<div class="submit-cell miss">✗</div>';
-      return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
+  // 依學期分組輸出，跨學期時加分隔標題列
+  html += semOrder.map(sem => {
+    const semStudents = students.filter(s => s.semester === sem);
+    let groupHtml = '';
+    if (isMultiSem) {
+      groupHtml += `<div class="submit-grid" style="grid-template-columns:${gridCols}"><div class="submit-group-header">${escapeHtml(semesterLabel(sem))}</div></div>`;
+    }
+    groupHtml += semStudents.map(s => {
+      const cells = monthSlots.map(slot => {
+        if (slot.sem !== s.semester) return '<div class="submit-cell" style="color:var(--text3)">-</div>';
+        const j = journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`];
+        if (!j) return '<div class="submit-cell miss">✗</div>';
+        return isJournalLate(j, deadlineMap) ? '<div class="submit-cell late">▲</div>' : '<div class="submit-cell done">✓</div>';
+      }).join('');
+      return `<div class="submit-grid" style="grid-template-columns:${gridCols}"><div class="submit-seat-cell">${escapeHtml(s.seatNo)}</div><div class="submit-name-cell">${escapeHtml(s.name)}</div>${cells}</div>`;
     }).join('');
-    return `<div class="submit-grid" style="grid-template-columns:55px 100px repeat(${monthSlots.length},minmax(64px,1fr))"><div class="submit-seat-cell">${escapeHtml(s.seatNo)}</div><div class="submit-name-cell">${escapeHtml(s.name)}</div>${cells}</div>`;
+    return groupHtml;
   }).join('');
   html += '</div></div>';
   document.getElementById('submit-stats-content').innerHTML = html;
