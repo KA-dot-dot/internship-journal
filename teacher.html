@@ -263,25 +263,30 @@ tr:last-child td { border-bottom: none; }
 .stats-tab { padding: 10px 22px; border: none; background: transparent; color: var(--text2); font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; border-radius:0; }
 .stats-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight:600; }
 .stats-tab:hover:not(.active) { color:var(--text); background:var(--bg3); }
-.stats-layout { display:grid; grid-template-columns:280px minmax(0,1fr); gap:16px; align-items:start; }
-.stats-control-card { position:sticky; top:18px; }
+.stats-layout { display:flex; flex-direction:column; gap:16px; }
+.stats-control-card { position:static; }
 .stats-control-title { font-size:15px; font-weight:700; margin-bottom:12px; }
-.stats-control-stack { display:flex; flex-direction:column; gap:12px; }
-.stats-control-actions { display:grid; grid-template-columns:1fr; gap:8px; margin-top:2px; }
-.company-filter-panel { position:relative; max-height:260px; overflow-y:auto; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); margin-top:6px; }
+.stats-control-stack { display:flex; flex-direction:row; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.stats-control-stack > .form-group { margin-bottom:0; flex:0 0 auto; min-width:130px; }
+.stats-control-stack > div:not(.form-group):not(.stats-control-actions) { flex:1 1 200px; min-width:180px; }
+.stats-control-actions { display:flex; flex-direction:row; gap:8px; flex:0 0 auto; align-items:flex-end; }
+.company-filter-panel { position:absolute; max-height:260px; overflow-y:auto; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); margin-top:6px; z-index:50; min-width:220px; }
 .company-filter-panel.hidden { display:none; }
 .company-option { display:flex; align-items:center; gap:8px; padding:7px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border); color:var(--text); }
 .company-option:last-child { border-bottom:none; }
 .company-option input { width:auto; accent-color:var(--accent); }
 .company-filter-hint { font-size:12px; color:var(--text2); line-height:1.5; background:var(--bg3); border-radius:6px; padding:8px 10px; }
 @media (max-width: 900px) {
-  .stats-layout { grid-template-columns:1fr; }
-  .stats-control-card { position:static; }
-  .stats-control-actions { grid-template-columns:1fr 1fr; }
+  .stats-control-stack { flex-direction:column; align-items:stretch; }
+  .stats-control-stack > .form-group,
+  .stats-control-stack > div:not(.form-group):not(.stats-control-actions) { min-width:unset; width:100%; }
+  .stats-control-actions { flex-direction:row; width:100%; }
+  .stats-control-actions .btn { flex:1; }
 }
 @media (max-width: 520px) {
   .stats-tab { padding:10px 12px; font-size:13px; }
-  .stats-control-actions { grid-template-columns:1fr; }
+  .stats-control-actions { flex-direction:column; }
+  .stats-control-actions .btn { flex:unset; }
 }
 
 /* 帳號管理頁 */
@@ -599,7 +604,7 @@ tr:last-child td { border-bottom: none; }
             <div class="stats-control-stack">
               <div class="form-group" style="margin-bottom:0"><label>起始日期</label><input type="date" id="stats-date-start"></div>
               <div class="form-group" style="margin-bottom:0"><label>結束日期</label><input type="date" id="stats-date-end"></div>
-              <div>
+              <div style="position:relative;flex:1 1 180px;min-width:180px">
                 <label>公司</label>
                 <button id="company-filter-btn" onclick="toggleCompanyFilter(event)" class="btn btn-secondary btn-sm" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center">
                   <span id="company-filter-label">🏭 全選所有公司</span><span id="company-filter-arrow">▾</span>
@@ -611,7 +616,7 @@ tr:last-child td { border-bottom: none; }
                   <div id="company-checkbox-list"><div class="company-filter-hint" style="margin:8px">查詢後顯示公司清單</div></div>
                 </div>
               </div>
-              <div id="company-filter-hint" class="company-filter-hint">先選日期再查詢；公司勾選會同步更新地點與薪資。</div>
+              <div id="company-filter-hint" class="company-filter-hint" style="flex:1 1 200px;align-self:flex-end;margin:0">先選日期再查詢；公司勾選會同步更新地點與薪資。</div>
               <div class="stats-control-actions">
                 <button class="btn btn-primary btn-sm" onclick="loadAllStats()">🔍 查詢</button>
                 <button class="btn btn-success btn-sm" onclick="exportAllStatsExcel()">⬇️ 匯出統計</button>
@@ -619,7 +624,7 @@ tr:last-child td { border-bottom: none; }
             </div>
           </div>
 
-          <div style="min-width:0">
+          <div>
             <div class="stats-tab-bar">
               <button class="stats-tab active" id="stats-tab-submit" onclick="switchStatsTab('submit')">✅ 繳交狀況</button>
               <button class="stats-tab" id="stats-tab-location" onclick="switchStatsTab('location')">📍 地點統計</button>
