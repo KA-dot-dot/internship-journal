@@ -1261,7 +1261,8 @@ function handlePhotoUpload(event, id) {
         wrap.style.position = 'relative';
         container.appendChild(wrap);
         const imgEl = wrap.querySelector('img');
-        const folder = `tcivs/${currentUser?.seatNo || 'unknown'}`;
+        const selectedSem = document.getElementById('write-semester')?.value || getCurrentSemester();
+        const folder = `tcivs/${selectedSem}/${currentUser?.seatNo || 'unknown'}`;
         const blob = await canvasToBlob(canvas, 0.75);
         const url = await uploadToCloudinary(blob, folder);
         wrap.querySelector('.photo-uploading')?.remove();
