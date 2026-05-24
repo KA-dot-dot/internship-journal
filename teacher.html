@@ -639,8 +639,8 @@ tr:last-child td { border-bottom: none; }
                   <div id="city-chart-filtered" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📍</div><p>查詢後顯示</p></div></div>
                 </div>
                 <div class="card">
-                  <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工距離</div>
-                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">依公司勾選同步更新，以各公司工作紀錄距離平均後分桶統計｜⚠️ 距離為直線距離（km），非實際行車里程</div>
+                  <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工直線距離</div>
+                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">各公司工作紀錄依距離區間分段統計｜直線距離，非行車里程</div>
                   <div id="distance-chart" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📏</div><p>查詢後顯示</p></div></div>
                   <div id="distance-company-detail" style="margin-top:14px"></div>
                 </div>
@@ -2123,7 +2123,7 @@ async function exportAllStatsExcel() {
         日期: e.date || '',
         縣市: city,
         工作地址: address,
-        '距學校(km)': e.distance ?? ''
+        '距學校(直線km)': e.distance ?? ''
       });
     });
   });
@@ -2230,7 +2230,7 @@ async function exportAllStatsExcel() {
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
   const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
-  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
+  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(直線km)':'' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
   salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
@@ -3041,7 +3041,7 @@ function renderJournalCard(j, isTeacher) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 直線距學校 ${escapeHtml(String(e.distance))} km` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
