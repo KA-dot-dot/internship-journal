@@ -391,7 +391,7 @@ tr:last-child td { border-bottom: none; }
           <div class="form-row">
             <div class="form-group">
               <label>本月薪資（元）</label>
-              <input type="number" id="write-salary" placeholder="例：15000" min="0" step="100">
+              <input type="number" id="write-salary" placeholder="例：15000" min="0" max="200000" step="100">
             </div>
             <div class="form-group">
               <label>主要輔導師傅／學長姐</label>
@@ -1303,6 +1303,7 @@ async function saveJournal() {
   const reflection = document.getElementById('write-reflection').value.trim();
   if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
   const salary = parseInt(document.getElementById('write-salary').value) || null;
+  if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
   const mentor = document.getElementById('write-mentor').value.trim();
   const salaryPhotoEl = document.getElementById('salary-photo-preview').querySelector('img');
   const salaryPhoto = salaryPhotoEl ? salaryPhotoEl.dataset.base64 : '';
