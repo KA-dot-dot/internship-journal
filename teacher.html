@@ -1316,6 +1316,8 @@ async function initStudentTermControls() {
   if (!sel) return;
   if (!sel.options.length) {
     sel.innerHTML = getSemesters().map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+    // 立即同步設為當前學期，防止 await 期間 dropdown 停在未來學期造成誤操作
+    sel.value = getCurrentSemester();
   }
   const active = await getActiveRosterSemester();
   if (!_studentTermInitialized) {
