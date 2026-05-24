@@ -1005,7 +1005,7 @@ function addWorkEntry() {
       </div>
     </div>
     <div class="form-group">
-      <label>工作地點地址（用於計算距學校距離）</label>
+      <label>工作地點地址（用於計算距學校直線距離）</label>
       <div style="display:flex;gap:8px;align-items:flex-start">
         <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="flex:1" oninput="clearDistResult('${id}')">
         <button class="btn btn-secondary btn-sm" style="white-space:nowrap;margin-top:0" onclick="calcDistance('${id}')">📍 計算距離</button>
@@ -1399,7 +1399,7 @@ function renderJournalCardSelectable(j) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${e.date || ''} ${e.type ? '｜'+e.type : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km（直線）` : ''}</div>` : ''}
       <div class="entry-content">${e.content || ''}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => `<img src="${resolveImgSrc(p)}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
@@ -1667,7 +1667,7 @@ function renderJournalCard(j, isTeacher) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${e.date || ''} ${e.type ? '｜'+e.type : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${e.address}${e.distance != null ? ` ／ 距學校 ${e.distance} km（直線）` : ''}</div>` : ''}
       <div class="entry-content">${e.content || ''}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
