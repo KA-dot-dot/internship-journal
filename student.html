@@ -1258,6 +1258,7 @@ function handlePhotoUpload(event, id) {
         else {
           // ★ Cloudinary 失敗：移除此張照片並明確告知，不 fallback base64（防止撐爆 Firestore 1MB 上限）
           wrap.remove();
+          event.target.value = ''; // ★ 清空 input，讓學生可重選同一張檔案
           toast('⚠️ 工作照片上傳失敗，請確認網路後重新選取圖片', 'error');
         }
       };
