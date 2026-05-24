@@ -490,8 +490,8 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">本月已繳</div>
             <div class="stat-value" style="color:var(--accent-green)" id="stat-submitted">-</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">本月未繳</div>
+          <div class="stat-card" onclick="toggleStatList('missing')" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">本月未繳 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent-red)" id="stat-missing">-</div>
           </div>
           <div class="stat-card">
@@ -499,25 +499,43 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-value" style="color:var(--accent)" id="stat-rate">-</div>
           </div>
         </div>
+        <div id="stat-list-panel-missing" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">📋 本月未繳名單</div>
+            <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
         <div style="font-size:15px;font-weight:700;margin:18px 0 12px">老師審閱進度</div>
         <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-label">已審閱</div>
+          <div class="stat-card" onclick="toggleStatList('reviewed')" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">已審閱 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent-green)" id="stat-reviewed">-</div>
           </div>
-          <div class="stat-card" id="stat-unreviewed-card" onclick="toggleUnreviewedList()" style="cursor:pointer;user-select:none" title="點擊查看名單">
+          <div class="stat-card" onclick="toggleStatList('unreviewed')" style="cursor:pointer;user-select:none" title="點擊查看名單">
             <div class="stat-label">未審閱 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent-yellow)" id="stat-unreviewed">-</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">有評語</div>
+          <div class="stat-card" onclick="toggleStatList('commented')" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">有評語 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
           </div>
         </div>
-        <div id="unreviewed-list-panel" style="display:none;margin-bottom:16px">
+        <div id="stat-list-panel-reviewed" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-green);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-green);margin-bottom:10px">📋 本月已審閱名單</div>
+            <div id="stat-list-names-reviewed" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+        <div id="stat-list-panel-unreviewed" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-yellow);padding:14px 18px">
             <div style="font-size:13px;font-weight:700;color:var(--accent-yellow);margin-bottom:10px">📋 本月未審閱名單</div>
-            <div id="unreviewed-names" style="display:flex;flex-wrap:wrap;gap:6px;font-size:13px"></div>
+            <div id="stat-list-names-unreviewed" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+        <div id="stat-list-panel-commented" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent2);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent2);margin-bottom:10px">📋 本月有評語名單</div>
+            <div id="stat-list-names-commented" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
         <div class="card" style="margin-bottom:20px">
@@ -527,10 +545,7 @@ tr:last-child td { border-bottom: none; }
           </div>
           <div id="t-deadline-info" style="color:var(--text2);font-size:13px">載入中...</div>
         </div>
-        <div class="card">
-          <div style="font-size:15px;font-weight:700;margin-bottom:14px">⚠️ 本月未繳學生</div>
-          <div id="t-missing-list" style="font-size:13px;color:var(--text2)">載入中...</div>
-        </div>
+
       </div>
 
       <!-- ========== 老師：學生管理 ========== -->
@@ -1481,34 +1496,45 @@ async function loadTeacherDashboard() {
   document.getElementById('stat-reviewed').textContent = reviewed;
   document.getElementById('stat-unreviewed').textContent = unreviewed;
   document.getElementById('stat-commented').textContent = commented;
-  // 未審閱名單（供點擊展開）
-  const unreviewedJournals = activeJournals.filter(j => !j.teacherReviewed);
-  window._unreviewedList = unreviewedJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`);
-  // 重設展開狀態
-  const panel = document.getElementById('unreviewed-list-panel');
-  if (panel) panel.style.display = 'none';
-  await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
+  // 各名單（供點擊展開）
   const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
-  const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id)).map(d => d.data().name);
-  const el = document.getElementById('t-missing-list');
-  if (missingStudents.length === 0) {
-    el.innerHTML = '<span style="color:var(--accent-green)">✅ 本月所有學生皆已繳交！</span>';
-  } else {
-    el.innerHTML = missingStudents.map(n => `<span class="badge badge-red" style="margin:3px">${n}</span>`).join('');
-  }
+  const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id));
+  window._statLists = {
+    missing:    missingStudents.map(d => `${d.id} ${d.data().name || d.id}`),
+    reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
+    unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
+    commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
+  };
+  // 重設所有展開面板
+  ['missing','reviewed','unreviewed','commented'].forEach(k => {
+    const p = document.getElementById(`stat-list-panel-${k}`);
+    if (p) p.style.display = 'none';
+  });
+  await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
 }
 
-function toggleUnreviewedList() {
-  const panel = document.getElementById('unreviewed-list-panel');
-  const namesEl = document.getElementById('unreviewed-names');
+function toggleStatList(key) {
+  const cfg = {
+    missing:    { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
+    reviewed:   { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
+    unreviewed: { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
+    commented:  { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' }
+  };
+  const panel = document.getElementById(`stat-list-panel-${key}`);
+  const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
+  // 關閉其他面板
+  ['missing','reviewed','unreviewed','commented'].forEach(k => {
+    if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
+  });
   const isHidden = panel.style.display === 'none';
   if (isHidden) {
-    const list = window._unreviewedList || [];
+    const list = (window._statLists || {})[key] || [];
+    const c = cfg[key];
     if (list.length === 0) {
-      namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 本月所有已繳月記均已審閱！</span>';
+      namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
     } else {
-      namesEl.innerHTML = list.map(n => `<span style="background:rgba(234,179,8,0.12);color:var(--accent-yellow);border:1px solid rgba(234,179,8,0.3);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+      namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
     }
     panel.style.display = 'block';
   } else {
