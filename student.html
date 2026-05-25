@@ -671,11 +671,13 @@ async function handleLoginUser(user) {
   if (!bindSnap.exists()) {
     const adminSnap = await getDocs(col(db, 'admins'));
     const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
-    await window._auth.signOut(window._auth.auth);
     hideLoading();
     if (isTeacher) {
+      // ★ 老師帳號：不 signOut（避免影響同瀏覽器開著的 teacher.html session）
+      //   只顯示提示，讓老師自行關閉此分頁或去綁定座號
       toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
     } else {
+      await window._auth.signOut(window._auth.auth);
       toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
     return;
@@ -1824,7 +1826,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const emailKey = email.replace(/[@.]/g, '_');
         try {
           const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
-          if (!bindSnap.exists()) { await window._auth.signOut(auth); hideLoading(); toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error'); return; }
+          if (!bindSnap.exists()) {
+            // 未綁定一律登出（此路徑非老師帳號，老師走 handleLoginUser）
+            await window._auth.signOut(auth);
+            hideLoading();
+            toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+            return;
+          }
           const binding = bindSnap.data();
           const stuSnap = await getDoc(doc(db, 'students', binding.seatNo));
           if (!stuSnap.exists()) { await window._auth.signOut(auth); hideLoading(); toast('❌ 找不到學生資料，請聯絡老師', 'error'); return; }
