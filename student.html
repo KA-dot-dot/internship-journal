@@ -669,8 +669,23 @@ async function handleLoginUser(user) {
   const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
 
   if (!bindSnap.exists()) {
-    const adminSnap = await getDocs(col(db, 'admins'));
-    const isTeacher = adminSnap.docs.some(d => d.data().email === email || d.id === user.uid);
+    // ★ 用 getDoc（單筆讀取）判斷是否為老師，避免 list admins 的權限問題
+    //   Firestore rules：get admins 允許 schoolUser 讀自己的文件，list 則需要 isAdmin
+    let isTeacher = false;
+    try {
+      const { doc: _doc } = firebase_funcs;
+      const uidSnap = await getDoc(_doc(db, 'admins', user.uid));
+      if (uidSnap.exists()) {
+        isTeacher = true;
+      } else {
+        const emailKey2 = email.replace(/[@.]/g, '_');
+        const emailSnap = await getDoc(_doc(db, 'admins', emailKey2));
+        isTeacher = emailSnap.exists();
+      }
+    } catch(e) {
+      // 讀取失敗時保守處理，不視為老師
+      isTeacher = false;
+    }
     hideLoading();
     if (isTeacher) {
       // ★ 老師帳號：不 signOut（避免影響同瀏覽器開著的 teacher.html session）
