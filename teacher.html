@@ -243,9 +243,9 @@ tr:last-child td { border-bottom: none; }
 .submit-cell.miss { background: rgba(239,68,68,0.1); color: var(--accent-red); }
 .submit-cell.late { background: rgba(245,158,11,0.12); color: var(--accent-yellow); }
 .submit-cell.na { background: transparent; color: var(--text3); }
-.submit-name-cell { position: sticky; left: 55px; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px; font-weight: 600; }
+.submit-name-cell { position: sticky; left: 55px; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text); padding: 6px 6px 6px 8px; font-weight: 600; }
 .submit-seat-cell { position: sticky; left: 0; z-index: 2; background: var(--bg2); font-size: 11px; color: var(--text2); padding: 6px; text-align: center; }
-.submit-group-header { grid-column: 1/-1; background: var(--bg3); border-left: 3px solid var(--accent); padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--accent); border-radius: 4px; margin-top: 2px; }
+.submit-group-header { grid-column: 1/-1; background: var(--bg3); border-left: 3px solid var(--accent); padding: 7px 12px; font-size: 14px; font-weight: 700; color: var(--accent); border-radius: 4px; margin-top: 4px; position: sticky; left: 0; }
 
 .config-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
 .config-banner strong { color: var(--accent-yellow); }
@@ -2237,7 +2237,7 @@ async function loadSubmitStats() {
   <div class="submit-grid" style="grid-template-columns:${gridCols}">
     <div class="submit-grid-header" style="grid-column:1/-1;text-align:left;background:var(--bg3);border-radius:6px;color:var(--text)">✓：已繳　▲：遲繳　✗：未繳</div>
     <div class="submit-grid-header">座號</div>
-    <div class="submit-grid-header" style="text-align:left">姓名</div>
+    <div class="submit-grid-header" style="text-align:left;padding-left:8px">姓名</div>
     ${monthSlots.map(slot => `<div class="submit-grid-header">${slot.label}</div>`).join('')}
   </div>`;
   // 依學期分組輸出，跨學期時加分隔標題列
@@ -3135,16 +3135,42 @@ async function executeTeacherBatchDelete(journals) {
 
 // ---- 匯出 ----
 async function loadExportStudents() {
-  const { collection, collectionGroup, getDocs } = firebase_funcs;
+  const { collection, getDocs } = firebase_funcs;
+  const sel = document.getElementById('export-student-select');
+  if (!sel) return;
   try {
-    const snap = await getDocs(collection(db, 'students'));
-    const sel = document.getElementById('export-student-select');
-    if (!sel) return;
-    sel.innerHTML = snap.docs.sort((a,b)=>a.id.localeCompare(b.id)).map(d => {
-      const s = d.data();
-      return `<option value="${d.id}">${s.seatNo} ${s.name}</option>`;
-    }).join('');
-  } catch(e) {}
+    // 讀取所有 termRoster_* 快照，整合各學期學生（依學期分 optgroup）
+    const settingsSnap = await getDocs(collection(db, 'settings'));
+    const rosterDocs = settingsSnap.docs
+      .filter(d => d.id.startsWith(TERM_ROSTER_PREFIX) && Array.isArray(d.data().students) && d.data().students.length)
+      .sort((a, b) => b.data().semester.localeCompare(a.data().semester)); // 新學期排前面
+
+    if (rosterDocs.length) {
+      sel.innerHTML = rosterDocs.map(d => {
+        const { semester, students } = d.data();
+        const label = semesterLabel(semester);
+        const options = [...students]
+          .sort((a, b) => (a.seatNo || '').localeCompare(b.seatNo || ''))
+          .map(s => `<option value="${escapeHtml(s.seatNo)}|${escapeHtml(semester)}">${escapeHtml(s.seatNo)} ${escapeHtml(s.name)}</option>`)
+          .join('');
+        return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+      }).join('');
+    } else {
+      // fallback：讀 /students/（當前學期）
+      const snap = await getDocs(collection(db, 'students'));
+      const active = await getActiveRosterSemester();
+      const label = semesterLabel(active);
+      const options = snap.docs
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map(d => {
+          const s = d.data();
+          return `<option value="${escapeHtml(d.id)}|${escapeHtml(active)}">${escapeHtml(s.seatNo || d.id)} ${escapeHtml(s.name || '')}</option>`;
+        }).join('');
+      sel.innerHTML = `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+    }
+  } catch(e) {
+    console.error('loadExportStudents 失敗', e);
+  }
 }
 
 async function exportSemesterPDF() {
@@ -3170,18 +3196,21 @@ async function exportSemesterPDF() {
 }
 
 async function exportStudentPDF() {
-  const seat = document.getElementById('export-student-select')?.value;
-  if (!seat) return toast('請先選擇學生', 'error');
-  const { collection, collectionGroup } = firebase_funcs;
+  const val = document.getElementById('export-student-select')?.value;
+  if (!val) return toast('請先選擇學生', 'error');
+  // value 格式：seatNo|semester（含學期資訊，避免跨學期同座號混淆）
+  const [seat, semester] = val.split('|');
+  const { collectionGroup } = firebase_funcs;
   showLoading();
   try {
     const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料');
     const journals = userJournalData(jSnap)
-      .filter(j => String(j.seatNo) === String(seat))
+      .filter(j => String(j.seatNo) === String(seat) && (semester ? j.semester === semester : true))
       .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     if (!journals.length) return toast('該學生尚無月記', 'error');
     const name = journals[0].studentName || seat;
-    printJournalsPDF(journals, `${name}實習月記`);
+    const semLabel = semester ? ` (${semesterLabel(semester)})` : '';
+    printJournalsPDF(journals, `${name}實習月記${semLabel}`);
   } catch(e) {
     console.error('匯出單一學生月記失敗', e);
     toast('匯出失敗：' + (e.message || '請確認網路或權限設定'), 'error');
