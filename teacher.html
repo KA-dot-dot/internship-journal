@@ -3389,7 +3389,7 @@ window.loadSalaryPhotoOnDemand = async function(seatNo, semester, month, ownerUi
     const snap = await getDoc(doc(db, 'users', ownerUid, 'journals', docId));
     if (snap.exists() && snap.data().salaryPhoto) {
       const src = resolveImgSrc(snap.data().salaryPhoto);
-      btn.parentElement.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">💴 薪資單</div><img src="${src}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單">`;
+      btn.parentElement.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${src}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單">`;
     } else {
       alert('查無薪資單照片');
       btn.disabled = false;
@@ -3470,7 +3470,7 @@ function renderJournalCard(j, isTeacher) {
       ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（直線）` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
-      ${(e.photos||[]).length ? `<div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
+      ${(e.photos||[]).length ? `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div></div>` : ''}
     </div>
   `).join('');
   const safeMonth = safeNumber(j.month);
@@ -3481,10 +3481,10 @@ function renderJournalCard(j, isTeacher) {
   let salaryPhotoHtml = '';
   if (j.salaryPhoto) {
     const _sp = resolveImgSrc(j.salaryPhoto);
-    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">💴 薪資單</div><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
+    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
   } else if (j.hasSalaryPhoto) {
     const btnId = `sp-btn-${safeDomIdPart(j.seatNo)}-${safeDomIdPart(j.semester)}-${safeDomIdPart(j.month)}`;
-    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">💴 薪資單</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
+    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
   }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
@@ -3572,7 +3572,7 @@ function openPhotoModal(src) {
 function printJournalsPDF(journals, title) {
   journals = [...journals].sort((a,b) => { const s=(a.seatNo||'').localeCompare(b.seatNo||''); return s!==0?s:(a.month||0)-(b.month||0); });
   const rows = journals.map((j, idx) => {
-    const entries = (j.entries||[]).map((e,i) => `<div class="print-block" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa"><div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${escapeHtml(e.date||'')}</div>${e.address?`<div style="color:#555;margin-bottom:4px">📍 工作地點：${escapeHtml(e.address)}</div>`:''}<div style="margin-bottom:4px">內容：${escapeHtml(e.content||'')}</div>${(e.photos||[]).length?`<div class="print-block" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">${(e.photos||[]).map(p=>{const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`;}).join('')}</div>`:''}</div>`).join('');
+    const entries = (j.entries||[]).map((e,i) => `<div class="print-block" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa"><div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${escapeHtml(e.date||'')}</div>${e.address?`<div style="color:#555;margin-bottom:4px">📍 工作地點：${escapeHtml(e.address)}</div>`:''}<div style="margin-bottom:4px">內容：${escapeHtml(e.content||'')}</div>${(e.photos||[]).length?`<div class="print-block" style="margin-top:6px"><div style="font-weight:600;margin-bottom:6px">📷 工作照片</div><div style="display:flex;flex-wrap:wrap;gap:8px">${(e.photos||[]).map(p=>{const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`;}).join('')}</div></div>`:''}</div>`).join('');
     const pageBreak = '';
     const salaryText = j.salary ? `${Number(j.salary).toLocaleString()} 元` : '-';
     const salaryPhotoPrint = j.salaryPhoto ? `<div class="print-block" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:6px">💴 薪資單</div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" style="max-width:350px;max-height:240px;border-radius:6px;border:1px solid #ddd;display:block"></div></div>` : '<div style="margin-bottom:14px"></div>';
