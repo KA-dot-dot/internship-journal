@@ -196,6 +196,25 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .stat-value { font-size: 22px; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
+  #page-t-students .table-wrap { overflow-x: visible; }
+  #page-t-students table.student-mobile-table,
+  #page-t-students .student-mobile-table thead,
+  #page-t-students .student-mobile-table tbody,
+  #page-t-students .student-mobile-table tr,
+  #page-t-students .student-mobile-table td { display: block; width: 100%; }
+  #page-t-students .student-mobile-table thead { display: none; }
+  #page-t-students .student-mobile-table tr { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg2); }
+  #page-t-students .student-mobile-table td { border-bottom: none; padding: 6px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
+  #page-t-students .student-mobile-table td::before { content: attr(data-label); display: block; color: var(--text2); font-size: 11px; font-weight: 600; margin-bottom: 3px; }
+  #page-t-students .student-mobile-table td.student-seat-cell { font-size: 17px; text-align: left !important; }
+  #page-t-students .student-mobile-table td.student-seat-cell::before { display: inline; content: "座號："; margin-right: 4px; }
+  #page-t-students .student-mobile-table td.student-action-cell { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 10px; }
+  #page-t-students .student-mobile-table td.student-action-cell::before { grid-column: 1 / -1; }
+  #page-t-students .student-mobile-table td.student-action-cell .btn { width: 100%; justify-content: center; padding: 8px 6px; }
+  #page-t-students .student-mobile-table .student-bind-cell > div { align-items: stretch !important; }
+  #page-t-students .student-mobile-table .student-bind-cell input { width: 100% !important; min-height: 38px; }
+  #page-t-students .student-mobile-table .student-bind-cell .btn { width: 100%; justify-content: center; }
+  #page-t-students .student-mobile-table .student-bind-cell span[title] { max-width: 100% !important; white-space: normal !important; overflow-wrap: anywhere; border-radius: 12px !important; }
   #page-t-settings [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
 }
 @media (min-width: 769px) { .mobile-nav { display: none !important; } }
@@ -309,6 +328,7 @@ tr:last-child td { border-bottom: none; }
   .stats-control-actions .btn { flex:none; width:100%; justify-content:center; }
   .company-filter-hint { min-height:auto; padding:10px 12px; }
   #company-filter-btn { min-height:46px; }
+  #page-t-students .student-mobile-table td.student-action-cell { grid-template-columns: 1fr; }
 }
 
 /* 帳號管理頁 */
@@ -592,7 +612,7 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div class="card">
           <div class="table-wrap">
-            <table>
+            <table class="student-mobile-table">
               <thead>
                 <tr>
                   <th style="text-align:center">座號</th><th>姓名</th><th>實習公司</th><th style="width:320px">Google 帳號綁定</th><th>操作</th>
@@ -939,7 +959,7 @@ tr:last-child td { border-bottom: none; }
     <button class="mobile-nav-item" onclick="showPage('t-students')"><span class="icon">👥</span>學生</button>
     <button class="mobile-nav-item" onclick="showPage('t-stats')" data-page="t-stats"><span class="icon">📊</span>統計</button>
     <button class="mobile-nav-item" onclick="showPage('t-admin')"><span class="icon">🔑</span>帳號</button>
-    <button class="mobile-nav-item" onclick="showPage('t-settings')"><span class="icon">⚙️</span>設定</button>
+    <button class="mobile-nav-item" onclick="showPage('t-export')"><span class="icon">⬇️</span>下載</button>
   </div>
 </div>
 
@@ -1933,11 +1953,11 @@ async function loadStudentsTable() {
           <button class="btn btn-primary btn-sm" onclick="bindStudentInline(${safeSeat},${safeNameArg})">綁定</button>
         </div>`;
       return `<tr>
-        <td style="text-align:center"><strong>${escapeHtml(seatNo)}</strong></td>
-        <td>${escapeHtml(s.name)}</td>
-        <td>${escapeHtml(s.company || '-')}</td>
-        <td>${googleCell}</td>
-        <td>
+        <td class="student-seat-cell" data-label="座號" style="text-align:center"><strong>${escapeHtml(seatNo)}</strong></td>
+        <td class="student-name-cell" data-label="姓名">${escapeHtml(s.name)}</td>
+        <td class="student-company-cell" data-label="實習公司">${escapeHtml(s.company || '-')}</td>
+        <td class="student-bind-cell" data-label="Google 帳號綁定">${googleCell}</td>
+        <td class="student-action-cell" data-label="操作">
           <button class="btn btn-secondary btn-sm" onclick="editStudent(${safeSeat})">編輯</button>
           <button class="btn btn-secondary btn-sm" onclick="viewStudentJournals(${safeSeat},${safeNameArg},${jsArg(semester)})">📖 月記</button>
           <button class="btn btn-danger btn-sm" onclick="deleteStudent(${safeSeat},${safeNameArg})">刪除</button>
