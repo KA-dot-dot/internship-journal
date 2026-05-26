@@ -3860,6 +3860,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // 檢查是否已有登入狀態
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
+      // ★ 處理登出事件：Firebase auth 變成 null 時，重新載入頁面讓老師重新登入
+      //   （防止 student.html 登出操作導致 teacher.html session 失效但畫面假裝還在）
+      if (!user && currentUser) {
+        currentUser = null;
+        toast('登入已逾期，請重新登入', 'error');
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
       if (user && !currentUser) {
         const email = normalizeEmail(user.email);
         if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
