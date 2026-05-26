@@ -1842,10 +1842,28 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
           if (!bindSnap.exists()) {
-            // 未綁定一律登出（此路徑非老師帳號，老師走 handleLoginUser）
-            await window._auth.signOut(auth);
+            // ★ Fix A-2：onAuthStateChanged 路徑（Firebase 自動恢復 session）
+            //   同樣需要先判斷是否為老師，才能決定要不要 signOut
+            let isTeacherAuto = false;
+            try {
+              const { doc: _doc2 } = firebase_funcs;
+              const uidSnap2 = await getDoc(_doc2(db, 'admins', user.uid));
+              if (uidSnap2.exists()) {
+                isTeacherAuto = true;
+              } else {
+                const ek2 = user.email.replace(/[@.]/g, '_');
+                const ekSnap2 = await getDoc(_doc2(db, 'admins', ek2));
+                isTeacherAuto = ekSnap2.exists();
+              }
+            } catch(e) { isTeacherAuto = false; }
             hideLoading();
-            toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+            if (isTeacherAuto) {
+              // 老師帳號：絕對不 signOut，只顯示提示，保護 teacher.html session
+              toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面', 'error');
+            } else {
+              await window._auth.signOut(auth);
+              toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
+            }
             return;
           }
           const binding = bindSnap.data();
