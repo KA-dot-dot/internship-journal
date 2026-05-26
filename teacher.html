@@ -245,8 +245,10 @@ tr:last-child td { border-bottom: none; }
 .submit-cell-miss { background: rgba(239,68,68,0.07); color: var(--accent-red); font-weight: 700; font-size: 12px; }
 .submit-cell-late { background: rgba(245,158,11,0.10); color: var(--accent-yellow); font-weight: 700; font-size: 12px; }
 .submit-cell-na { color: var(--text3); }
-.submit-sem-row td { background: rgba(79,142,247,0.10); border-left: 3px solid var(--accent); border-bottom: 1px solid var(--border); padding: 0; }
-.submit-sem-label { position: sticky; left: 0; display: inline-block; padding: 6px 14px; font-size: 14px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.submit-sem-row td { background: rgba(79,142,247,0.10); border-bottom: 1px solid var(--border); padding: 0; }
+.submit-sem-row td.submit-sem-sticky { position: sticky; left: 0; z-index: 2; width: 155px; min-width: 155px; max-width: 155px; border-left: 3px solid var(--accent); background: #eaf2ff; text-align: center; }
+.submit-sem-row td.submit-sem-fill { background: rgba(79,142,247,0.10); }
+.submit-sem-label { display: block; padding: 6px 14px; font-size: 14px; font-weight: 700; color: var(--accent); white-space: nowrap; }
 
 .config-banner { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 14px 18px; font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
 .config-banner strong { color: var(--accent-yellow); }
@@ -2246,7 +2248,6 @@ async function loadSubmitStats() {
   const seenSems = new Set();
   students.forEach(s => { if (!seenSems.has(s.semester)) { seenSems.add(s.semester); semOrder.push(s.semester); } });
   const isMultiSem = semOrder.length > 1;
-  const totalCols = monthSlots.length + 2;
   // 表頭
   const theadCells = monthSlots.map(slot => `<th>${escapeHtml(slot.label)}</th>`).join('');
   let tbody = '';
@@ -2254,7 +2255,7 @@ async function loadSubmitStats() {
     const semStudents = students.filter(s => s.semester === sem);
     // 跨學期時加分隔標題列
     if (isMultiSem) {
-      tbody += `<tr class="submit-sem-row"><td colspan="${totalCols}"><div class="submit-sem-label">${escapeHtml(semesterLabel(sem))}</div></td></tr>`;
+      tbody += `<tr class="submit-sem-row"><td class="submit-sem-sticky" colspan="2"><div class="submit-sem-label">${escapeHtml(semesterLabel(sem))}</div></td><td class="submit-sem-fill" colspan="${monthSlots.length}"></td></tr>`;
     }
     semStudents.forEach(s => {
       const cells = monthSlots.map(slot => {
