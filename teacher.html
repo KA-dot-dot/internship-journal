@@ -215,19 +215,18 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   #page-t-students .student-mobile-table .student-bind-cell input { width: 100% !important; min-height: 38px; }
   #page-t-students .student-mobile-table .student-bind-cell .btn { width: 100%; justify-content: center; }
   #page-t-students .student-mobile-table .student-bind-cell span[title] { max-width: 100% !important; white-space: normal !important; overflow-wrap: anywhere; border-radius: 12px !important; }
+  .location-cards-grid { grid-template-columns: 1fr !important; }
+  .location-cards-grid .card { text-align: left; }
   #location-detail-table .table-wrap { overflow-x: visible; }
   #location-detail-table table.loc-detail-mobile-table,
   #location-detail-table .loc-detail-mobile-table thead,
   #location-detail-table .loc-detail-mobile-table tbody,
-  #location-detail-table .loc-detail-mobile-table tr,
-  #location-detail-table .loc-detail-mobile-table td { display: block; width: 100%; }
+  #location-detail-table .loc-detail-mobile-table tr { display: block; width: 100%; }
   #location-detail-table .loc-detail-mobile-table thead { display: none; }
   #location-detail-table .loc-detail-mobile-table tr { border-bottom: 1px solid var(--border); padding: 12px; background: var(--bg2); }
   #location-detail-table .loc-detail-mobile-table tr:last-child { border-bottom: 0; }
-  #location-detail-table .loc-detail-mobile-table td { border-bottom: 0; padding: 4px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
-  #location-detail-table .loc-detail-mobile-table td::before { content: attr(data-label); display: inline-block; min-width: 72px; color: var(--text2); font-size: 11px; font-weight: 600; margin-right: 8px; vertical-align: top; }
-  #location-detail-table .loc-detail-mobile-table td.loc-address-cell { line-height: 1.6; }
-  #location-detail-table .loc-detail-mobile-table td.loc-address-cell::before { display: block; margin-bottom: 2px; }
+  #location-detail-table .loc-detail-mobile-table td { display: grid; grid-template-columns: 72px 1fr; align-items: start; gap: 0 8px; border-bottom: 0; padding: 3px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
+  #location-detail-table .loc-detail-mobile-table td::before { content: attr(data-label); color: var(--text2); font-size: 11px; font-weight: 600; padding-top: 2px; }
   #page-t-settings [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
 }
 @media (min-width: 769px) { .mobile-nav { display: none !important; } }
@@ -720,7 +719,7 @@ tr:last-child td { border-bottom: none; }
             </div>
             <div id="stats-panel-submit"><div class="card"><div id="submit-stats-content"><div class="empty-state"><div class="icon">📊</div><p>請輸入日期區間後按查詢</p></div></div></div></div>
             <div id="stats-panel-location" class="hidden">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+              <div class="location-cards-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
                 <div class="card">
                   <div style="font-size:15px;font-weight:700;margin-bottom:10px">🗺️ 縣市分布</div>
                   <div id="city-filter-summary" style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:6px 10px;background:var(--bg3);border-radius:6px">查詢後顯示</div>
