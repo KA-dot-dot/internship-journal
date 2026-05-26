@@ -1100,7 +1100,7 @@ const SCHOOL_LNG = 120.6614906;
 function stripPostalCode(addr) { return addr.replace(/^\d{3,6}[\s]?/, '').trim(); }
 function normalizeTaiwanAddress(addr) { return (addr || '').trim().replace(/\s+/g, '').replace(/台/g, '臺'); }
 function stripNeighborhood(addr) {
-  return addr.replace(/([縣市][^縣市]{1,8}[區鄉鎮市])[\u4e00-\u9fff]{1,8}[里村](?=[\u4e00-\u9fff]{1,12}(?:路|街|大道|巷|弄))/g, '$1').replace(/[\u4e00-\u9fff]{1,8}[里村](?=[\u4e00-\u9fff]{1,12}(?:路|街|大道|巷|弄))/g, '');
+  return addr.replace(/([區鄉鎮市])[^縣市區鄉鎮]{1,8}[里村](?=[^縣市區鄉鎮]{1,12}(?:大道|路|街|巷|弄))/g, '$1');
 }
 function preprocessAddress(addr) { let a = normalizeTaiwanAddress(addr); a = stripPostalCode(a); a = stripNeighborhood(a); return a; }
 
@@ -1113,6 +1113,18 @@ function parseTaiwanAddress(addr) {
   const street = rest || clean;
   const streetNo = street.match(/^(.+?[路街道巷弄][^,，]*)/)?.[1] || street;
   return { clean, city, district, street: streetNo };
+}
+
+function validateCompleteTaiwanAddress(addr) {
+  const clean = preprocessAddress(addr);
+  if (!clean) return '請輸入工作地點地址';
+  const hasCity = /^[\u4e00-\u9fff]{2,}(縣|市)/.test(clean);
+  const hasRoad = /(大道|路|街|巷|弄|段)/.test(clean);
+  const hasHouseNo = /\d+\s*(號|之\d+號?|[-－]\d+)/.test(clean);
+  if (!hasCity || !hasRoad || !hasHouseNo) {
+    return '工作地址請填完整地址，需包含縣市、路名與門牌號碼，例如：臺中市南區高工路191號；不能只填地標、公司名稱或只有路名';
+  }
+  return '';
 }
 
 function isTaiwanCoord(lat, lng) { return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 21.5 && lat <= 25.5 && lng >= 119 && lng <= 122.5; }
@@ -1184,25 +1196,19 @@ async function calcDistance(id) {
   let addr = document.getElementById(`${id}-address`)?.value?.trim();
   if (!addr) return toast('請先輸入工作地點地址', 'error');
   const resultEl = document.getElementById(`${id}-dist-result`);
+  const addressError = validateCompleteTaiwanAddress(addr);
+  if (addressError) {
+    resultEl.innerHTML = `<div class="dist-calculating" style="color:var(--accent-red)">❌ ${addressError}</div>`;
+    return toast(addressError, 'error');
+  }
   resultEl.innerHTML = '<div class="dist-calculating">🔍 正在查詢地址，請稍候...</div>';
   try {
     const geoPoint = await geocodeTaiwanAddress(addr);
     if (!geoPoint) { resultEl.innerHTML = '<div class="dist-calculating" style="color:var(--accent-red)">❌ 找不到此地址，請確認地址是否正確</div>'; return; }
     const directDistKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, geoPoint.lat, geoPoint.lng);
-    if (directDistKm < 0.1) { resultEl.innerHTML = '<div class="dist-result">📍 距台中高工約 <strong>0.0 km</strong>（本校地址）</div>'; return; }
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${SCHOOL_LNG},${SCHOOL_LAT};${geoPoint.lng},${geoPoint.lat}?overview=false`;
-    let osrmData = {};
-    try { const r = await fetch(osrmUrl); osrmData = await r.json(); } catch(e) {}
-    let finalKm;
-    if (osrmData.code === 'Ok' && osrmData.routes?.length) {
-      const route = osrmData.routes[0];
-      finalKm = (route.distance / 1000).toFixed(1);
-      const mins = Math.round(route.duration / 60);
-      resultEl.innerHTML = `<div class="dist-result">🚗 距台中高工約 <strong>${finalKm} km</strong>，開車約 <strong>${mins} 分鐘</strong></div>`;
-    } else {
-      finalKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, geoPoint.lat, geoPoint.lng).toFixed(1);
-      resultEl.innerHTML = `<div class="dist-result">📍 距台中高工約 <strong>${finalKm} km</strong>（直線距離）</div>`;
-    }
+    const finalKm = directDistKm < 0.1 ? '0.0' : directDistKm.toFixed(1);
+    const note = directDistKm < 0.1 ? '（本校地址）' : '（直線距離）';
+    resultEl.innerHTML = `<div class="dist-result">📍 距台中高工約 <strong>${finalKm} km</strong>${note}</div>`;
     const manualInput = document.getElementById(`${id}-dist-manual`);
     if (manualInput && (manualInput.value === '' || manualInput.dataset.autoFilled === '1')) {
       manualInput.value = finalKm;
@@ -1349,19 +1355,25 @@ async function saveJournal() {
   const salaryPhoto = salaryPhotoEl ? salaryPhotoEl.dataset.base64 : '';
   const entries = [];
   let distanceError = false;
+  let addressError = '';
+  let entryIndex = 0;
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
+    entryIndex += 1;
     const id = div.id;
     const noPhoto = document.getElementById(`${id}-nophoto`)?.checked;
     const photos = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap img`)).map(img => img.dataset.base64);
     const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
     const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
     const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
+    const msg = validateCompleteTaiwanAddress(address);
+    if (msg && !addressError) addressError = `第 ${entryIndex} 筆工作地址：${msg}`;
     if (address && (distance === null || isNaN(distance))) distanceError = true;
     const typeEl = document.getElementById(`${id}-type`);
     let workType = typeEl ? typeEl.value : '';
     if (workType === '其他') { const oi = document.getElementById(`${id}-other-input`)?.value?.trim(); if (oi) workType = `其他（${oi}）`; }
     entries.push({ date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
   });
+  if (addressError) return toast(addressError, 'error');
   if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
