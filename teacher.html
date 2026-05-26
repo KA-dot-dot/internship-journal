@@ -298,11 +298,17 @@ tr:last-child td { border-bottom: none; }
   .stats-control-stack > div:not(.form-group):not(.stats-control-actions) { min-width:unset; width:100%; }
   .stats-control-actions { flex-direction:row; width:100%; }
   .stats-control-actions .btn { flex:1; }
+  #company-filter-hint { flex:none !important; align-self:stretch !important; min-height:auto; width:100%; }
+  .company-filter-panel { left:0; right:0; width:100%; min-width:0; }
 }
 @media (max-width: 520px) {
   .stats-tab { padding:10px 12px; font-size:13px; }
+  .stats-control-stack { gap:10px; }
+  .stats-control-stack > * { flex:none !important; min-width:0 !important; width:100% !important; align-self:stretch !important; }
   .stats-control-actions { flex-direction:column; }
-  .stats-control-actions .btn { flex:unset; }
+  .stats-control-actions .btn { flex:none; width:100%; justify-content:center; }
+  .company-filter-hint { min-height:auto; padding:10px 12px; }
+  #company-filter-btn { min-height:46px; }
 }
 
 /* 帳號管理頁 */
