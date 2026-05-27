@@ -3639,7 +3639,11 @@ function printJournalsPDF(journals, title, win) {
       const photosHtml = (e.photos||[]).length
         ? `<div style="font-weight:600;margin:8px 0 6px">📷 工作照片</div>`
           + `<div class="pb-avoid" style="display:flex;flex-wrap:wrap;gap:8px">`
-          + (e.photos||[]).map(p => `<img src="${resolveImgSrc(p)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`).join('')
+          + (e.photos||[]).map(p =>
+              `<div style="max-width:350px;min-width:120px;flex:1 1 200px">`
+              + `<img src="${resolveImgSrc(p)}" style="width:100%;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;display:block">`
+              + `</div>`
+            ).join('')
           + `</div>`
         : '';
       return `<div class="pb-avoid" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa">`
@@ -3655,8 +3659,9 @@ function printJournalsPDF(journals, title, win) {
       ? `<div class="pb-avoid" style="margin-bottom:14px">`
           + `<div style="font-weight:600;margin-bottom:6px">💴 薪資單</div>`
           + `<div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa">`
-          + `<img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:350px;max-height:240px;border-radius:6px;border:1px solid #ddd;display:block">`
-          + `</div></div>`
+          + `<div style="max-width:350px">`
+          + `<img src="${resolveImgSrc(j.salaryPhoto)}" style="width:100%;max-height:240px;border-radius:6px;border:1px solid #ddd;display:block;object-fit:contain">`
+          + `</div></div></div>`
       : '<div style="margin-bottom:14px"></div>';
     const commentPrint = (j.teacherReviewed||j.teacherComment)
       ? `<div class="pb-avoid" style="margin-top:10px;border:1px solid #86efac;border-radius:6px;padding:10px 12px;background:#f0fdf4">`
@@ -3709,8 +3714,8 @@ body{font-family:'微軟正黑體','Noto Sans TC',sans-serif;font-size:13px;colo
 .journal-print:last-child{break-after:auto;page-break-after:auto;}
 /* 各區塊避免被截斷（首選）；無法避免時也讓文字自然折行 */
 .pb-avoid{break-inside:avoid;page-break-inside:avoid;orphans:3;widows:3;}
-/* 圖片單獨避免截斷 */
-img{break-inside:avoid;page-break-inside:avoid;}
+/* 圖片單獨避免截斷；max-width:100% 防止溢出容器 */
+img{break-inside:avoid;page-break-inside:avoid;max-width:100%;}
 /* 表格保護：整表不截、表頭每頁重印、每列不截 */
 table{break-inside:avoid;page-break-inside:avoid;}
 thead{display:table-header-group;}
