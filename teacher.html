@@ -3693,7 +3693,7 @@ function printJournalsPDF(journals, title, win) {
         + `</div>`
       + commentPrint
       + `</div>`;
-  }).join('<div style="page-break-after:always"></div>');
+  }).join('');
   // ── 與學生端完全一致的 HTML 結構（非 fixed toolbar，無 max-width wrapper）
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   const hint = isIOS
