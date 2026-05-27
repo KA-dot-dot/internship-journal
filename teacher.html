@@ -3638,7 +3638,9 @@ function printJournalsPDF(journals, title, win) {
     const entries = (j.entries||[]).map((e,i) => {
       const photosHtml = (e.photos||[]).length
         ? `<div style="font-weight:600;margin:8px 0 6px">📷 工作照片</div>`
-          + (e.photos||[]).map(p => `<div class="pb-avoid" style="margin-bottom:8px"><img src="${resolveImgSrc(p)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;display:block"></div>`).join('')
+          + `<div class="pb-avoid" style="display:flex;flex-wrap:wrap;gap:8px">`
+          + (e.photos||[]).map(p => `<img src="${resolveImgSrc(p)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`).join('')
+          + `</div>`
         : '';
       return `<div class="pb-avoid" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa">`
         + `<div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${escapeHtml(e.date||'')}</div>`
@@ -3708,7 +3710,7 @@ body{font-family:'微軟正黑體','Noto Sans TC',sans-serif;font-size:13px;colo
 /* 各區塊避免被截斷（首選）；無法避免時也讓文字自然折行 */
 .pb-avoid{break-inside:avoid;page-break-inside:avoid;orphans:3;widows:3;}
 /* 圖片單獨避免截斷 */
-img{break-inside:avoid;page-break-inside:avoid;max-width:100%;height:auto;}
+img{break-inside:avoid;page-break-inside:avoid;}
 /* 表格保護：整表不截、表頭每頁重印、每列不截 */
 table{break-inside:avoid;page-break-inside:avoid;}
 thead{display:table-header-group;}
