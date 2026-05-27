@@ -3638,7 +3638,7 @@ function printJournalsPDF(journals, title, win) {
     const entries = (j.entries||[]).map((e,i) => {
       const photosHtml = (e.photos||[]).length
         ? `<div style="font-weight:600;margin:8px 0 6px">📷 工作照片</div>`
-          + (e.photos||[]).map(p => `<div class="pb-avoid" style="margin-bottom:8px"><img src="${resolveImgSrc(p)}" style="max-width:100%;max-height:280px;border-radius:4px;border:1px solid #ddd;object-fit:cover;display:block"></div>`).join('')
+          + (e.photos||[]).map(p => `<div class="pb-avoid" style="margin-bottom:8px"><img src="${resolveImgSrc(p)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;display:block"></div>`).join('')
         : '';
       return `<div class="pb-avoid" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa">`
         + `<div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${escapeHtml(e.date||'')}</div>`
@@ -3653,7 +3653,7 @@ function printJournalsPDF(journals, title, win) {
       ? `<div class="pb-avoid" style="margin-bottom:14px">`
           + `<div style="font-weight:600;margin-bottom:6px">💴 薪資單</div>`
           + `<div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa">`
-          + `<img src="${resolveImgSrc(j.salaryPhoto)}" style="width:100%;max-height:420px;border-radius:6px;border:1px solid #ddd;display:block;object-fit:contain">`
+          + `<img src="${resolveImgSrc(j.salaryPhoto)}" style="max-width:350px;max-height:240px;border-radius:6px;border:1px solid #ddd;display:block">`
           + `</div></div>`
       : '<div style="margin-bottom:14px"></div>';
     const commentPrint = (j.teacherReviewed||j.teacherComment)
