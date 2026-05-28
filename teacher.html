@@ -812,13 +812,13 @@ tr:last-child td { border-bottom: none; }
                   <button class="salary-sub-tab" id="salary-tab-detail" onclick="switchSalaryDetailTab('detail')">📄 全部明細</button>
                 </div>
                 <div id="salary-panel-student" class="salary-detail-panel">
-                  <div class="table-wrap"><table><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>公司</th><th>月數</th><th>平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:420px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th style="white-space:nowrap">姓名</th><th style="min-width:120px">公司</th><th style="white-space:nowrap">月數</th><th style="white-space:nowrap">平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
                 </div>
                 <div id="salary-panel-company" class="salary-detail-panel hidden">
-                  <div class="table-wrap"><table><thead><tr><th>公司名稱</th><th>學生數</th><th>平均薪資</th></tr></thead><tbody id="salary-company-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:320px"><thead><tr><th style="min-width:140px">公司名稱</th><th style="white-space:nowrap">學生數</th><th style="white-space:nowrap">平均薪資</th></tr></thead><tbody id="salary-company-table"></tbody></table></div>
                 </div>
                 <div id="salary-panel-detail" class="salary-detail-panel hidden">
-                  <div class="table-wrap"><table><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>公司</th><th>月份</th><th>薪資</th><th>師傅/學長姐</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:380px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th style="white-space:nowrap">姓名</th><th style="min-width:120px">公司</th><th style="white-space:nowrap">月份</th><th style="white-space:nowrap">薪資</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
                 </div>
               </div>
             </div>
@@ -2972,7 +2972,7 @@ function renderSalaryStatsFromCache(cache) {
 
   document.getElementById('salary-student-table').innerHTML = studentList.map(s => {
     const avg = s.avg;
-    return `<tr><td>${escapeHtml(s.seatNo)}</td><td>${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td>${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
+    return `<tr><td style="white-space:nowrap">${escapeHtml(s.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td style="white-space:nowrap">${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無薪資資料</td></tr>';
 
   const companyMap = {};
@@ -2992,8 +2992,8 @@ function renderSalaryStatsFromCache(cache) {
   }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   document.getElementById('salary-detail-table').innerHTML = [...journals].sort((a,b)=>(String(a.seatNo || '')+String(a.month).padStart(2,'0')).localeCompare(String(b.seatNo || '')+String(b.month).padStart(2,'0'))).map(j =>
-    `<tr><td>${escapeHtml(j.seatNo)}</td><td>${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td>${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary || 0).toLocaleString()}</td><td>${escapeHtml(j.mentor || '-')}</td></tr>`
-  ).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
+    `<tr><td>${escapeHtml(j.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td style="white-space:nowrap">${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${(j.salary || 0).toLocaleString()}</td></tr>`
+  ).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   renderSalaryFocus(studentList, companyList);
   renderSalaryAlerts({ studentList, companyList, allActiveJournals: filteredActiveJournals, classAvg, stuCompanyMap });
@@ -3659,7 +3659,7 @@ function printJournalsPDF(journals, title, win) {
       overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;';
       document.body.appendChild(overlay);
     }
-    overlay.innerHTML = `<div style="position:sticky;top:0;background:#1e3a5f;color:#fff;padding:10px 16px;font-size:13px;line-height:1.7;display:flex;align-items:center;gap:12px;">📄 ${title}<button onclick="window.print()" style="padding:6px 16px;background:#4ade80;color:#1a1a1a;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">🖨️ 列印/另存PDF</button><button onclick="document.getElementById('t-print-overlay').style.display='none'" style="padding:6px 16px;background:#f87171;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;">✕ 關閉</button></div><div style="padding:10px;">${rows}</div>`;
+    overlay.innerHTML = `<div style="position:sticky;top:0;background:#1e3a5f;color:#fff;padding:10px 16px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:nowrap;"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📄 ${title}</span><div style="display:flex;gap:8px;flex-shrink:0;"><button onclick="window.print()" style="padding:6px 14px;background:#4ade80;color:#1a1a1a;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap;">🖨️ 列印/另存PDF</button><button onclick="document.getElementById('t-print-overlay').style.display='none'" style="padding:6px 14px;background:#f87171;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;">✕ 關閉</button></div></div><div style="padding:10px;">${rows}</div>`;
     overlay.style.display = 'block';
   }
   toast('已開啟列印視窗', 'success');
