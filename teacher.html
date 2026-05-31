@@ -12,6 +12,9 @@
 <script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
 <!-- SheetJS for Excel export -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<!-- pdfmake for deterministic PDF export -->
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/pdfmake.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/vfs_fonts.js"></script>
 
 <!-- Firebase SDK -->
 <script type="module">
@@ -200,34 +203,108 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   #page-t-students table.student-mobile-table,
   #page-t-students .student-mobile-table thead,
   #page-t-students .student-mobile-table tbody,
-  #page-t-students .student-mobile-table tr,
   #page-t-students .student-mobile-table td { display: block; width: 100%; }
   #page-t-students .student-mobile-table thead { display: none; }
-  #page-t-students .student-mobile-table tr { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg2); }
-  #page-t-students .student-mobile-table td { border-bottom: none; padding: 6px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
-  #page-t-students .student-mobile-table td::before { content: attr(data-label); display: block; color: var(--text2); font-size: 11px; font-weight: 600; margin-bottom: 3px; }
-  #page-t-students .student-mobile-table td.student-seat-cell { font-size: 17px; text-align: left !important; }
-  #page-t-students .student-mobile-table td.student-seat-cell::before { display: inline; content: "座號："; margin-right: 4px; }
-  #page-t-students .student-mobile-table td.student-action-cell { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 10px; }
-  #page-t-students .student-mobile-table td.student-action-cell::before { grid-column: 1 / -1; }
+  #page-t-students .student-mobile-table tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--bg2);
+  }
+  #page-t-students .student-mobile-table td {
+    border-bottom: none;
+    padding: 0;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  #page-t-students .student-mobile-table td::before {
+    content: attr(data-label) "：";
+    display: block;
+    color: var(--text2);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+  #page-t-students .student-mobile-table td.student-seat-cell {
+    grid-column: 1;
+    grid-row: 1;
+    text-align: left !important;
+  }
+  #page-t-students .student-mobile-table td.student-seat-cell::before { display: none; }
+  #page-t-students .student-mobile-table td.student-seat-cell strong {
+    min-width: 46px;
+    min-height: 34px;
+    padding: 5px 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    font-size: 17px;
+    font-family: 'Space Mono', monospace;
+  }
+  #page-t-students .student-mobile-table td.student-name-cell {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  #page-t-students .student-mobile-table td.student-name-cell::before { display: none; }
+  #page-t-students .student-mobile-table td.student-company-cell,
+  #page-t-students .student-mobile-table td.student-bind-cell {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 4px 8px;
+    align-items: start;
+  }
+  #page-t-students .student-mobile-table td.student-company-cell::before,
+  #page-t-students .student-mobile-table td.student-bind-cell::before {
+    margin-bottom: 0;
+    padding-top: 2px;
+  }
+  #page-t-students .student-mobile-table td.student-action-cell {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 4px;
+  }
+  #page-t-students .student-mobile-table td.student-action-cell::before { display: none; }
   #page-t-students .student-mobile-table td.student-action-cell .btn { width: 100%; justify-content: center; padding: 8px 6px; }
   #page-t-students .student-mobile-table .student-bind-cell > div { align-items: stretch !important; }
   #page-t-students .student-mobile-table .student-bind-cell input { width: 100% !important; min-height: 38px; }
   #page-t-students .student-mobile-table .student-bind-cell .btn { width: 100%; justify-content: center; }
   #page-t-students .student-mobile-table .student-bind-cell span[title] { max-width: 100% !important; white-space: normal !important; overflow-wrap: anywhere; border-radius: 12px !important; }
+  .location-cards-grid { grid-template-columns: 1fr !important; }
+  .location-cards-grid .card { text-align: left; }
+  .location-cards-grid .chart-bar-label { text-align: left; }
   #location-detail-table .table-wrap { overflow-x: visible; }
   #location-detail-table table.loc-detail-mobile-table,
   #location-detail-table .loc-detail-mobile-table thead,
   #location-detail-table .loc-detail-mobile-table tbody,
-  #location-detail-table .loc-detail-mobile-table tr,
-  #location-detail-table .loc-detail-mobile-table td { display: block; width: 100%; }
+  #location-detail-table .loc-detail-mobile-table tr { display: block; width: 100%; }
   #location-detail-table .loc-detail-mobile-table thead { display: none; }
   #location-detail-table .loc-detail-mobile-table tr { border-bottom: 1px solid var(--border); padding: 12px; background: var(--bg2); }
   #location-detail-table .loc-detail-mobile-table tr:last-child { border-bottom: 0; }
-  #location-detail-table .loc-detail-mobile-table td { border-bottom: 0; padding: 4px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
-  #location-detail-table .loc-detail-mobile-table td::before { content: attr(data-label); display: inline-block; min-width: 72px; color: var(--text2); font-size: 11px; font-weight: 600; margin-right: 8px; vertical-align: top; }
-  #location-detail-table .loc-detail-mobile-table td.loc-address-cell { line-height: 1.6; }
-  #location-detail-table .loc-detail-mobile-table td.loc-address-cell::before { display: block; margin-bottom: 2px; }
+  #location-detail-table .loc-detail-mobile-table td { display: grid; grid-template-columns: 72px 1fr; align-items: start; gap: 0 8px; border-bottom: 0; padding: 3px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
+  #location-detail-table .loc-detail-mobile-table td::before { content: attr(data-label); color: var(--text2); font-size: 11px; font-weight: 600; padding-top: 2px; }
+  .t-journals-controls { display: grid !important; grid-template-columns: 1fr; gap: 10px !important; align-items: stretch !important; }
+  .t-journals-date-field { display: grid !important; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 8px; }
+  .t-journals-date-field label { margin-bottom: 0 !important; }
+  .t-journals-date-field input { width: 100% !important; min-width: 0 !important; }
+  .t-journals-action-row { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .t-journals-action-row .btn,
+  #t-journals-search,
+  .t-journals-review-btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #page-t-settings [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
 }
 @media (min-width: 769px) { .mobile-nav { display: none !important; } }
@@ -258,7 +335,7 @@ tr:last-child td { border-bottom: none; }
 
 .chart-bar-wrap { display: flex; flex-direction: column; gap: 10px; }
 .chart-bar-item { display: flex; align-items: center; gap: 10px; }
-.chart-bar-label { width: 80px; font-size: 12px; color: var(--text2); text-align: right; flex-shrink: 0; }
+.chart-bar-label { width: 80px; font-size: 12px; color: var(--text2); text-align: left; flex-shrink: 0; }
 .chart-bar-track { flex: 1; height: 8px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
 .chart-bar-fill { height: 100%; border-radius: 4px; transition: width 0.8s cubic-bezier(0.34,1.56,0.64,1); }
 .chart-bar-pct { width: 40px; font-size: 12px; color: var(--text2); font-family: 'Space Mono', monospace; }
@@ -341,7 +418,7 @@ tr:last-child td { border-bottom: none; }
   .stats-control-actions .btn { flex:none; width:100%; justify-content:center; }
   .company-filter-hint { min-height:auto; padding:10px 12px; }
   #company-filter-btn { min-height:46px; }
-  #page-t-students .student-mobile-table td.student-action-cell { grid-template-columns: 1fr; }
+  #page-t-students .student-mobile-table td.student-action-cell { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* 帳號管理頁 */
@@ -720,7 +797,7 @@ tr:last-child td { border-bottom: none; }
             </div>
             <div id="stats-panel-submit"><div class="card"><div id="submit-stats-content"><div class="empty-state"><div class="icon">📊</div><p>請輸入日期區間後按查詢</p></div></div></div></div>
             <div id="stats-panel-location" class="hidden">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+              <div class="location-cards-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
                 <div class="card">
                   <div style="font-size:15px;font-weight:700;margin-bottom:10px">🗺️ 縣市分布</div>
                   <div id="city-filter-summary" style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:6px 10px;background:var(--bg3);border-radius:6px">查詢後顯示</div>
@@ -812,13 +889,13 @@ tr:last-child td { border-bottom: none; }
                   <button class="salary-sub-tab" id="salary-tab-detail" onclick="switchSalaryDetailTab('detail')">📄 全部明細</button>
                 </div>
                 <div id="salary-panel-student" class="salary-detail-panel">
-                  <div class="table-wrap"><table><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>公司</th><th>月數</th><th>平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:420px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th style="white-space:nowrap">姓名</th><th style="min-width:120px">公司</th><th style="white-space:nowrap">月數</th><th style="white-space:nowrap">平均薪資</th></tr></thead><tbody id="salary-student-table"></tbody></table></div>
                 </div>
                 <div id="salary-panel-company" class="salary-detail-panel hidden">
-                  <div class="table-wrap"><table><thead><tr><th>公司名稱</th><th>學生數</th><th>平均薪資</th></tr></thead><tbody id="salary-company-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:320px"><thead><tr><th style="min-width:140px">公司名稱</th><th style="white-space:nowrap">學生數</th><th style="white-space:nowrap">平均薪資</th></tr></thead><tbody id="salary-company-table"></tbody></table></div>
                 </div>
                 <div id="salary-panel-detail" class="salary-detail-panel hidden">
-                  <div class="table-wrap"><table><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>公司</th><th>月份</th><th>薪資</th><th>師傅/學長姐</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
+                  <div class="table-wrap"><table style="min-width:380px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th style="white-space:nowrap">姓名</th><th style="min-width:120px">公司</th><th style="white-space:nowrap">月份</th><th style="white-space:nowrap">薪資</th></tr></thead><tbody id="salary-detail-table"></tbody></table></div>
                 </div>
               </div>
             </div>
@@ -830,15 +907,21 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-journals" class="hidden fade-in">
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-          <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
-          <input type="date" id="t-journals-date-start" style="min-width:150px">
-          <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
-          <input type="date" id="t-journals-date-end" style="min-width:150px">
-          <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
-          <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
+        <div class="t-journals-controls" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
+            <input type="date" id="t-journals-date-start" style="min-width:150px">
+          </div>
+          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
+            <input type="date" id="t-journals-date-end" style="min-width:150px">
+          </div>
+          <div class="t-journals-action-row" style="display:flex;gap:10px">
+            <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
+          </div>
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
-          <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
+          <button class="btn btn-sm t-journals-review-btn" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
         </div>
         <div id="t-cache-indicator" style="min-height:18px;margin-bottom:6px;font-size:11px;color:var(--text2)"></div>
         <!-- 批次選取工具列 -->
@@ -856,7 +939,7 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-export" class="hidden fade-in">
         <div class="page-title">⬇️ 匯出下載</div>
         <div class="page-subtitle">列印或另存月記資料為 PDF</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="display:grid;grid-template-columns:1fr;gap:16px">
           <div class="card">
             <div style="font-size:15px;font-weight:700;margin-bottom:6px">📁 按日期範圍匯出</div>
             <p style="font-size:13px;color:var(--text2);margin-bottom:16px">匯出指定日期範圍所有學生的月記</p>
@@ -1696,11 +1779,12 @@ async function loadAdminPage() {
         if (a.protected) item.protected = true;
       });
       adminList.innerHTML = Array.from(adminMap.values()).map(a => {
-        const ids = a.ids.join('|').replace(/'/g, "\\'");
-        const safeEmail = (a.email || '').replace(/'/g, "\\'");
+        const label = a.label || a.email || '';
+        const idsArg = jsArg(a.ids.join('|'));
+        const emailArg = jsArg(a.email || label);
         return `<span class="admin-tag">
-          👨‍🏫 ${a.label}
-          ${!a.isSelf ? (a.protected ? '<span style="font-size:11px;color:var(--accent-yellow)">🔒</span>' : `<button onclick="removeAdmin('${ids}','${safeEmail || a.label.replace(/'/g, "\\'")}')" title="移除">×</button>`) : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
+          👨‍🏫 ${escapeHtml(label)}
+          ${!a.isSelf ? (a.protected ? '<span style="font-size:11px;color:var(--accent-yellow)">🔒</span>' : `<button onclick="removeAdmin(${idsArg},${emailArg})" title="移除">×</button>`) : '<span style="font-size:11px;color:var(--text3)">(你)</span>'}
         </span>`;
       }).join('');
     }
@@ -2972,7 +3056,7 @@ function renderSalaryStatsFromCache(cache) {
 
   document.getElementById('salary-student-table').innerHTML = studentList.map(s => {
     const avg = s.avg;
-    return `<tr><td>${escapeHtml(s.seatNo)}</td><td>${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td>${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
+    return `<tr><td style="white-space:nowrap">${escapeHtml(s.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td style="white-space:nowrap">${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無薪資資料</td></tr>';
 
   const companyMap = {};
@@ -2992,8 +3076,8 @@ function renderSalaryStatsFromCache(cache) {
   }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   document.getElementById('salary-detail-table').innerHTML = [...journals].sort((a,b)=>(String(a.seatNo || '')+String(a.month).padStart(2,'0')).localeCompare(String(b.seatNo || '')+String(b.month).padStart(2,'0'))).map(j =>
-    `<tr><td>${escapeHtml(j.seatNo)}</td><td>${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td>${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700">$${(j.salary || 0).toLocaleString()}</td><td>${escapeHtml(j.mentor || '-')}</td></tr>`
-  ).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
+    `<tr><td>${escapeHtml(j.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td style="white-space:nowrap">${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${(j.salary || 0).toLocaleString()}</td></tr>`
+  ).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   renderSalaryFocus(studentList, companyList);
   renderSalaryAlerts({ studentList, companyList, allActiveJournals: filteredActiveJournals, classAvg, stuCompanyMap });
@@ -3258,17 +3342,27 @@ async function exportSemesterPDF() {
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
   const { collection, collectionGroup } = firebase_funcs;
+  // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (win) {
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
+  }
   showLoading();
   try {
     const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '月記資料');
     let journals = userJournalData(jSnap);
     if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
     journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
-    if (!journals.length) return toast('無月記資料可匯出', 'error');
-    printJournalsPDF(journals, '實習月記總覽');
+    if (!journals.length) {
+      if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>無資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">無月記資料可匯出</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
+      return toast('無月記資料可匯出', 'error');
+    }
+    printJournalsPDF(journals, '實習月記總覽', win);
   } catch(e) {
     console.error('匯出全部月記失敗', e);
-    toast('匯出失敗：' + (e.message || '請確認網路或權限設定'), 'error');
+    const errMsg = e.message || '請確認網路或權限設定';
+    if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + errMsg + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
+    toast('匯出失敗：' + errMsg, 'error');
   } finally {
     hideLoading();
   }
@@ -3280,19 +3374,29 @@ async function exportStudentPDF() {
   // value 格式：seatNo|semester（含學期資訊，避免跨學期同座號混淆）
   const [seat, semester] = val.split('|');
   const { collectionGroup } = firebase_funcs;
+  // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (win) {
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
+  }
   showLoading();
   try {
     const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料');
     const journals = userJournalData(jSnap)
       .filter(j => String(j.seatNo) === String(seat) && (semester ? j.semester === semester : true))
       .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-    if (!journals.length) return toast('該學生尚無月記', 'error');
+    if (!journals.length) {
+      if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>無資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">該學生尚無月記</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
+      return toast('該學生尚無月記', 'error');
+    }
     const name = journals[0].studentName || seat;
     const semLabel = semester ? ` (${semesterLabel(semester)})` : '';
-    printJournalsPDF(journals, `${name}實習月記${semLabel}`);
+    printJournalsPDF(journals, `${name}實習月記${semLabel}`, win);
   } catch(e) {
     console.error('匯出單一學生月記失敗', e);
-    toast('匯出失敗：' + (e.message || '請確認網路或權限設定'), 'error');
+    const errMsg = e.message || '請確認網路或權限設定';
+    if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + errMsg + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
+    toast('匯出失敗：' + errMsg, 'error');
   } finally {
     hideLoading();
   }
@@ -3520,10 +3624,10 @@ function renderJournalCard(j, isTeacher) {
   let salaryPhotoHtml = '';
   if (j.salaryPhoto) {
     const _sp = resolveImgSrc(j.salaryPhoto);
-    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
+    salaryPhotoHtml = `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
   } else if (j.hasSalaryPhoto) {
     const btnId = `sp-btn-${safeDomIdPart(j.seatNo)}-${safeDomIdPart(j.semester)}-${safeDomIdPart(j.month)}`;
-    salaryPhotoHtml = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--bg3)"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
+    salaryPhotoHtml = `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
   }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
@@ -3607,22 +3711,267 @@ function openPhotoModal(src) {
   openModal('photo-modal');
 }
 
-// ---- PDF 列印 ----
-function printJournalsPDF(journals, title) {
-  journals = [...journals].sort((a,b) => { const s=(a.seatNo||'').localeCompare(b.seatNo||''); return s!==0?s:(a.month||0)-(b.month||0); });
-  const rows = journals.map((j, idx) => {
-    const entries = (j.entries||[]).map((e,i) => `<div class="print-block" style="border:1px solid #ccc;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa"><div style="font-weight:600;margin-bottom:4px">工作摘要 ${i+1}　${escapeHtml(e.date||'')}</div>${e.address?`<div style="color:#555;margin-bottom:4px">📍 工作地點：${escapeHtml(e.address)}</div>`:''}<div style="margin-bottom:4px">內容：${escapeHtml(e.content||'')}</div>${(e.photos||[]).length?`<div style="font-weight:600;margin:8px 0 6px">📷 工作照片</div><div class="print-block" style="display:flex;flex-wrap:wrap;gap:8px">${(e.photos||[]).map(p=>{const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" style="max-width:350px;max-height:240px;border-radius:4px;border:1px solid #ddd;object-fit:cover;">`;}).join('')}</div>`:''}</div>`).join('');
-    const pageBreak = '';
-    const salaryText = j.salary ? `${Number(j.salary).toLocaleString()} 元` : '-';
-    const salaryPhotoPrint = j.salaryPhoto ? `<div class="print-block" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:6px">💴 薪資單</div><div style="border:1px solid #ccc;border-radius:6px;padding:12px;background:#fafafa"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" style="max-width:350px;max-height:240px;border-radius:6px;border:1px solid #ddd;display:block"></div></div>` : '<div style="margin-bottom:14px"></div>';
-    const commentPrint = (j.teacherReviewed||j.teacherComment) ? `<div class="print-block" style="margin-top:10px;border:1px solid #86efac;border-radius:6px;padding:10px 12px;background:#f0fdf4"><b style="color:#166534">💬 老師評語 <span style="background:#bbf7d0;color:#166534;border-radius:10px;padding:2px 8px;font-size:11px">✅ 已審閱</span></b><br><span style="color:#1a1a1a">${escapeHtml(j.teacherComment||'（老師已閱讀，無文字評語）')}</span></div>` : '';
-    return `<div class="journal-print" style="${pageBreak}padding:20px 10px"><h2 style="font-size:18px;border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:14px">🗒️ ${escapeHtml(j.studentName||'')}　實習月記</h2><table class="print-block" style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px"><thead><tr style="background:#1e3a5f;color:#fff"><th style="padding:6px 10px;border:1px solid #999">座號</th><th style="padding:6px 10px;border:1px solid #999">姓名</th><th style="padding:6px 10px;border:1px solid #999">實習公司</th><th style="padding:6px 10px;border:1px solid #999">學期</th><th style="padding:6px 10px;border:1px solid #999">月份</th></tr></thead><tbody><tr><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${escapeHtml(j.seatNo||'')}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${escapeHtml(j.studentName||'')}</td><td style="padding:6px 10px;border:1px solid #ccc">${escapeHtml(j.company||'')}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${escapeHtml(j.semester||'')}</td><td style="padding:6px 10px;border:1px solid #ccc;text-align:center">${escapeHtml(j.month||'')}月</td></tr></tbody></table><div class="print-block" style="margin-bottom:8px"><b>主要師傅/學長姐：</b>${escapeHtml(j.mentor||'')}</div><div class="print-block" style="margin-bottom:8px"><b>本月薪資：</b>${escapeHtml(salaryText)}</div>${salaryPhotoPrint}<div style="margin-bottom:8px;font-weight:600">工作摘要</div>${entries||'<div style="color:#999;font-size:13px">無工作摘要</div>'}<div class="print-block" style="margin-top:14px"><b>本月心得：</b><div style="border:1px solid #ccc;border-radius:6px;padding:12px;min-height:60px;margin-top:6px;background:#fafafa">${escapeHtml(j.reflection||'')}</div></div>${commentPrint}</div>`;
-  }).join('<hr style="margin:0;border:none">');
-  const win = window.open('', '_blank', 'width=900,height=700');
-  if (!win) return toast('請允許彈出視窗，再試一次', 'error');
-  win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${title}</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'微軟正黑體','Noto Sans TC',sans-serif;font-size:13px;color:#1a1a1a;background:#fff;}.journal-print{break-after:page;page-break-after:always;}.journal-print:last-child{break-after:auto;page-break-after:auto;}.print-block{break-inside:avoid;page-break-inside:avoid;}img{break-inside:avoid;page-break-inside:avoid;}@media print{@page{size:A4;margin:15mm 12mm;}body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.content{margin-top:0!important;}.journal-print{break-after:page;page-break-after:always;}.journal-print:last-child{break-after:auto;page-break-after:auto;}.print-block{break-inside:avoid;page-break-inside:avoid;}}.print-toolbar{position:fixed;top:0;left:0;right:0;z-index:999;background:#1e3a5f;color:#fff;padding:10px 20px;display:flex;align-items:center;gap:12px;font-size:14px;font-weight:600;}.print-toolbar button{padding:7px 18px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}.btn-print{background:#4ade80;color:#1a1a1a;}.btn-close{background:#f87171;color:#fff;}.content{margin-top:52px;max-width:800px;margin-left:auto;margin-right:auto;padding:10px;}</style></head><body><div class="no-print print-toolbar">📄 ${title}<button class="btn-print" onclick="window.print()">🖨️ 列印 / 另存 PDF</button><button class="btn-close" onclick="window.close()">✕ 關閉</button></div><div class="content">${rows}</div></body></html>`);
-  win.document.close();
-  toast('已開啟列印視窗', 'success');
+// ---- PDF 產生（pdfmake）----
+function setupPdfMakeFonts() {
+  if (!window.pdfMake) return false;
+  const notoRegular = 'https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf';
+  const notoBold = 'https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Bold.otf';
+  const fonts = {
+    NotoSansTC: {
+      normal: notoRegular,
+      bold: notoBold,
+      italics: notoRegular,
+      bolditalics: notoBold
+    }
+  };
+  pdfMake.fonts = fonts;
+  return true;
+}
+
+function pdfText(v) {
+  const s = String(v ?? '');
+  return s.replace(/([A-Za-z0-9]{18})(?=[A-Za-z0-9])/g, '$1\u200b');
+}
+
+function pdfDateText() {
+  const d = new Date();
+  const meridiem = d.getHours() < 12 ? '上午' : '下午';
+  const hh = String(d.getHours() % 12 || 12);
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${meridiem}${hh}:${mm}`;
+}
+
+function pdfFileName(title) {
+  return String(title || '實習月記')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '')
+    .slice(0, 80) + '.pdf';
+}
+
+function imageToDataUrl(src) {
+  const url = resolveImgSrc(src);
+  if (!url) return Promise.resolve(null);
+  if (/^data:image\//i.test(url)) return Promise.resolve(url);
+  return fetch(url, { mode: 'cors', cache: 'force-cache' })
+    .then(r => {
+      if (!r.ok) throw new Error(`圖片讀取失敗：${r.status}`);
+      return r.blob();
+    })
+    .then(blob => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    }))
+    .catch(err => {
+      console.warn('PDF 圖片略過', url, err);
+      return null;
+    });
+}
+
+async function preparePdfJournalImages(journals) {
+  return Promise.all(journals.map(async j => {
+    const copy = { ...j };
+    copy._pdfSalaryPhoto = await imageToDataUrl(j.salaryPhoto);
+    copy._pdfEntries = await Promise.all((j.entries || []).map(async e => ({
+      ...e,
+      _pdfPhotos: (await Promise.all((e.photos || []).map(p => imageToDataUrl(p)))).filter(Boolean)
+    })));
+    return copy;
+  }));
+}
+
+function pdfInfoTable(j) {
+  return {
+    table: {
+      widths: [44, 72, '*', 60, 44],
+      body: [
+        [
+          { text: '座號', style: 'tableHead' },
+          { text: '姓名', style: 'tableHead' },
+          { text: '實習公司', style: 'tableHead' },
+          { text: '學期', style: 'tableHead' },
+          { text: '月份', style: 'tableHead' }
+        ],
+        [
+          { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.studentName || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.company || ''), style: 'tableCell' },
+          { text: pdfText(j.semester || ''), style: 'tableCell', alignment: 'center' },
+          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
+        ]
+      ]
+    },
+    layout: {
+      fillColor: (rowIndex) => rowIndex === 0 ? '#1e3a5f' : null,
+      hLineColor: () => '#999',
+      vLineColor: () => '#999',
+      paddingLeft: () => 5,
+      paddingRight: () => 5,
+      paddingTop: () => 4,
+      paddingBottom: () => 4
+    },
+    margin: [0, 0, 0, 10]
+  };
+}
+
+function pdfWorkEntry(e, idx) {
+  const stack = [
+    { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
+  ];
+  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}`, color: '#555', margin: [0, 0, 0, 3] });
+  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, e._pdfPhotos?.length ? 4 : 0] });
+  if (e._pdfPhotos?.length) {
+    stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
+    stack.push({
+      columns: e._pdfPhotos.slice(0, 3).map(img => ({ image: img, fit: [210, 92], margin: [0, 0, 6, 0] })),
+      columnGap: 6,
+      margin: [0, 0, 0, 0]
+    });
+  }
+  return {
+    table: { widths: ['*'], body: [[{ stack }]] },
+    layout: {
+      fillColor: () => '#fafafa',
+      hLineColor: () => '#ccc',
+      vLineColor: () => '#ccc',
+      paddingLeft: () => 8,
+      paddingRight: () => 8,
+      paddingTop: () => 7,
+      paddingBottom: () => 7
+    },
+    margin: [0, 0, 0, 7]
+  };
+}
+
+function pdfJournalBlock(j, idx) {
+  const salaryNum = Number(j.salary);
+  const salaryText = Number.isFinite(salaryNum) ? `${salaryNum.toLocaleString()} 元` : '-';
+  const content = [
+    { text: `${pdfText(j.studentName || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
+    pdfInfoTable(j),
+    { text: `主要師傅/學長姐：${pdfText(j.mentor || '')}`, margin: [0, 0, 0, 4] },
+    { text: `本月薪資：${pdfText(salaryText)}`, margin: [0, 0, 0, 6] }
+  ];
+  if (j._pdfSalaryPhoto) {
+    content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
+    content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
+  }
+  content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
+  const entries = j._pdfEntries || [];
+  if (entries.length) entries.forEach((e, i) => content.push(pdfWorkEntry(e, i)));
+  else content.push({ text: '無工作摘要', color: '#999', margin: [0, 0, 0, 8] });
+  content.push({
+    text: '本月心得：',
+    bold: true,
+    margin: [0, 6, 0, 4]
+  });
+  content.push({
+    table: { widths: ['*'], body: [[{ text: pdfText(j.reflection || ''), margin: [2, 2, 2, 2] }]] },
+    layout: {
+      fillColor: () => '#fafafa',
+      hLineColor: () => '#ccc',
+      vLineColor: () => '#ccc',
+      paddingLeft: () => 6,
+      paddingRight: () => 6,
+      paddingTop: () => 6,
+      paddingBottom: () => 6
+    },
+    margin: [0, 0, 0, 7]
+  });
+  if (j.teacherReviewed || j.teacherComment) {
+    content.push({
+      table: { widths: ['*'], body: [[{ stack: [
+        { text: '老師評語　已審閱', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
+      ] }]] },
+      layout: {
+        fillColor: () => '#f0fdf4',
+        hLineColor: () => '#86efac',
+        vLineColor: () => '#86efac',
+        paddingLeft: () => 8,
+        paddingRight: () => 8,
+        paddingTop: () => 7,
+        paddingBottom: () => 7
+      },
+      margin: [0, 0, 0, 8]
+    });
+  }
+  return content;
+}
+
+function buildPdfDocDefinition(journals, title) {
+  const content = [];
+  journals.forEach((j, idx) => content.push(...pdfJournalBlock(j, idx)));
+  return {
+    pageSize: 'A4',
+    pageMargins: [36, 40, 36, 34],
+    info: { title },
+    defaultStyle: { font: 'NotoSansTC', fontSize: 12, lineHeight: 1.25 },
+    footer: (currentPage, pageCount) => ({
+      columns: [
+        { text: pdfDateText(), alignment: 'left', margin: [36, 0, 0, 0], fontSize: 8 },
+        { text: pdfText(title), alignment: 'center', fontSize: 8 },
+        { text: `${currentPage}/${pageCount}`, alignment: 'right', margin: [0, 0, 36, 0], fontSize: 8 }
+      ]
+    }),
+    styles: {
+      journalTitle: { fontSize: 15, bold: true, margin: [0, 0, 0, 8] },
+      tableHead: { color: '#fff', bold: true, fontSize: 9, alignment: 'center' },
+      tableCell: { fontSize: 9.5 }
+    },
+    content
+  };
+}
+
+function openPdfBlob(blob, filename, win) {
+  const url = URL.createObjectURL(blob);
+  if (win && !win.closed) {
+    win.location.href = url;
+  } else {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
+// win 由呼叫端在使用者點擊的同步執行流中預先開啟，以相容 iOS Safari 彈出視窗限制。
+async function printJournalsPDF(journals, title, win) {
+  if (!setupPdfMakeFonts()) {
+    if (win && !win.closed) win.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#b91c1c">PDF 套件載入失敗，請確認網路後重試。</p>';
+    return toast('PDF 套件載入失敗，請確認網路後重試', 'error');
+  }
+  try {
+    journals = [...journals].sort((a,b) => {
+      const s = (a.seatNo || '').localeCompare(b.seatNo || '');
+      return s !== 0 ? s : (a.month || 0) - (b.month || 0);
+    });
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write('<html><head><meta charset="UTF-8"><title>產生 PDF 中</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">正在產生 PDF，請稍候...</p></body></html>');
+      win.document.close();
+    }
+    const prepared = await preparePdfJournalImages(journals);
+    const docDefinition = buildPdfDocDefinition(prepared, title);
+    const filename = pdfFileName(title);
+    pdfMake.createPdf(docDefinition).getBlob(blob => {
+      openPdfBlob(blob, filename, win);
+      toast('PDF 已產生', 'success');
+    });
+  } catch (e) {
+    console.error('pdfmake 匯出失敗', e);
+    const msg = e.message || 'PDF 產生失敗';
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write(`<html><head><meta charset="UTF-8"><title>PDF 產生失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">PDF 產生失敗</p><p style="font-size:14px;color:#555;">${escapeHtml(msg)}</p></body></html>`);
+      win.document.close();
+    }
+    toast('PDF 產生失敗：' + msg, 'error');
+  }
 }
 
 // 地點統計詳細
