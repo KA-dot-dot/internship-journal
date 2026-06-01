@@ -185,8 +185,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .main-content { padding: 14px; padding-bottom: 80px; }
-  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
-  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 48px; }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
+  .mobile-nav::-webkit-scrollbar { display: none; }
+  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 56px; flex-shrink: 0; }
   .mobile-nav-item .icon { font-size: 22px; }
   .mobile-nav-item.active { color: var(--accent); }
   .top-header { padding: 0 14px; }
@@ -1052,11 +1053,14 @@ tr:last-child td { border-bottom: none; }
 
   <!-- 手機底部導航 -->
   <div class="mobile-nav" id="teacher-mobile-nav">
-    <button class="mobile-nav-item active" onclick="showPage('t-dashboard')"><span class="icon">📊</span>主頁</button>
-    <button class="mobile-nav-item" onclick="showPage('t-students')"><span class="icon">👥</span>學生</button>
+    <button class="mobile-nav-item active" onclick="showPage('t-dashboard')"><span class="icon">🏠</span>主頁</button>
+    <button class="mobile-nav-item" onclick="showPage('t-students')" data-page="t-students"><span class="icon">👥</span>學生</button>
+    <button class="mobile-nav-item" onclick="showPage('t-deadline')" data-page="t-deadline"><span class="icon">📅</span>截止</button>
     <button class="mobile-nav-item" onclick="showPage('t-stats')" data-page="t-stats"><span class="icon">📊</span>統計</button>
-    <button class="mobile-nav-item" onclick="showPage('t-admin')"><span class="icon">🔑</span>帳號</button>
-    <button class="mobile-nav-item" onclick="showPage('t-export')"><span class="icon">⬇️</span>下載</button>
+    <button class="mobile-nav-item" onclick="showPage('t-journals')" data-page="t-journals"><span class="icon">📖</span>月記</button>
+    <button class="mobile-nav-item" onclick="showPage('t-export')" data-page="t-export"><span class="icon">⬇️</span>下載</button>
+    <button class="mobile-nav-item" onclick="showPage('t-admin')" data-page="t-admin"><span class="icon">🔑</span>帳號</button>
+    <button class="mobile-nav-item" onclick="showPage('t-settings')" data-page="t-settings"><span class="icon">⚙️</span>設定</button>
   </div>
 </div>
 
