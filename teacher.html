@@ -431,7 +431,8 @@ tr:last-child td { border-bottom: none; }
 .entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
 
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7; }
+.entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
+.comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
 /* ===== 老師端批次刪除 ===== */
@@ -3648,7 +3649,7 @@ function renderJournalCard(j, isTeacher) {
     </div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span>繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
-    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
+    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
     ${(isTeacher && hasComment)
       ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${escapeHtml(j.teacherComment)}</div>`
