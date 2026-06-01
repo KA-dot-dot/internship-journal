@@ -185,9 +185,8 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .main-content { padding: 14px; padding-bottom: 80px; }
-  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
-  .mobile-nav::-webkit-scrollbar { display: none; }
-  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 56px; flex-shrink: 0; }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
+  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 4px; flex: 1; }
   .mobile-nav-item .icon { font-size: 22px; }
   .mobile-nav-item.active { color: var(--accent); }
   .top-header { padding: 0 14px; }
