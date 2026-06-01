@@ -103,7 +103,7 @@ input, textarea, select { font-family: var(--font-main); }
 input[type="text"], input[type="password"], input[type="date"], input[type="number"],
 select, textarea {
   background: var(--bg3); border: 1px solid var(--border); color: var(--text);
-  border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; width: 100%; max-width: 100%; box-sizing: border-box; outline: none; transition: border-color 0.2s; display: block;
+  border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; width: 100%; max-width: 100%; box-sizing: border-box; -webkit-appearance: none; appearance: none; outline: none; transition: border-color 0.2s; display: block;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 textarea { resize: vertical; min-height: 90px; }
@@ -185,7 +185,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 @media (max-width: 768px) {
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
   .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
-  input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; }
+  input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
   .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 4px; flex: 1; }
   .mobile-nav-item .icon { font-size: 22px; }
