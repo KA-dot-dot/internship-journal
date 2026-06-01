@@ -307,46 +307,6 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   #t-journals-search,
   .t-journals-review-btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #page-t-settings [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
-
-  /* ── 學生管理：學期操控列 ── */
-  .student-mgmt-controls {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    align-items: stretch !important;
-    gap: 10px !important;
-  }
-  .student-mgmt-controls .form-group {
-    grid-column: 1 / -1;
-    min-width: 0 !important;
-  }
-  .student-mgmt-controls .form-group select {
-    width: 100% !important;
-    min-width: 0 !important;
-    font-size: 14px !important;
-    padding: 10px 14px !important;
-  }
-  .student-mgmt-controls .btn {
-    justify-content: center;
-    padding: 10px 8px !important;
-    font-size: 13px !important;
-    text-align: center;
-    min-height: 42px;
-  }
-  .student-mgmt-controls .btn-danger {
-    grid-column: 1 / -1;
-  }
-
-  /* ── 學生管理：新增 / 批次匯入按鈕列 ── */
-  .student-add-btns {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 10px !important;
-  }
-  .student-add-btns .btn {
-    justify-content: center;
-    min-height: 48px;
-    font-size: 15px !important;
-  }
 }
 @media (min-width: 769px) { .mobile-nav { display: none !important; } }
 
@@ -660,8 +620,8 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">學生總數</div>
             <div class="stat-value" id="stat-total-students">-</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">本月已繳</div>
+          <div class="stat-card" onclick="toggleStatList('submitted')" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">本月已繳 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent-green)" id="stat-submitted">-</div>
           </div>
           <div class="stat-card" onclick="toggleStatList('missing')" style="cursor:pointer;user-select:none" title="點擊查看名單">
@@ -677,6 +637,12 @@ tr:last-child td { border-bottom: none; }
           <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
             <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">📋 本月未繳名單</div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+        <div id="stat-list-panel-submitted" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-green);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-green);margin-bottom:10px">📋 本月已繳名單</div>
+            <div id="stat-list-names-submitted" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
         <div style="font-size:15px;font-weight:700;margin:18px 0 12px">老師審閱進度</div>
@@ -727,7 +693,7 @@ tr:last-child td { border-bottom: none; }
         <div class="page-title">👥 學生管理</div>
         <div class="page-subtitle">管理學生基本資料與實習公司</div>
         <div class="card" style="margin-bottom:16px">
-          <div class="student-mgmt-controls" style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
             <div class="form-group" style="margin-bottom:0;min-width:220px">
               <label>管理學期</label>
               <select id="student-term-select" onchange="onStudentTermChanged()" style="padding:6px 14px;font-size:12px;width:auto;min-width:220px"></select>
@@ -738,7 +704,7 @@ tr:last-child td { border-bottom: none; }
           </div>
           <div id="student-term-status" style="margin-top:10px;font-size:12px;color:var(--text2)">載入中...</div>
         </div>
-        <div class="student-add-btns" style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+        <div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="openAddStudentModal()">➕ 新增學生</button>
           <button class="btn btn-secondary" onclick="openImportModal()">📥 批次匯入</button>
         </div>
@@ -1502,7 +1468,7 @@ async function updateStudentTermStatus() {
   const active = await getActiveRosterSemester();
   const roster = await loadTermRoster(selected, { fallbackRoot: selected === active });
   const isActive = selected === active;
-  el.innerHTML = `目前登入名單：<strong>${escapeHtml(semesterLabel(active))}</strong>　｜　正在管理：<strong>${escapeHtml(semesterLabel(selected))}</strong>　｜　名單 <strong>${roster.length}</strong> 人${isActive ? '　<span class="badge badge-green">登入中</span>' : ''}`;
+  el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:12px;color:var(--text2)"><span style="white-space:nowrap">目前登入名單：<strong style="color:var(--text)">${escapeHtml(semesterLabel(active))}</strong></span><span style="color:var(--border)">｜</span><span style="white-space:nowrap">正在管理：<strong style="color:var(--text)">${escapeHtml(semesterLabel(selected))}</strong></span><span style="color:var(--border)">｜</span><span style="white-space:nowrap">名單 <strong style="color:var(--text)">${roster.length}</strong> 人</span>${isActive ? '<span class="badge badge-green">登入中</span>' : ''}</div>`;
 }
 
 async function onStudentTermChanged() {
@@ -1998,12 +1964,13 @@ async function loadTeacherDashboard() {
   const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id));
   window._statLists = {
     missing:    missingStudents.map(d => `${d.id} ${d.data().name || d.id}`),
+    submitted:  activeJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
   };
   // 重設所有展開面板
-  ['missing','reviewed','unreviewed','commented'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2013,6 +1980,7 @@ async function loadTeacherDashboard() {
 function toggleStatList(key) {
   const cfg = {
     missing:    { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
+    submitted:  { color:'var(--accent-green)',  empty:'本月尚無學生繳交月記。' },
     reviewed:   { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
     unreviewed: { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
     commented:  { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' }
@@ -2021,7 +1989,7 @@ function toggleStatList(key) {
   const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
   // 關閉其他面板
-  ['missing','reviewed','unreviewed','commented'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
     if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
   });
   const isHidden = panel.style.display === 'none';
