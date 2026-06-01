@@ -912,11 +912,11 @@ tr:last-child td { border-bottom: none; }
         <div class="t-journals-controls" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
             <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
-            <input type="date" id="t-journals-date-start" style="min-width:150px">
+            <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
           </div>
           <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
             <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
-            <input type="date" id="t-journals-date-end" style="min-width:150px">
+            <input type="date" id="t-journals-date-end" style="width:100%;display:block;box-sizing:border-box">
           </div>
           <div class="t-journals-action-row" style="display:flex;gap:10px">
             <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
@@ -945,8 +945,8 @@ tr:last-child td { border-bottom: none; }
           <div class="card">
             <div style="font-size:15px;font-weight:700;margin-bottom:6px">📁 按日期範圍匯出</div>
             <p style="font-size:13px;color:var(--text2);margin-bottom:16px">匯出指定日期範圍所有學生的月記</p>
-            <div class="form-group"><label>起始日期</label><input type="date" id="export-date-start" onchange="loadExportStudents()"></div>
-            <div class="form-group"><label>結束日期</label><input type="date" id="export-date-end" onchange="loadExportStudents()"></div>
+            <div class="form-group"><label>起始日期</label><div style="width:100%"><input type="date" id="export-date-start" onchange="loadExportStudents()" style="width:100%;display:block;box-sizing:border-box"></div></div>
+            <div class="form-group"><label>結束日期</label><div style="width:100%"><input type="date" id="export-date-end" onchange="loadExportStudents()" style="width:100%;display:block;box-sizing:border-box"></div></div>
             <button class="btn btn-purple" onclick="exportSemesterPDF()">📄 列印/另存PDF</button>
           </div>
           <div class="card">
