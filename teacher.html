@@ -473,6 +473,32 @@ tr:last-child td { border-bottom: none; }
 .salary-sub-tab.active { background:rgba(79,142,247,0.16); border-color:rgba(79,142,247,0.45); color:var(--accent); font-weight:700; }
 .salary-detail-panel.hidden { display:none; }
 .salary-advanced-toggle { width:100%; border:1px solid var(--border); background:var(--bg3); color:var(--text); border-radius:var(--radius); padding:12px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; font-weight:700; margin-bottom:10px; }
+
+/* ── 學期狀態列：三欄對齊 ── */
+.term-status-grid {
+  display: grid;
+  grid-template-columns: auto 24px 1fr;
+  row-gap: 5px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.term-status-grid .ts-sep {
+  text-align: center;
+  color: var(--text3);
+  font-size: 13px;
+  user-select: none;
+}
+.term-status-grid .ts-val {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--text);
+  font-weight: 600;
+}
 </style>
 </head>
 <body>
@@ -1468,7 +1494,7 @@ async function updateStudentTermStatus() {
   const active = await getActiveRosterSemester();
   const roster = await loadTermRoster(selected, { fallbackRoot: selected === active });
   const isActive = selected === active;
-  el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:12px;color:var(--text2)"><span style="white-space:nowrap">目前登入名單：<strong style="color:var(--text)">${escapeHtml(semesterLabel(active))}</strong></span><span style="color:var(--border)">｜</span><span style="white-space:nowrap">正在管理：<strong style="color:var(--text)">${escapeHtml(semesterLabel(selected))}</strong></span><span style="color:var(--border)">｜</span><span style="white-space:nowrap">名單 <strong style="color:var(--text)">${roster.length}</strong> 人</span>${isActive ? '<span class="badge badge-green">登入中</span>' : ''}</div>`;
+  el.innerHTML = `<div class="term-status-grid"><span>目前登入名單</span><span class="ts-sep">｜</span><span class="ts-val">${escapeHtml(semesterLabel(active))}</span><span>正在管理</span><span class="ts-sep">｜</span><span class="ts-val">${escapeHtml(semesterLabel(selected))}</span><span>名單</span><span class="ts-sep">｜</span><span class="ts-val">${roster.length} 人${isActive ? ' <span class="badge badge-green">登入中</span>' : ''}</span></div>`;
 }
 
 async function onStudentTermChanged() {
