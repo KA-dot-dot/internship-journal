@@ -1342,13 +1342,17 @@ async function saveJournal() {
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
   const { doc, getDoc, setDoc } = firebase_funcs;
-  const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
-  if (deadlineSnap.exists()) {
-    const deadline = deadlineSnap.data();
-    const now = new Date();
-    const open = new Date(deadline.openDate);
-    const close = new Date(deadline.closeDate);
-    if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
+  try {
+    const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
+    if (deadlineSnap.exists()) {
+      const deadline = deadlineSnap.data();
+      const now = new Date();
+      const open = new Date(deadline.openDate);
+      if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
+    }
+  } catch(e) {
+    // 截止日查詢失敗不擋儲存，僅 console 記錄
+    console.warn('截止日期查詢失敗，略過檢查', e);
   }
   const reflection = document.getElementById('write-reflection').value.trim();
   if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
@@ -1369,7 +1373,7 @@ async function saveJournal() {
     const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
     const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
     const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
-    const msg = validateCompleteTaiwanAddress(address);
+    const msg = address ? validateCompleteTaiwanAddress(address) : '';
     if (msg && !addressError) addressError = `第 ${entryIndex} 筆工作地址：${msg}`;
     if (address && (distance === null || isNaN(distance))) distanceError = true;
     const typeEl = document.getElementById(`${id}-type`);
@@ -2145,3 +2149,4 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+ㄋ
