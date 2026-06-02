@@ -4192,7 +4192,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   const months = Object.keys(monthDataMap).sort();
   const companies = [...companySet].sort();
   if (!months.length) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">📈</div><p>尚無薪資資料</p></div>';
+    container.innerHTML = '<div class="empty-state"><div class="icon">\u{1F4C8}</div><p>\u5C1A\u7121\u85AA\u8CC7\u8CC7\u6599</p></div>';
     if (legendEl) legendEl.innerHTML = ''; return;
   }
   const colorMap = {};
@@ -4208,195 +4208,162 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     const v = monthDataMap[m].total;
     return v.length ? Math.round(v.reduce((a,b)=>a+b,0)/v.length) : null;
   });
-  const allVals = [...classAvgs,...Object.values(companyAvgs).flat()].filter(v=>v!=null);
-  if (!allVals.length) return;
-  const maxV=Math.max(...allVals), rawMin=Math.min(...allVals);
-  const pad=(maxV-rawMin)*0.12||maxV*0.12||2000;
-  const minVal=Math.max(0,rawMin-pad), yRange=(maxV+pad)-minVal||1;
-  const W=580,H=210,ML=68,MR=60,MT=18,MB=42,plotW=W-ML-MR,plotH=H-MT-MB,n=months.length;
-  const xPos=i=>ML+(n>1?i*plotW/(n-1):plotW/2);
-  const yPos=v=>MT+plotH-((v-minVal)/yRange)*plotH;
-  function smPath(pts){
-    if(!pts.length) return '';
-    if(pts.length===1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
-    let d=`M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
-    for(let i=0;i<pts.length-1;i++){
-      const[x0,y0]=pts[i],[x1,y1]=pts[i+1],cx=(x0+x1)/2;
-      d+=` C ${cx.toFixed(1)} ${y0.toFixed(1)} ${cx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
-    } return d;
+
+  // \u4E92\u52D5\u72C0\u614B
+  const hiddenCompanies = new Set();
+  let hoveredCompany = null;
+
+  const W=580, H=210, ML=68, MR=60, MT=18, MB=42;
+  const plotW=W-ML-MR, plotH=H-MT-MB, n=months.length;
+  const xPos = i => ML + (n > 1 ? i * plotW / (n - 1) : plotW / 2);
+
+  function smPath(pts) {
+    if (!pts.length) return '';
+    if (pts.length === 1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0,y0]=pts[i],[x1,y1]=pts[i+1],cx=(x0+x1)/2;
+      d += ` C ${cx.toFixed(1)} ${y0.toFixed(1)} ${cx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
   }
-  let sp=[];
-  for(let i=0;i<5;i++){
-    const v=minVal+(yRange/4)*i, y=yPos(v).toFixed(1);
-    sp.push(`<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="#2a3047" stroke-width="1"/>`);
-    sp.push(`<text x="${ML-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="#8892aa">$${Math.round(v/1000)}k</text>`);
-  }
-  months.forEach((m,i)=>{
-    const x=xPos(i).toFixed(1),yBt=(MT+plotH).toFixed(1);
-    sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="#2a3047" stroke-width="1"/>`);
-    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m.slice(2)}</text>`);
-  });
-  sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
-  sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
-  // 各公司折線與資料點（加 data-company 屬性供互動用）
-  companies.forEach(c=>{
-    const color=colorMap[c];
-    const cKey=encodeURIComponent(c);
-    const vi=companyAvgs[c].map((v,i)=>v!=null?i:null).filter(v=>v!==null);
-    if(vi.length>1) sp.push(`<path d="${smPath(vi.map(i=>[xPos(i),yPos(companyAvgs[c][i])]))}" fill="none" stroke="${color}" stroke-width="2.2" opacity="0.85" data-company="${escapeHtml(cKey)}" class="salary-line-path" style="transition:opacity 0.2s,stroke-width 0.2s"/>`);
-    companyAvgs[c].forEach((v,i)=>{
-      if(v==null) return;
-      const x=xPos(i).toFixed(1),y=yPos(v).toFixed(1);
-      sp.push(`<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--bg2)" stroke-width="2" style="cursor:pointer;transition:opacity 0.2s,r 0.15s" data-company="${escapeHtml(cKey)}" data-tip="${escapeHtml(c)} | ${escapeHtml(months[i])}: $${v.toLocaleString()}" class="salary-dot salary-line-dot"/>`);
+
+  // \u6839\u64DA\u76EE\u524D\u986F\u793A\u4E2D\u516C\u53F8\u91CD\u65B0\u8A08\u7B97 Y \u8EF8\u4E26\u91CD\u5EFA SVG
+  function redraw() {
+    const visibleCompanies = companies.filter(c => !hiddenCompanies.has(c));
+    const visVals = [
+      ...classAvgs.filter(v => v != null),
+      ...visibleCompanies.flatMap(c => companyAvgs[c].filter(v => v != null))
+    ];
+    const svgEl = container.querySelector('#salary-line-svg');
+    if (!svgEl) return;
+    if (!visVals.length) {
+      svgEl.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="13" fill="#8892aa" font-family="Noto Sans TC,sans-serif">(\u7121\u986F\u793A\u4E2D\u7684\u516C\u53F8\u8CC7\u6599)</text>`;
+      return;
+    }
+    const maxV = Math.max(...visVals), rawMin = Math.min(...visVals);
+    const pad = (maxV - rawMin) * 0.15 || maxV * 0.15 || 2000;
+    const minVal = Math.max(0, rawMin - pad);
+    const yRange = (maxV + pad) - minVal || 1;
+    const yPos = v => MT + plotH - ((v - minVal) / yRange) * plotH;
+    let sp = [];
+    for (let i = 0; i < 5; i++) {
+      const v = minVal + (yRange / 4) * i, y = yPos(v).toFixed(1);
+      sp.push(`<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="#2a3047" stroke-width="1"/>`);
+      sp.push(`<text x="${ML-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="#8892aa">$${Math.round(v/1000)}k</text>`);
+    }
+    months.forEach((m, i) => {
+      const x = xPos(i).toFixed(1), yBt = (MT + plotH).toFixed(1);
+      sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="#2a3047" stroke-width="1"/>`);
+      sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m.slice(2)}</text>`);
     });
-  });
-  const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
-  if(ci.length>1){
-    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-dasharray="5,4" class="salary-avg-line"/>`);
-    const lastI=ci[ci.length-1];
-    const lx=(xPos(lastI)+8).toFixed(1), ly=(yPos(classAvgs[lastI])+4).toFixed(1);
-    sp.push(`<text x="${lx}" y="${ly}" font-size="11" fill="var(--text2)" font-family="Noto Sans TC,sans-serif" font-weight="500">全班平均</text>`);
+    sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
+    sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
+    visibleCompanies.forEach(c => {
+      const color = colorMap[c];
+      const cKey = encodeURIComponent(c);
+      const vi = companyAvgs[c].map((v,i) => v != null ? i : null).filter(v => v !== null);
+      const isHov = hoveredCompany === c;
+      const opacity = hoveredCompany ? (isHov ? '1' : '0.1') : '0.88';
+      const sw = isHov ? '3.2' : '2.2';
+      if (vi.length > 1) sp.push(`<path d="${smPath(vi.map(i=>[xPos(i),yPos(companyAvgs[c][i])]))}" fill="none" stroke="${color}" stroke-width="${sw}" opacity="${opacity}" data-company="${escapeHtml(cKey)}" class="salary-line-path" style="transition:opacity 0.18s,stroke-width 0.18s"/>`);
+      companyAvgs[c].forEach((v, i) => {
+        if (v == null) return;
+        const x = xPos(i).toFixed(1), y = yPos(v).toFixed(1);
+        sp.push(`<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--bg2)" stroke-width="2" opacity="${opacity}" style="cursor:pointer;transition:opacity 0.18s" data-company="${escapeHtml(cKey)}" data-tip="${escapeHtml(c)} | ${escapeHtml(months[i])}: $${v.toLocaleString()}" class="salary-dot salary-line-dot"/>`);
+      });
+    });
+    const ci = classAvgs.map((v,i) => v != null ? i : null).filter(v => v !== null);
+    if (ci.length > 1) {
+      sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+      const lastI = ci[ci.length - 1];
+      sp.push(`<text x="${(xPos(lastI)+8).toFixed(1)}" y="${(yPos(classAvgs[lastI])+4).toFixed(1)}" font-size="11" fill="var(--text2)" font-family="Noto Sans TC,sans-serif" font-weight="500">\u5168\u73ED\u5E73\u5747</text>`);
+    }
+    svgEl.innerHTML = sp.join('');
+    const tipEl = container.querySelector('#salary-line-tooltip');
+    if (tipEl) {
+      container.querySelectorAll('.salary-dot').forEach(dot => {
+        dot.addEventListener('mouseenter', function() { tipEl.textContent = this.getAttribute('data-tip'); tipEl.style.display = 'block'; });
+        dot.addEventListener('mousemove', function(e) {
+          const rect = container.getBoundingClientRect();
+          let lx = e.clientX - rect.left + 14, ly = e.clientY - rect.top - 14;
+          if (lx + 170 > rect.width) lx = e.clientX - rect.left - 170;
+          tipEl.style.left = lx + 'px'; tipEl.style.top = ly + 'px';
+        });
+        dot.addEventListener('mouseleave', function() { tipEl.style.display = 'none'; });
+      });
+    }
   }
-  container.innerHTML=`<div style="position:relative;display:inline-block;width:100%">
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="salary-line-svg">${sp.join('')}</svg>
+
+  container.innerHTML = `<div style="position:relative;display:inline-block;width:100%">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="salary-line-svg"></svg>
     <div id="salary-line-tooltip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:pre;line-height:1.7;color:var(--text)"></div>
   </div>`;
-  const tipEl=container.querySelector('#salary-line-tooltip');
-  const svg=container.querySelector('#salary-line-svg');
+  redraw();
 
-  // ── 互動狀態 ──
-  const hiddenCompanies = new Set();   // 被點擊隱藏的公司
-  let hoveredCompany = null;           // 滑鼠懸停的公司
-
-  function applyLineStyles() {
-    const anyHidden = hiddenCompanies.size > 0;
-    const anyHovered = hoveredCompany !== null;
-    svg.querySelectorAll('.salary-line-path,.salary-line-dot').forEach(el => {
-      const c = decodeURIComponent(el.getAttribute('data-company') || '');
-      if (hiddenCompanies.has(c)) {
-        el.style.opacity = '0';
-        el.style.pointerEvents = 'none';
-        return;
-      }
-      if (anyHovered) {
-        el.style.opacity = (c === hoveredCompany) ? '1' : '0.08';
-        if (el.classList.contains('salary-line-path')) {
-          el.style.strokeWidth = (c === hoveredCompany) ? '3.2' : '2.2';
-        }
-      } else {
-        el.style.opacity = '0.85';
-        if (el.classList.contains('salary-line-path')) el.style.strokeWidth = '2.2';
-      }
-      el.style.pointerEvents = '';
-    });
-  }
-
-  // tooltip
-  container.querySelectorAll('.salary-dot').forEach(dot=>{
-    dot.addEventListener('mouseenter',function(){
-      tipEl.textContent=this.getAttribute('data-tip');
-      tipEl.style.display='block';
-    });
-    dot.addEventListener('mousemove',function(e){
-      const rect=container.getBoundingClientRect();
-      let lx=e.clientX-rect.left+14,ly=e.clientY-rect.top-14;
-      if(lx+170>rect.width) lx=e.clientX-rect.left-170;
-      tipEl.style.left=lx+'px';tipEl.style.top=ly+'px';
-    });
-    dot.addEventListener('mouseleave',function(){tipEl.style.display='none';});
-  });
-
-  // 圖例互動
-  if(legendEl){
-    legendEl.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
-    legendEl.innerHTML='';
-    companies.forEach(c=>{
-      const item=document.createElement('span');
-      item.style.cssText='display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid transparent;transition:all 0.15s;user-select:none';
-      item.title='點擊隱藏／顯示此公司曲線';
-      item.dataset.company=c;
-      const swatch=document.createElement('span');
-      swatch.style.cssText=`display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px;flex-shrink:0`;
+  if (legendEl) {
+    legendEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
+    legendEl.innerHTML = '';
+    companies.forEach(c => {
+      const item = document.createElement('span');
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid transparent;transition:all 0.15s;user-select:none';
+      item.title = '\u9EDE\u64CA\u96B1\u85CF\uFF0F\u986F\u793A\uFF08Y \u8EF8\u81EA\u52D5\u8ABF\u6574\uFF09';
+      item.dataset.company = c;
+      const swatch = document.createElement('span');
+      swatch.style.cssText = `display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px;flex-shrink:0`;
       item.appendChild(swatch);
       item.appendChild(document.createTextNode(c));
-
-      // hover 高亮（方向四）
-      item.addEventListener('mouseenter',()=>{
-        if(hiddenCompanies.has(c)) return;
-        hoveredCompany=c;
-        applyLineStyles();
-        item.style.background='var(--bg3)';
-        item.style.borderColor='var(--border)';
+      item.addEventListener('mouseenter', () => {
+        if (hiddenCompanies.has(c)) return;
+        hoveredCompany = c; redraw();
+        item.style.background = 'var(--bg3)'; item.style.borderColor = 'var(--border)';
       });
-      item.addEventListener('mouseleave',()=>{
-        hoveredCompany=null;
-        applyLineStyles();
-        if(!hiddenCompanies.has(c)){
-          item.style.background='';
-          item.style.borderColor='transparent';
-        }
+      item.addEventListener('mouseleave', () => {
+        hoveredCompany = null; redraw();
+        if (!hiddenCompanies.has(c)) { item.style.background = ''; item.style.borderColor = 'transparent'; }
       });
-
-      // 點擊切換隱藏（方向一）
-      item.addEventListener('click',()=>{
-        hoveredCompany=null;
-        if(hiddenCompanies.has(c)){
+      item.addEventListener('click', () => {
+        hoveredCompany = null;
+        if (hiddenCompanies.has(c)) {
           hiddenCompanies.delete(c);
-          item.style.opacity='1';
-          item.style.textDecoration='none';
-          item.style.background='';
-          item.style.borderColor='transparent';
-          swatch.style.background=colorMap[c];
+          item.style.opacity = '1'; item.style.textDecoration = 'none'; swatch.style.background = colorMap[c];
         } else {
           hiddenCompanies.add(c);
-          item.style.opacity='0.38';
-          item.style.textDecoration='line-through';
-          item.style.background='';
-          item.style.borderColor='transparent';
-          swatch.style.background='var(--text3)';
+          item.style.opacity = '0.35'; item.style.textDecoration = 'line-through'; swatch.style.background = 'var(--text3)';
         }
-        applyLineStyles();
+        item.style.background = ''; item.style.borderColor = 'transparent';
+        redraw();
       });
-
       legendEl.appendChild(item);
     });
-
-    // 全顯 / 全隱 快速按鈕
-    const btnWrap=document.createElement('div');
-    btnWrap.style.cssText='width:100%;display:flex;gap:6px;margin-top:4px';
-    const btnAll=document.createElement('button');
-    btnAll.className='btn btn-secondary btn-sm';
-    btnAll.textContent='全部顯示';
-    btnAll.onclick=()=>{
-      hiddenCompanies.clear();
-      hoveredCompany=null;
-      legendEl.querySelectorAll('[data-company]').forEach(item=>{
-        const cc=item.dataset.company;
-        item.style.opacity='1';
-        item.style.textDecoration='none';
-        item.style.background='';
-        item.style.borderColor='transparent';
-        item.querySelector('span').style.background=colorMap[cc];
+    const btnWrap = document.createElement('div');
+    btnWrap.style.cssText = 'width:100%;display:flex;gap:6px;margin-top:4px';
+    const btnAll = document.createElement('button');
+    btnAll.className = 'btn btn-secondary btn-sm';
+    btnAll.textContent = '\u5168\u90E8\u986F\u793A';
+    btnAll.onclick = () => {
+      hiddenCompanies.clear(); hoveredCompany = null;
+      legendEl.querySelectorAll('[data-company]').forEach(item => {
+        const cc = item.dataset.company;
+        item.style.opacity = '1'; item.style.textDecoration = 'none';
+        item.style.background = ''; item.style.borderColor = 'transparent';
+        item.querySelector('span').style.background = colorMap[cc];
       });
-      applyLineStyles();
+      redraw();
     };
-    const btnNone=document.createElement('button');
-    btnNone.className='btn btn-secondary btn-sm';
-    btnNone.textContent='全部隱藏';
-    btnNone.onclick=()=>{
-      companies.forEach(cc=>hiddenCompanies.add(cc));
-      hoveredCompany=null;
-      legendEl.querySelectorAll('[data-company]').forEach(item=>{
-        item.style.opacity='0.38';
-        item.style.textDecoration='line-through';
-        item.style.background='';
-        item.style.borderColor='transparent';
-        item.querySelector('span').style.background='var(--text3)';
+    const btnNone = document.createElement('button');
+    btnNone.className = 'btn btn-secondary btn-sm';
+    btnNone.textContent = '\u5168\u90E8\u96B1\u85CF';
+    btnNone.onclick = () => {
+      companies.forEach(cc => hiddenCompanies.add(cc)); hoveredCompany = null;
+      legendEl.querySelectorAll('[data-company]').forEach(item => {
+        item.style.opacity = '0.35'; item.style.textDecoration = 'line-through';
+        item.style.background = ''; item.style.borderColor = 'transparent';
+        item.querySelector('span').style.background = 'var(--text3)';
       });
-      applyLineStyles();
+      redraw();
     };
-    btnWrap.appendChild(btnAll);
-    btnWrap.appendChild(btnNone);
+    btnWrap.appendChild(btnAll); btnWrap.appendChild(btnNone);
     legendEl.appendChild(btnWrap);
   }
 }
