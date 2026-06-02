@@ -332,9 +332,26 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     flex-wrap: wrap;
     gap: 6px;
     align-content: flex-start;
+    /* 捲軸樣式 */
+    scrollbar-width: thin;
+    scrollbar-color: #9aa3bb transparent;
+  }
+  #salary-line-chart-legend::-webkit-scrollbar {
+    width: 6px;
+  }
+  #salary-line-chart-legend::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  #salary-line-chart-legend::-webkit-scrollbar-thumb {
+    background-color: #9aa3bb;
+    border-radius: 4px;
   }
   body.light-mode #salary-line-chart-legend {
     border-color: #7a8499;
+    scrollbar-color: #7a8499 transparent;
+  }
+  body.light-mode #salary-line-chart-legend::-webkit-scrollbar-thumb {
+    background-color: #7a8499;
   }
 
   /* ── 學生管理：學期操控列 ── */
