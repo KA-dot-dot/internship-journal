@@ -150,8 +150,8 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .google-icon { width: 22px; height: 22px; }
 
 /* ===== LINE 警告 ===== */
-#line-warning { display:none; background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(239,68,68,0.08)); border:2px solid #f59e0b; border-radius:14px; padding:18px 16px; margin-bottom:18px; text-align:center; }
-.line-warn-title { font-size:15px; font-weight:700; color:#f59e0b; margin-bottom:14px; }
+#line-warning { display:none; background:var(--bg3); border:0.5px solid var(--border); border-radius:14px; padding:18px 16px; margin-bottom:18px; text-align:center; }
+.line-warn-title { font-size:15px; font-weight:500; color:var(--text); margin-bottom:14px; }
 .line-warn-steps { display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap; }
 .line-warn-step { display:flex; flex-direction:column; align-items:center; gap:4px; }
 .line-warn-icon { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px; }
@@ -570,7 +570,7 @@ tr:last-child td { border-bottom: none; }
 
     <!-- LINE 內建瀏覽器警告（偵測到才顯示） -->
     <div id="line-warning">
-      <div class="line-warn-title">⚠️ 你在 LINE 裡開啟，無法登入</div>
+      <div class="line-warn-title">⚠️ 你在LINE瀏覽器開啟，無法登入</div>
       <div class="line-warn-steps">
         <div class="line-warn-step">
           <div class="line-warn-icon bad">💬</div>
@@ -578,7 +578,7 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div class="line-warn-icon arrow">→</div>
         <div class="line-warn-step">
-          <div class="line-warn-icon" style="background:rgba(245,158,11,0.15);border:1.5px solid rgba(245,158,11,0.4);font-size:20px;font-weight:700;color:#f59e0b" id="line-warn-symbol-icon"></div>
+          <div class="line-warn-icon" style="background:var(--bg);border:1.5px solid var(--border);font-size:20px;font-weight:500;color:var(--text)" id="line-warn-symbol-icon"></div>
           <div class="line-warn-label">點 •••<br>選單</div>
         </div>
         <div class="line-warn-icon arrow">→</div>
