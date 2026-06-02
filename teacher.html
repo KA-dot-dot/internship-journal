@@ -308,6 +308,32 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .t-journals-review-btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #page-t-settings [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
 
+  /* ── 薪資走勢：手機版 legend 滑桿 + 固定按鈕 ── */
+  #salary-line-chart-legend-wrap {
+    margin-top: 10px;
+  }
+  #salary-legend-btn-row {
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  #salary-line-chart-legend {
+    max-height: 160px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    background: var(--bg3);
+    /* 讓 flex-wrap 的 items 在限制高度內捲動 */
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-content: flex-start;
+  }
+
   /* ── 學生管理：學期操控列 ── */
   .student-mgmt-controls {
     display: grid !important;
@@ -963,7 +989,15 @@ tr:last-child td { border-bottom: none; }
                 <div style="font-size:15px;font-weight:700;margin-bottom:6px">各公司薪資走勢（依月份）</div>
                 <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各公司每月平均薪資，虛線為平均；公司多時建議只在需要比較時展開</div>
                 <div id="salary-line-chart-container"><div class="empty-state"><div class="icon">📈</div><p>查詢後顯示</p></div></div>
-                <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px"></div>
+                <div id="salary-line-chart-legend-wrap" style="margin-top:10px">
+                  <!-- 手機版：按鈕固定在上方，清單可捲動 -->
+                  <div id="salary-legend-btn-row" style="display:none;gap:6px;margin-bottom:6px;align-items:center">
+                    <button class="btn btn-secondary btn-sm" id="salary-legend-btn-all" onclick="salaryLegendShowAll()">全部顯示</button>
+                    <button class="btn btn-secondary btn-sm" id="salary-legend-btn-none" onclick="salaryLegendHideAll()">全部隱藏</button>
+                    <span style="font-size:11px;color:var(--text3);margin-left:4px">點公司名稱切換顯示</span>
+                  </div>
+                  <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+                </div>
               </div>
 
               <div class="card">
@@ -4302,8 +4336,37 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   redraw();
 
   if (legendEl) {
-    legendEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
+    legendEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:0';
     legendEl.innerHTML = '';
+
+    // 在手機版：顯示固定的按鈕列（電腦版該列由 CSS 隱藏，按鈕保留在 legend 內）
+    const isMobile = window.innerWidth <= 768;
+    const fixedBtnRow = document.getElementById('salary-legend-btn-row');
+
+    // 定義全部顯示 / 全部隱藏的共用函數（掛到 window 供 HTML onclick 使用）
+    window._salaryLegendCtx = { hiddenCompanies, hoveredCompany: null, companies, colorMap, legendEl, redraw };
+    window.salaryLegendShowAll = () => {
+      const ctx = window._salaryLegendCtx;
+      ctx.hiddenCompanies.clear(); ctx.hoveredCompany = null; hoveredCompany = null;
+      ctx.legendEl.querySelectorAll('[data-company]').forEach(item => {
+        const cc = item.dataset.company;
+        item.style.opacity = '1'; item.style.textDecoration = 'none';
+        item.style.background = ''; item.style.borderColor = 'transparent';
+        item.querySelector('span').style.background = ctx.colorMap[cc];
+      });
+      ctx.redraw();
+    };
+    window.salaryLegendHideAll = () => {
+      const ctx = window._salaryLegendCtx;
+      ctx.companies.forEach(cc => ctx.hiddenCompanies.add(cc)); ctx.hoveredCompany = null; hoveredCompany = null;
+      ctx.legendEl.querySelectorAll('[data-company]').forEach(item => {
+        item.style.opacity = '0.35'; item.style.textDecoration = 'line-through';
+        item.style.background = ''; item.style.borderColor = 'transparent';
+        item.querySelector('span').style.background = 'var(--text3)';
+      });
+      ctx.redraw();
+    };
+
     companies.forEach(c => {
       const item = document.createElement('span');
       item.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid transparent;transition:all 0.15s;user-select:none';
@@ -4336,35 +4399,22 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
       });
       legendEl.appendChild(item);
     });
-    const btnWrap = document.createElement('div');
-    btnWrap.style.cssText = 'width:100%;display:flex;gap:6px;margin-top:4px';
-    const btnAll = document.createElement('button');
-    btnAll.className = 'btn btn-secondary btn-sm';
-    btnAll.textContent = '\u5168\u90E8\u986F\u793A';
-    btnAll.onclick = () => {
-      hiddenCompanies.clear(); hoveredCompany = null;
-      legendEl.querySelectorAll('[data-company]').forEach(item => {
-        const cc = item.dataset.company;
-        item.style.opacity = '1'; item.style.textDecoration = 'none';
-        item.style.background = ''; item.style.borderColor = 'transparent';
-        item.querySelector('span').style.background = colorMap[cc];
-      });
-      redraw();
-    };
-    const btnNone = document.createElement('button');
-    btnNone.className = 'btn btn-secondary btn-sm';
-    btnNone.textContent = '\u5168\u90E8\u96B1\u85CF';
-    btnNone.onclick = () => {
-      companies.forEach(cc => hiddenCompanies.add(cc)); hoveredCompany = null;
-      legendEl.querySelectorAll('[data-company]').forEach(item => {
-        item.style.opacity = '0.35'; item.style.textDecoration = 'line-through';
-        item.style.background = ''; item.style.borderColor = 'transparent';
-        item.querySelector('span').style.background = 'var(--text3)';
-      });
-      redraw();
-    };
-    btnWrap.appendChild(btnAll); btnWrap.appendChild(btnNone);
-    legendEl.appendChild(btnWrap);
+
+    // 電腦版：在 legend 內加入全部顯示/隱藏按鈕（手機版用固定按鈕列取代）
+    if (!isMobile) {
+      const btnWrap = document.createElement('div');
+      btnWrap.style.cssText = 'width:100%;display:flex;gap:6px;margin-top:4px';
+      const btnAll = document.createElement('button');
+      btnAll.className = 'btn btn-secondary btn-sm';
+      btnAll.textContent = '\u5168\u90E8\u986F\u793A';
+      btnAll.onclick = () => window.salaryLegendShowAll();
+      const btnNone = document.createElement('button');
+      btnNone.className = 'btn btn-secondary btn-sm';
+      btnNone.textContent = '\u5168\u90E8\u96B1\u85CF';
+      btnNone.onclick = () => window.salaryLegendHideAll();
+      btnWrap.appendChild(btnAll); btnWrap.appendChild(btnNone);
+      legendEl.appendChild(btnWrap);
+    }
   }
 }
 
