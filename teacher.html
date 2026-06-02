@@ -539,6 +539,20 @@ tr:last-child td { border-bottom: none; }
   color: var(--text);
   font-weight: 600;
 }
+@media (min-width: 768px) {
+  .term-status-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 4px;
+    row-gap: 0;
+  }
+  .term-status-grid > span:nth-child(4),
+  .term-status-grid > span:nth-child(7) {
+    margin-left: 14px;
+  }
+}
 </style>
 </head>
 <body>
