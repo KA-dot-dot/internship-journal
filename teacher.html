@@ -323,35 +323,23 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     max-height: 160px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    border: 2px solid #9aa3bb;
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 8px;
+    padding: 8px 18px 8px 8px;
     background: var(--bg3);
-    /* 讓 flex-wrap 的 items 在限制高度內捲動 */
     display: flex !important;
     flex-wrap: wrap;
     gap: 6px;
     align-content: flex-start;
-    /* 捲軸樣式 */
-    scrollbar-width: thin;
-    scrollbar-color: #9aa3bb transparent;
+    /* 隱藏原生捲軸（iOS 無效，由假捲軸取代） */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
   #salary-line-chart-legend::-webkit-scrollbar {
-    width: 6px;
+    display: none;
   }
-  #salary-line-chart-legend::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  #salary-line-chart-legend::-webkit-scrollbar-thumb {
-    background-color: #9aa3bb;
-    border-radius: 4px;
-  }
-  body.light-mode #salary-line-chart-legend {
-    border-color: #7a8499;
-    scrollbar-color: #7a8499 transparent;
-  }
-  body.light-mode #salary-line-chart-legend::-webkit-scrollbar-thumb {
-    background-color: #7a8499;
+  #salary-legend-scrollbar-track {
+    display: block !important;
   }
 
   /* ── 學生管理：學期操控列 ── */
@@ -1016,7 +1004,13 @@ tr:last-child td { border-bottom: none; }
                     <button class="btn btn-secondary btn-sm" id="salary-legend-btn-none" onclick="salaryLegendHideAll()">全部隱藏</button>
                     <span style="font-size:11px;color:var(--text3);margin-left:4px">點公司名稱切換顯示</span>
                   </div>
-                  <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+                  <div id="salary-legend-scroll-wrap" style="position:relative">
+                    <div id="salary-line-chart-legend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+                    <!-- 假捲軸（iOS Safari 不支援自訂 scrollbar CSS） -->
+                    <div id="salary-legend-scrollbar-track" style="display:none;position:absolute;right:2px;top:4px;bottom:4px;width:5px;background:rgba(128,128,128,0.15);border-radius:3px;pointer-events:none">
+                      <div id="salary-legend-scrollbar-thumb" style="position:absolute;width:100%;background:#9aa3bb;border-radius:3px;opacity:0.85"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -4434,6 +4428,26 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
       btnNone.onclick = () => window.salaryLegendHideAll();
       btnWrap.appendChild(btnAll); btnWrap.appendChild(btnNone);
       legendEl.appendChild(btnWrap);
+    }
+
+    // 手機版假捲軸：讓 iOS Safari 也能看到灰色捲軸
+    if (isMobile) {
+      const track = document.getElementById('salary-legend-scrollbar-track');
+      const thumb = document.getElementById('salary-legend-scrollbar-thumb');
+      function updateThumb() {
+        if (!track || !thumb) return;
+        const sh = legendEl.scrollHeight, ch = legendEl.clientHeight;
+        if (sh <= ch) { track.style.opacity = '0'; return; }
+        track.style.opacity = '1';
+        const ratio = ch / sh;
+        const thumbH = Math.max(ratio * ch, 24);
+        const thumbTop = (legendEl.scrollTop / (sh - ch)) * (ch - thumbH);
+        thumb.style.height = thumbH + 'px';
+        thumb.style.top = thumbTop + 'px';
+      }
+      legendEl.addEventListener('scroll', updateThumb);
+      // 初始化（等 DOM 渲染後）
+      setTimeout(updateThumb, 50);
     }
   }
 }
