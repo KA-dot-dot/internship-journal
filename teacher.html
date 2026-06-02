@@ -595,7 +595,7 @@ tr:last-child td { border-bottom: none; }
       <p>台中高工｜老師端</p>
     </div>
 
-    <div class="card fade-in">
+    <div class="card fade-in" id="login-card">
       <p style="font-size:13px;color:var(--text2);margin-bottom:20px;text-align:center">
         請使用學校 Google 帳號登入
       </p>
@@ -620,9 +620,11 @@ tr:last-child td { border-bottom: none; }
   var symbol = isIOS ? '⋯' : '⋮';
   var el = document.getElementById('line-warning');
   var symIcon = document.getElementById('line-warn-symbol-icon');
+  var loginCard = document.getElementById('login-card');
   if (!el) return;
   if (symIcon) symIcon.textContent = symbol;
   el.style.display = 'block';
+  if (loginCard) loginCard.style.display = 'none';
 })();
 </script>
 
