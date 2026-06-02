@@ -323,7 +323,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     max-height: 160px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    border: 1px solid var(--border);
+    border: 2px solid #9aa3bb;
     border-radius: var(--radius-sm);
     padding: 8px;
     background: var(--bg3);
@@ -332,6 +332,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     flex-wrap: wrap;
     gap: 6px;
     align-content: flex-start;
+  }
+  body.light-mode #salary-line-chart-legend {
+    border-color: #7a8499;
   }
 
   /* ── 學生管理：學期操控列 ── */
@@ -4247,7 +4250,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   const hiddenCompanies = new Set();
   let hoveredCompany = null;
 
-  const W=580, H=210, ML=68, MR=60, MT=18, MB=42;
+  const W=580, H=170, ML=68, MR=60, MT=8, MB=32;
   const plotW=W-ML-MR, plotH=H-MT-MB, n=months.length;
   const xPos = i => ML + (n > 1 ? i * plotW / (n - 1) : plotW / 2);
 
