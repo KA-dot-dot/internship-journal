@@ -4238,22 +4238,21 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
   });
   sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
   sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
-  // 收集 tooltip 資料點
-  const tooltipPoints = [];
+  // 各公司折線與資料點（加 data-company 屬性供互動用）
   companies.forEach(c=>{
     const color=colorMap[c];
+    const cKey=encodeURIComponent(c);
     const vi=companyAvgs[c].map((v,i)=>v!=null?i:null).filter(v=>v!==null);
-    if(vi.length>1) sp.push(`<path d="${smPath(vi.map(i=>[xPos(i),yPos(companyAvgs[c][i])]))}" fill="none" stroke="${color}" stroke-width="2.2" opacity="0.9"/>`);
+    if(vi.length>1) sp.push(`<path d="${smPath(vi.map(i=>[xPos(i),yPos(companyAvgs[c][i])]))}" fill="none" stroke="${color}" stroke-width="2.2" opacity="0.85" data-company="${escapeHtml(cKey)}" class="salary-line-path" style="transition:opacity 0.2s,stroke-width 0.2s"/>`);
     companyAvgs[c].forEach((v,i)=>{
       if(v==null) return;
       const x=xPos(i).toFixed(1),y=yPos(v).toFixed(1);
-      sp.push(`<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--bg2)" stroke-width="2" style="cursor:pointer" data-tip="${escapeHtml(c)} | ${escapeHtml(months[i])}: $${v.toLocaleString()}" class="salary-dot"/>`);
-      tooltipPoints.push({x:parseFloat(x),y:parseFloat(y),label:`${c}\n${months[i]}: $${v.toLocaleString()}`,color});
+      sp.push(`<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--bg2)" stroke-width="2" style="cursor:pointer;transition:opacity 0.2s,r 0.15s" data-company="${escapeHtml(cKey)}" data-tip="${escapeHtml(c)} | ${escapeHtml(months[i])}: $${v.toLocaleString()}" class="salary-dot salary-line-dot"/>`);
     });
   });
   const ci=classAvgs.map((v,i)=>v!=null?i:null).filter(v=>v!==null);
   if(ci.length>1){
-    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-dasharray="5,4"/>`);
+    sp.push(`<path d="${smPath(ci.map(i=>[xPos(i),yPos(classAvgs[i])]))}" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-dasharray="5,4" class="salary-avg-line"/>`);
     const lastI=ci[ci.length-1];
     const lx=(xPos(lastI)+8).toFixed(1), ly=(yPos(classAvgs[lastI])+4).toFixed(1);
     sp.push(`<text x="${lx}" y="${ly}" font-size="11" fill="var(--text2)" font-family="Noto Sans TC,sans-serif" font-weight="500">全班平均</text>`);
@@ -4263,6 +4262,36 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     <div id="salary-line-tooltip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:pre;line-height:1.7;color:var(--text)"></div>
   </div>`;
   const tipEl=container.querySelector('#salary-line-tooltip');
+  const svg=container.querySelector('#salary-line-svg');
+
+  // ── 互動狀態 ──
+  const hiddenCompanies = new Set();   // 被點擊隱藏的公司
+  let hoveredCompany = null;           // 滑鼠懸停的公司
+
+  function applyLineStyles() {
+    const anyHidden = hiddenCompanies.size > 0;
+    const anyHovered = hoveredCompany !== null;
+    svg.querySelectorAll('.salary-line-path,.salary-line-dot').forEach(el => {
+      const c = decodeURIComponent(el.getAttribute('data-company') || '');
+      if (hiddenCompanies.has(c)) {
+        el.style.opacity = '0';
+        el.style.pointerEvents = 'none';
+        return;
+      }
+      if (anyHovered) {
+        el.style.opacity = (c === hoveredCompany) ? '1' : '0.08';
+        if (el.classList.contains('salary-line-path')) {
+          el.style.strokeWidth = (c === hoveredCompany) ? '3.2' : '2.2';
+        }
+      } else {
+        el.style.opacity = '0.85';
+        if (el.classList.contains('salary-line-path')) el.style.strokeWidth = '2.2';
+      }
+      el.style.pointerEvents = '';
+    });
+  }
+
+  // tooltip
   container.querySelectorAll('.salary-dot').forEach(dot=>{
     dot.addEventListener('mouseenter',function(){
       tipEl.textContent=this.getAttribute('data-tip');
@@ -4276,10 +4305,99 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     });
     dot.addEventListener('mouseleave',function(){tipEl.style.display='none';});
   });
-  if(legendEl){
-    const items=companies.map(c=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)"><span style="display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px"></span>${escapeHtml(c)}</span>`);
 
-    legendEl.innerHTML=items.join('');
+  // 圖例互動
+  if(legendEl){
+    legendEl.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
+    legendEl.innerHTML='';
+    companies.forEach(c=>{
+      const item=document.createElement('span');
+      item.style.cssText='display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid transparent;transition:all 0.15s;user-select:none';
+      item.title='點擊隱藏／顯示此公司曲線';
+      item.dataset.company=c;
+      const swatch=document.createElement('span');
+      swatch.style.cssText=`display:inline-block;width:22px;height:3px;background:${colorMap[c]};border-radius:2px;flex-shrink:0`;
+      item.appendChild(swatch);
+      item.appendChild(document.createTextNode(c));
+
+      // hover 高亮（方向四）
+      item.addEventListener('mouseenter',()=>{
+        if(hiddenCompanies.has(c)) return;
+        hoveredCompany=c;
+        applyLineStyles();
+        item.style.background='var(--bg3)';
+        item.style.borderColor='var(--border)';
+      });
+      item.addEventListener('mouseleave',()=>{
+        hoveredCompany=null;
+        applyLineStyles();
+        if(!hiddenCompanies.has(c)){
+          item.style.background='';
+          item.style.borderColor='transparent';
+        }
+      });
+
+      // 點擊切換隱藏（方向一）
+      item.addEventListener('click',()=>{
+        hoveredCompany=null;
+        if(hiddenCompanies.has(c)){
+          hiddenCompanies.delete(c);
+          item.style.opacity='1';
+          item.style.textDecoration='none';
+          item.style.background='';
+          item.style.borderColor='transparent';
+          swatch.style.background=colorMap[c];
+        } else {
+          hiddenCompanies.add(c);
+          item.style.opacity='0.38';
+          item.style.textDecoration='line-through';
+          item.style.background='';
+          item.style.borderColor='transparent';
+          swatch.style.background='var(--text3)';
+        }
+        applyLineStyles();
+      });
+
+      legendEl.appendChild(item);
+    });
+
+    // 全顯 / 全隱 快速按鈕
+    const btnWrap=document.createElement('div');
+    btnWrap.style.cssText='width:100%;display:flex;gap:6px;margin-top:4px';
+    const btnAll=document.createElement('button');
+    btnAll.className='btn btn-secondary btn-sm';
+    btnAll.textContent='全部顯示';
+    btnAll.onclick=()=>{
+      hiddenCompanies.clear();
+      hoveredCompany=null;
+      legendEl.querySelectorAll('[data-company]').forEach(item=>{
+        const cc=item.dataset.company;
+        item.style.opacity='1';
+        item.style.textDecoration='none';
+        item.style.background='';
+        item.style.borderColor='transparent';
+        item.querySelector('span').style.background=colorMap[cc];
+      });
+      applyLineStyles();
+    };
+    const btnNone=document.createElement('button');
+    btnNone.className='btn btn-secondary btn-sm';
+    btnNone.textContent='全部隱藏';
+    btnNone.onclick=()=>{
+      companies.forEach(cc=>hiddenCompanies.add(cc));
+      hoveredCompany=null;
+      legendEl.querySelectorAll('[data-company]').forEach(item=>{
+        item.style.opacity='0.38';
+        item.style.textDecoration='line-through';
+        item.style.background='';
+        item.style.borderColor='transparent';
+        item.querySelector('span').style.background='var(--text3)';
+      });
+      applyLineStyles();
+    };
+    btnWrap.appendChild(btnAll);
+    btnWrap.appendChild(btnNone);
+    legendEl.appendChild(btnWrap);
   }
 }
 
@@ -4304,7 +4422,7 @@ function renderSalaryBarChart(journals, stuCompanyMap) {
   const bars = months.map((m,i) => {
     const avg=monthAvgs[i], hPct=Math.round((avg/maxAvg)*100);
     const mDisp=m.slice(5).replace(/^0/,'')+'月';
-    return `<div class="salary-bar-col" onclick="selectSalaryMonth(${jsArg(m)},this)" title="${escapeHtml(m)} 平均 $${avg.toLocaleString()}"><div style="font-size:10px;color:#4f8ef7;font-weight:600;margin-bottom:4px;white-space:nowrap">$${Math.round(avg/1000)}k</div><div style="width:100%;display:flex;align-items:flex-end;justify-content:center;height:110px"><div class="salary-bar-inner" style="height:${Math.max(hPct,3)}%;background:rgba(79,142,247,0.3);border:none"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">${escapeHtml(mDisp)}</div></div>`;
+    return `<div class="salary-bar-col" onclick="selectSalaryMonth(${jsArg(m)},this)" title="${escapeHtml(m)} 平均 $${avg.toLocaleString()}"><div style="font-size:10px;color:#93c5fd;font-weight:600;margin-bottom:4px;white-space:nowrap">$${Math.round(avg/1000)}k</div><div style="width:100%;display:flex;align-items:flex-end;justify-content:center;height:110px"><div class="salary-bar-inner" style="height:${Math.max(hPct,3)}%;background:rgba(79,142,247,0.15);border:none"></div></div><div style="font-size:11px;color:var(--text2);margin-top:4px">${escapeHtml(mDisp)}</div></div>`;
   }).join('');
   container.innerHTML=`<div style="display:flex;gap:4px;align-items:flex-end;padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:12px">${bars}</div><div id="salary-bar-detail" style="font-size:13px;min-height:40px"></div>`;
   const firstCol=container.querySelector('.salary-bar-col');
@@ -4312,9 +4430,9 @@ function renderSalaryBarChart(journals, stuCompanyMap) {
 }
 
 function selectSalaryMonth(monthLabel, clickedEl) {
-  document.querySelectorAll('#salary-bar-chart-container .salary-bar-inner').forEach(b=>{b.style.background='rgba(79,142,247,0.3)';b.style.boxShadow='none';});
+  document.querySelectorAll('#salary-bar-chart-container .salary-bar-inner').forEach(b=>{b.style.background='rgba(79,142,247,0.15)';b.style.boxShadow='none';});
   const bar=clickedEl?.querySelector('.salary-bar-inner');
-  if(bar){bar.style.background='linear-gradient(180deg,#6ea8ff,#4f8ef7)';bar.style.boxShadow='0 0 14px rgba(79,142,247,0.55)';}
+  if(bar){bar.style.background='linear-gradient(180deg,#93c5fd,#3b82f6)';bar.style.boxShadow='0 0 12px rgba(59,130,246,0.35)';}
   const detail=document.getElementById('salary-bar-detail');
   const {monthDataMap}=window._salaryBarData||{};
   if(!detail||!monthDataMap?.[monthLabel]) return;
