@@ -924,7 +924,7 @@ async function checkMonthDeadline() {
     // 薪資單照片
     const preview = document.getElementById('salary-photo-preview');
     if (j.salaryPhoto) {
-      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${resolveImgSrc(j.salaryPhoto)}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" data-base64="${escapeHtml(j.salaryPhoto)}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
     } else { preview.innerHTML = ''; }
     // 工作摘要
     const container = document.getElementById('work-entries-container');
@@ -942,7 +942,7 @@ async function checkMonthDeadline() {
         const photoGrid = document.getElementById(`${id}-photos`);
         e.photos.forEach(p => {
           const wrap = document.createElement('div'); wrap.className = 'photo-thumb-wrap';
-          const _ps = resolveImgSrc(p);
+          const _ps = escapeHtml(resolveImgSrc(p));
           wrap.innerHTML = `<img src="${_ps}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove()">×</button>`;
           wrap.querySelector('img').dataset.base64 = p;
           photoGrid.appendChild(wrap);
@@ -1662,7 +1662,7 @@ async function editJournal(seatNo, sem, month) {
   document.getElementById('write-mentor').value = j.mentor || '';
   document.getElementById('write-reflection').value = j.reflection || '';
   if (j.salaryPhoto) {
-    document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img src="${resolveImgSrc(j.salaryPhoto)}" data-base64="${j.salaryPhoto}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
+    document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" data-base64="${escapeHtml(j.salaryPhoto)}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
   }
   const container = document.getElementById('work-entries-container');
   container.innerHTML = '';
@@ -1685,7 +1685,7 @@ async function editJournal(seatNo, sem, month) {
       e.photos.forEach(p => {
         const wrap = document.createElement('div');
         wrap.className = 'photo-thumb-wrap';
-        const _ps = resolveImgSrc(p);
+        const _ps = escapeHtml(resolveImgSrc(p));
         wrap.innerHTML = `<img src="${_ps}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove()">×</button>`;
         wrap.querySelector('img').dataset.base64 = p;
         photoGrid.appendChild(wrap);
