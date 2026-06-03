@@ -2148,7 +2148,7 @@ async function loadDeadlineInfo(targetId, sem, month) {
   const close = new Date(d.closeDate);
   const isOpen = now >= new Date(d.openDate) && now <= close;
   const isPast = now > close;
-  el.innerHTML = `開放日：<strong>${d.openDate}</strong> ／ 截止日：<strong>${d.closeDate}</strong> &nbsp;<span class="badge ${isOpen?'badge-green':isPast?'badge-red':'badge-yellow'}">${isOpen?'上傳中':isPast?'已截止':'未開放'}</span>`;
+  el.innerHTML = `開放日：<strong>${escapeHtml(d.openDate)}</strong> ／ 截止日：<strong>${escapeHtml(d.closeDate)}</strong> &nbsp;<span class="badge ${isOpen?'badge-green':isPast?'badge-red':'badge-yellow'}">${isOpen?'上傳中':isPast?'已截止':'未開放'}</span>`;
 }
 
 // ---- 學生管理 ----
