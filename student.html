@@ -1,5 +1,4 @@
-
-
+﻿
 
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -1426,7 +1425,7 @@ async function saveJournal() {
       }
     }
     showLoading();
-    await setDoc(journalRef, data);
+    await setDoc(journalRef, data, { merge: true }); // merge: true 防止覆蓋老師評語欄位
     hideLoading();
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     toast('月記已成功儲存！', 'success');
