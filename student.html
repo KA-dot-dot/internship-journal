@@ -902,15 +902,15 @@ async function checkMonthDeadline() {
     const open = new Date(d.openDate);
     const close = new Date(d.closeDate);
     if (now < open) {
-      el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${d.openDate}（尚未開放）</span>`;
+      el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${escapeHtml(d.openDate)}（尚未開放）</span>`;
       if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.textContent = '⏳ 尚未開放';
       }
     } else if (now > close) {
-      el.innerHTML = `<span class="badge badge-yellow">⚠️ 已截止（${d.closeDate}），仍可補交，系統會標記為遲繳</span>`;
+      el.innerHTML = `<span class="badge badge-yellow">⚠️ 已截止（${escapeHtml(d.closeDate)}），仍可補交，系統會標記為遲繳</span>`;
     } else {
-      el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${d.closeDate}</span>`;
+      el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${escapeHtml(d.closeDate)}</span>`;
     }
   }
 
