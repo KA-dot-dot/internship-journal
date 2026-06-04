@@ -1,5 +1,3 @@
-﻿
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -1401,7 +1399,11 @@ async function saveJournal() {
     submittedAt: new Date().toISOString(),
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
-    storagePath: 'user'
+    storagePath: 'user',
+    // 學生重新儲存時清除老師評語，讓老師重新審閱
+    teacherComment: null,
+    teacherReviewed: false,
+    reviewedAt: null
   };
   if (JSON.stringify(data).length > 900000) return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
   const saveBtn = document.getElementById('save-journal-btn');
@@ -1412,8 +1414,13 @@ async function saveJournal() {
     const existing = await getDoc(journalRef);
     hideLoading();
     if (existing.exists()) {
-      const submittedDate = existing.data().submittedAt?.slice(0, 10) || '未知日期';
-      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）\n\n確定要覆蓋原本的資料嗎？`);
+      const existingData = existing.data();
+      const submittedDate = existingData.submittedAt?.slice(0, 10) || '未知日期';
+      const wasReviewed = !!(existingData.teacherReviewed || existingData.teacherComment);
+      const reviewWarning = wasReviewed
+        ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
+        : '';
+      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
       if (!confirmed) {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
         toast('已取消，原本月記保留', 'info');
@@ -1421,7 +1428,7 @@ async function saveJournal() {
       }
     }
     showLoading();
-    await setDoc(journalRef, data, { merge: true }); // merge: true 防止覆蓋老師評語欄位
+    await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
     hideLoading();
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     toast('月記已成功儲存！', 'success');
