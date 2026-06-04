@@ -1,3 +1,5 @@
+﻿
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -812,7 +814,9 @@ async function loadStudentDashboard() {
     document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
       '<span class="badge badge-green">✅ 本月已繳</span>' :
       '<span class="badge badge-red">❌ 本月未繳</span>';
-    const recent = journals.sort((a,b) => b.month - a.month).slice(0, 3);
+    const recent = journals
+      .sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || b.month - a.month)
+      .slice(0, 3);
     document.getElementById('s-recent-journals').innerHTML = recent.length ?
       recent.map(j => renderJournalCard(j, false)).join('') :
       '<div class="empty-state"><div class="icon">📝</div><p>尚無月記，快去填寫第一份吧！</p></div>';
@@ -877,7 +881,7 @@ async function initWriteForm() {
   checkMonthDeadline();
 }
 
-async function checkMonthDeadline() {
+async function checkMonthDeadline(skipFill = false) {
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
   if (!sem || !month) return;
@@ -912,6 +916,8 @@ async function checkMonthDeadline() {
   }
 
   // 2. 載入此月份已有的資料（有就填入，沒有就清空）
+  // skipFill=true 時（editJournal 呼叫）僅更新截止日狀態，不覆蓋表單
+  if (skipFill) return;
   const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -1601,6 +1607,11 @@ async function exportMyPDF() {
   const endVal = document.getElementById('s-export-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
+  // 日期都空白時提示（不擋，仍可繼續匯出全部）
+  if (!startVal && !endVal) {
+    const ok = window.confirm('未選擇日期範圍，將匯出全部月記。\n確定繼續嗎？');
+    if (!ok) return;
+  }
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
@@ -1695,6 +1706,8 @@ async function editJournal(seatNo, sem, month) {
     }
   });
   showPage('s-write');
+  // skipFill=true：只更新截止日狀態與 saveBtn，不覆蓋 editJournal 剛填入的表單值
+  checkMonthDeadline(true);
   toast('已載入月記，修改後請重新儲存', 'success');
 }
 
