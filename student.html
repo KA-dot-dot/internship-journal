@@ -1364,11 +1364,7 @@ async function saveJournal() {
   if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
   // 薪資未填軟性提示（不強制，可繼續儲存）
   if (salary === null) {
-    const goAhead = window.confirm('⚠️ 本月薪資尚未填寫。
-
-若這個月尚未發薪，可以先儲存其他內容，發薪後再編輯补填。
-
-確定要不填薪資直接儲存嗎？');
+    const goAhead = window.confirm('⚠️ 本月薪資尚未填寫。\n\n若這個月尚未發薪，可以先儲存其他內容，發薪後再編輯补填。\n\n確定要不填薪資直接儲存嗎？');
     if (!goAhead) return;
   }
   const mentor = document.getElementById('write-mentor').value.trim();
