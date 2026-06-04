@@ -2473,20 +2473,30 @@ async function saveAllDeadlines() {
   if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
   const { doc, setDoc } = firebase_funcs;
-  for (const { id, data } of entries) await setDoc(doc(db, 'deadlines', id), data);
-  hideLoading();
-  toast(`✅ 已儲存 ${entries.length} 個月份的期限設定`, 'success');
-  loadDeadlinesTable();
+  try {
+    await Promise.all(entries.map(({ id, data }) => setDoc(doc(db, 'deadlines', id), data)));
+    toast(`✅ 已儲存 ${entries.length} 個月份的期限設定`, 'success');
+    loadDeadlinesTable();
+  } catch(e) {
+    toast('儲存失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 async function deleteDeadline(id) {
   if (!confirm('確定要刪除這個期限設定嗎？')) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'deadlines', id));
-  hideLoading();
-  toast('已刪除', 'success');
-  loadDeadlinesTable();
+  try {
+    await deleteDoc(doc(db, 'deadlines', id));
+    toast('已刪除', 'success');
+    loadDeadlinesTable();
+  } catch(e) {
+    toast('刪除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ---- 統計 ----
@@ -2711,6 +2721,7 @@ async function exportAllStatsExcel() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('export-stats');
   showLoading();
+  try {
   const [jSnap, deadlineSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
@@ -2721,7 +2732,6 @@ async function exportAllStatsExcel() {
   journals.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   const students = await loadRosterStudentsForSemesters(monthSlots.map(s => s.sem), allJournals);
-  hideLoading();
   const studentMap = {};
   students.forEach(s => { studentMap[`${s.semester}-${s.seatNo}`] = s; });
   const deadlineMap = buildDeadlineMap(deadlineSnap);
@@ -2889,6 +2899,12 @@ async function exportAllStatsExcel() {
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
   toast('✅ 已下載 Excel（8 張工作表，含薪資摘要與異常提醒）', 'success');
+  } catch(e) {
+    console.error('匯出 Excel 失敗', e);
+    toast('匯出失敗：' + (e.message || '請確認網路或重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // 地點統計（簡化版）
@@ -3676,13 +3692,13 @@ window.loadSalaryPhotoOnDemand = async function(seatNo, semester, month, ownerUi
       const src = escapeHtml(resolveImgSrc(snap.data().salaryPhoto));
       btn.parentElement.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${src}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單">`;
     } else {
-      alert('查無薪資單照片');
+      toast('查無薪資單照片', 'error');
       btn.disabled = false;
       btn.innerHTML = original;
     }
   } catch(e) {
     console.error(e);
-    alert('載入失敗：' + e.message);
+    toast('薪資單載入失敗：' + (e.message || '請重試'), 'error');
     btn.disabled = false;
     btn.innerHTML = original;
   }
@@ -3843,6 +3859,13 @@ async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   const { doc, deleteDoc } = firebase_funcs;
   try {
     await deleteDoc(getTeacherJournalRef(seatNo, semester, month));
+    // 立即從本地快取移除，避免快取未過期時仍顯示已刪月記
+    if (window._teacherJournalsCache) {
+      const key = teacherJournalKey(seatNo, semester, month);
+      window._teacherJournalsCache = window._teacherJournalsCache.filter(
+        j => teacherJournalKey(j.seatNo, j.semester, j.month) !== key
+      );
+    }
     closeModal('delete-journal-modal');
     toast('✅ 月記已刪除', 'success');
     if (isTeacher) loadTeacherJournals();
@@ -4143,15 +4166,18 @@ function openCommentModal(seatNo, semester, month) {
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
     document.getElementById('comment-modal-textarea').value = data.teacherComment || '';
-  }).catch(() => { document.getElementById('comment-modal-textarea').value = ''; });
-  openModal('comment-modal');
+    openModal('comment-modal');
+  }).catch(() => {
+    document.getElementById('comment-modal-textarea').value = '';
+    openModal('comment-modal');
+  });
 }
 
 async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
   const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
-  if (!comment) return toast('評語不能為空', 'error');
+  // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
