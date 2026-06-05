@@ -3464,20 +3464,27 @@ function confirmTeacherBatchDelete() {
 async function executeTeacherBatchDelete(journals) {
   const { deleteDoc } = firebase_funcs;
   let success = 0, fail = 0;
+  const deletedKeys = new Set(); // 精確追蹤成功刪除的項目
   showLoading();
+  try {
   for (const j of journals) {
     try {
       await deleteDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid));
       success++;
+      deletedKeys.add(teacherJournalKey(j.seatNo, j.semester, j.month));
     } catch(e) { fail++; console.error('批次刪除失敗', j, e); }
   }
-  hideLoading();
+  } catch(e) {
+    console.error('批次刪除異常', e);
+    toast('批次刪除發生錯誤：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
   closeModal('t-batch-delete-modal');
   document.getElementById('t-batch-float').style.display = 'none';
   toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
-  // 立即從本地快取移除已成功刪除的月記
-  if (window._teacherJournalsCache && success > 0) {
-    const deletedKeys = new Set(journals.slice(0, success).map(j => teacherJournalKey(j.seatNo, j.semester, j.month)));
+  // 立即從本地快取移除已成功刪除的月記（以實際成功的 key 為準，避免 slice(0,success) 誤移除失敗項）
+  if (window._teacherJournalsCache && deletedKeys.size > 0) {
     window._teacherJournalsCache = window._teacherJournalsCache.filter(
       j => !deletedKeys.has(teacherJournalKey(j.seatNo, j.semester, j.month))
     );
