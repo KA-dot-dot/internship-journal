@@ -1993,10 +1993,15 @@ async function removeAdmin(docId, email) {
     return;
   }
   const ids = String(docId || '').split('|').filter(Boolean);
-  await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
-  hideLoading();
-  toast('已移除', 'success');
-  loadAdminPage();
+  try {
+    await Promise.all(ids.map(id => deleteDoc(doc(db, 'admins', id))));
+    toast('已移除', 'success');
+    loadAdminPage();
+  } catch(e) {
+    toast('移除失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 async function bindStudent() {
@@ -2032,8 +2037,9 @@ async function bindStudent() {
 
 async function loadBindingList() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
-  const snap = await getDocs(collection(db, 'studentBindings'));
   const el = document.getElementById('binding-list');
+  try {
+  const snap = await getDocs(collection(db, 'studentBindings'));
   if (snap.empty) {
     el.innerHTML = '<div style="color:var(--text2);font-size:13px">尚無綁定記錄</div>';
     return;
@@ -2048,16 +2054,25 @@ async function loadBindingList() {
     </div>`;
   }).join('');
   el.innerHTML = rows;
+  } catch(e) {
+    if (el) el.innerHTML = '<div style="color:var(--accent-red);font-size:13px">綁定清單讀取失敗，請重新整理後再試。</div>';
+    toast('綁定清單載入失敗：' + (e.message || '請重試'), 'error');
+  }
 }
 
 async function removeBinding(docId, email) {
   if (!confirm(`確定要解除綁定「${email}」嗎？解除後該學生無法用 Google 帳號登入`)) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'studentBindings', docId));
-  hideLoading();
-  toast('已解除綁定', 'success');
-  loadBindingList();
+  try {
+    await deleteDoc(doc(db, 'studentBindings', docId));
+    toast('已解除綁定', 'success');
+    loadBindingList();
+  } catch(e) {
+    toast('解除綁定失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ============================================================
@@ -2104,6 +2119,14 @@ async function loadTeacherDashboard() {
     if (p) p.style.display = 'none';
   });
   await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
+  } catch(e) {
+    console.error('主頁資料載入失敗', e);
+    toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
+    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '-';
+    });
+    document.getElementById('stat-rate').textContent = '-';
+  }
 }
 
 function toggleStatList(key) {
@@ -2389,6 +2412,7 @@ async function importStudents() {
 // ---- 截止日期 ----
 async function loadDeadlinesTable() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
+  try {
   const snap = await getDocs(collection(db, 'deadlines'));
   const now = new Date();
   const rows = snap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
@@ -2401,6 +2425,10 @@ async function loadDeadlinesTable() {
     return `<tr><td style="white-space:nowrap;font-size:12px">${semShort}</td><td style="white-space:nowrap">${dd.month}月</td><td style="white-space:nowrap">${fmtDate(dd.openDate)}</td><td style="white-space:nowrap">${fmtDate(dd.closeDate)}</td><td>${status}</td><td><button class="btn btn-danger btn-sm" onclick="deleteDeadline('${d.id}')">刪除</button></td></tr>`;
   }).join('');
   document.getElementById('deadlines-table-body').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:30px">尚未設定</td></tr>';
+  } catch(e) {
+    document.getElementById('deadlines-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:30px">截止日期資料載入失敗，請重新整理後再試。</td></tr>';
+    toast('截止日期載入失敗：' + (e.message || '請重試'), 'error');
+  }
 }
 
 function getDeadlineSemKey() {
@@ -3426,6 +3454,13 @@ async function executeTeacherBatchDelete(journals) {
   closeModal('t-batch-delete-modal');
   document.getElementById('t-batch-float').style.display = 'none';
   toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
+  // 立即從本地快取移除已成功刪除的月記
+  if (window._teacherJournalsCache && success > 0) {
+    const deletedKeys = new Set(journals.slice(0, success).map(j => teacherJournalKey(j.seatNo, j.semester, j.month)));
+    window._teacherJournalsCache = window._teacherJournalsCache.filter(
+      j => !deletedKeys.has(teacherJournalKey(j.seatNo, j.semester, j.month))
+    );
+  }
   loadTeacherJournals();
 }
 
