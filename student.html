@@ -919,6 +919,10 @@ async function checkMonthDeadline(skipFill = false) {
   // skipFill=true 時（editJournal 呼叫）僅更新截止日狀態，不覆蓋表單
   if (skipFill) return;
   const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
+  // 快取查詢結果供 saveJournal 直接使用，避免儲存時重複 Firestore 讀取
+  window._currentJournalCache = journalSnap.exists()
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
+    : { exists: false };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
     document.getElementById('write-salary').value = j.salary ?? '';
@@ -962,7 +966,8 @@ async function checkMonthDeadline(skipFill = false) {
       });
     }, 100);
   } else {
-    // 清空所有欄位
+    // 清空所有欄位，同時清除快取（新月份沒有舊資料）
+    window._currentJournalCache = { exists: false };
     document.getElementById('write-salary').value = '';
     document.getElementById('write-mentor').value = '';
     document.getElementById('write-reflection').value = '';
@@ -1417,26 +1422,28 @@ async function saveJournal() {
   showLoading();
   try {
     const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
-    const existing = await getDoc(journalRef);
-    hideLoading();
-    if (existing.exists()) {
-      const existingData = existing.data();
-      const submittedDate = existingData.submittedAt?.slice(0, 10) || '未知日期';
-      const wasReviewed = !!(existingData.teacherReviewed || existingData.teacherComment);
+    // 優先使用 checkMonthDeadline 預先快取的查詢結果，避免重複 Firestore 讀取造成延遲
+    const cached = window._currentJournalCache;
+    if (cached?.exists) {
+      const submittedDate = (cached.submittedAt || '').slice(0, 10) || '未知日期';
+      const wasReviewed = !!(cached.teacherReviewed || cached.teacherComment);
       const reviewWarning = wasReviewed
         ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
         : '';
+      hideLoading();
       const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
       if (!confirmed) {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
         toast('已取消，原本月記保留', 'info');
         return;
       }
+      showLoading();
     }
-    showLoading();
+    // 快取無效時（直接跳到填寫頁等邊界情況）仍正常儲存，不擋
     await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
     hideLoading();
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
     toast('月記已成功儲存！', 'success');
     showPage('s-dashboard');
   } catch(e) {
@@ -1663,9 +1670,9 @@ async function editJournal(seatNo, sem, month) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
   const { doc, getDoc } = firebase_funcs;
   showLoading();
+  try {
   const snap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`));
-  hideLoading();
-  if (!snap.exists()) return toast('月記不存在', 'error');
+  if (!snap.exists()) { hideLoading(); return toast('月記不存在', 'error'); }
   const j = snap.data();
   await initWriteForm();
   document.getElementById('write-semester').value = sem;
@@ -1709,6 +1716,12 @@ async function editJournal(seatNo, sem, month) {
   // skipFill=true：只更新截止日狀態與 saveBtn，不覆蓋 editJournal 剛填入的表單值
   checkMonthDeadline(true);
   toast('已載入月記，修改後請重新儲存', 'success');
+  } catch(e) {
+    console.error('載入月記失敗', e);
+    toast('載入月記失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 function toDateVal(str) {
@@ -1830,7 +1843,10 @@ async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
     toast('✅ 月記已刪除', 'success');
     loadStudentHistory();
     loadStudentDashboard();
-  } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
+  } catch(e) {
+    toast('刪除失敗：' + (e.message || '請重試'), 'error');
+    closeModal('delete-journal-modal');
+  }
 }
 
 function openPhotoModal(src) {
