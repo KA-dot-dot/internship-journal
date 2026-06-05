@@ -2101,6 +2101,7 @@ async function removeBinding(docId, email) {
 
 // ---- 老師主頁 ----
 async function loadTeacherDashboard() {
+  try {
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
   const semLabel = `${y}學年第${t}學期`;
