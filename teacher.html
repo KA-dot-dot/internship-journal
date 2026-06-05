@@ -1781,9 +1781,19 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
 async function googleTeacherLogin() {
   showLoading();
   try {
-    await waitForFirebaseAsync();
+    // iOS Safari 要求 signInWithPopup 必須在使用者點擊的同步流程中呼叫
+    // 先確保 Firebase 已初始化（通常 DOMContentLoaded 後就已完成）
+    // 若尚未初始化，最多等 3 秒；若仍未完成則提示
+    if (!window._auth) {
+      hideLoading();
+      toast('系統初始化中，請稍候 1 秒後再試', 'error');
+      return;
+    }
     const { auth, provider, signInWithPopup } = window._auth;
-    const result = await signInWithPopup(auth, provider);
+    // 同步觸發 popup（必須在此行之前不能有任何 await）
+    const popupPromise = signInWithPopup(auth, provider);
+    await waitForFirebaseAsync();
+    const result = await popupPromise;
     const user = result.user;
     const email = normalizeEmail(user.email);
 
