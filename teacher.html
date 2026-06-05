@@ -19,7 +19,7 @@
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -36,7 +36,7 @@
   const provider = new GoogleAuthProvider();
 
   window._firebase = { db, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
-  window._auth = { auth, provider, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
+  window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider };
 </script>
 
 <style>
@@ -1837,7 +1837,17 @@ async function googleTeacherLogin() {
     enterApp();
   } catch(e) {
     hideLoading();
-    if (e.code === 'auth/popup-closed-by-user') return;
+    if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+    // 手機瀏覽器封鎖 popup 時，改用 redirect 流程
+    if (e.code === 'auth/popup-blocked') {
+      try {
+        const { auth, provider, signInWithRedirect } = window._auth;
+        await signInWithRedirect(auth, provider);
+      } catch(re) {
+        toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
+      }
+      return;
+    }
     console.error('Google 登入失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
   }
