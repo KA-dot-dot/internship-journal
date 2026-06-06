@@ -318,7 +318,7 @@ tr:last-child td { border-bottom: none; }
 </div>
 
 <!-- ==================== 主應用 ==================== -->
-<div id="app">
+<div id="app" style="display:none">
   <!-- Header -->
   <div class="top-header">
     <div class="header-left">
@@ -743,14 +743,30 @@ async function handleLoginUser(user) {
 async function googleStudentLogin() {
   showLoading();
   try {
-    await waitForFirebaseAsync();
+    // iOS Safari 要求 signInWithPopup 必須在使用者點擊的同步流程中呼叫
+    if (!window._auth) {
+      hideLoading();
+      toast('系統初始化中，請稍候 1 秒後再試', 'error');
+      return;
+    }
     const { auth, provider, signInWithPopup } = window._auth;
-    // 手機與桌機統一使用 Popup，避免 Redirect 在手機瀏覽器的 cookie 問題
-    const result = await signInWithPopup(auth, provider);
+    // 同步觸發 popup（此行之前不能有任何 await）
+    const popupPromise = signInWithPopup(auth, provider);
+    await waitForFirebaseAsync();
+    const result = await popupPromise;
     await handleLoginUser(result.user);
   } catch(e) {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+    if (e.code === 'auth/popup-blocked') {
+      try {
+        const { auth, provider, signInWithRedirect } = window._auth;
+        await signInWithRedirect(auth, provider);
+      } catch(re) {
+        toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
+      }
+      return;
+    }
     console.error('Google 登入失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
   }
@@ -764,6 +780,8 @@ async function handleRedirectResult() {
 
 // ============ 進入應用 ============
 function enterApp() {
+  if (window._enteringApp) return;
+  window._enteringApp = true;
   hideLoading();
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -779,6 +797,7 @@ function enterApp() {
 async function logout() {
   try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
   currentUser = null;
+  window._enteringApp = false;
   location.reload();
 }
 
