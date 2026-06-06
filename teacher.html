@@ -662,7 +662,7 @@ tr:last-child td { border-bottom: none; }
 </script>
 
 <!-- ==================== 主應用 ==================== -->
-<div id="app">
+<div id="app" style="display:none">
   <!-- Header -->
   <div class="top-header">
     <div class="header-left">
@@ -1869,6 +1869,8 @@ function waitForFirebaseAsync() {
 
 // ============ 進入應用 ============
 function enterApp() {
+  if (window._enteringApp) return;
+  window._enteringApp = true;
   hideLoading();
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -1885,6 +1887,7 @@ async function logout() {
     await signOut(auth);
   } catch(e) {}
   currentUser = null;
+  window._enteringApp = false;
   location.reload();
 }
 
@@ -2101,7 +2104,6 @@ async function removeBinding(docId, email) {
 
 // ---- 老師主頁 ----
 async function loadTeacherDashboard() {
-  try {
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
   const semLabel = `${y}學年第${t}學期`;
@@ -3464,27 +3466,20 @@ function confirmTeacherBatchDelete() {
 async function executeTeacherBatchDelete(journals) {
   const { deleteDoc } = firebase_funcs;
   let success = 0, fail = 0;
-  const deletedKeys = new Set(); // 精確追蹤成功刪除的項目
   showLoading();
-  try {
   for (const j of journals) {
     try {
       await deleteDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid));
       success++;
-      deletedKeys.add(teacherJournalKey(j.seatNo, j.semester, j.month));
     } catch(e) { fail++; console.error('批次刪除失敗', j, e); }
   }
-  } catch(e) {
-    console.error('批次刪除異常', e);
-    toast('批次刪除發生錯誤：' + (e.message || '請重試'), 'error');
-  } finally {
-    hideLoading();
-  }
+  hideLoading();
   closeModal('t-batch-delete-modal');
   document.getElementById('t-batch-float').style.display = 'none';
   toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
-  // 立即從本地快取移除已成功刪除的月記（以實際成功的 key 為準，避免 slice(0,success) 誤移除失敗項）
-  if (window._teacherJournalsCache && deletedKeys.size > 0) {
+  // 立即從本地快取移除已成功刪除的月記
+  if (window._teacherJournalsCache && success > 0) {
+    const deletedKeys = new Set(journals.slice(0, success).map(j => teacherJournalKey(j.seatNo, j.semester, j.month)));
     window._teacherJournalsCache = window._teacherJournalsCache.filter(
       j => !deletedKeys.has(teacherJournalKey(j.seatNo, j.semester, j.month))
     );
@@ -4606,6 +4601,7 @@ document.addEventListener('DOMContentLoaded', () => {
       //   （防止 student.html 登出操作導致 teacher.html session 失效但畫面假裝還在）
       if (!user && currentUser) {
         currentUser = null;
+        window._enteringApp = false;
         toast('登入已逾期，請重新登入', 'error');
         setTimeout(() => location.reload(), 1500);
         return;
