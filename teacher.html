@@ -1411,7 +1411,7 @@ function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;
   const sems = getSemesters();
-  el.innerHTML = sems.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  el.innerHTML = sems.map(s => `<option value="${escapeHtml(s.key || '')}">${escapeHtml(s.label || '')}</option>`).join('');
   const cur = getCurrentSemester();
   if (sems.find(s => s.key === cur)) el.value = cur;
 }
@@ -1578,7 +1578,7 @@ async function initStudentTermControls() {
   const sel = document.getElementById('student-term-select');
   if (!sel) return;
   if (!sel.options.length) {
-    sel.innerHTML = getSemesters().map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+    sel.innerHTML = getSemesters().map(s => `<option value="${escapeHtml(s.key || '')}">${escapeHtml(s.label || '')}</option>`).join('');
     // 立即同步設為當前學期，防止 await 期間 dropdown 停在未來學期造成誤操作
     sel.value = getCurrentSemester();
   }
@@ -2070,10 +2070,10 @@ async function loadBindingList() {
   const rows = snap.docs.sort((a,b) => (a.data().seatNo||'').localeCompare(b.data().seatNo||'')).map(d => {
     const b = d.data();
     return `<div class="binding-row">
-      <span style="width:60px;font-weight:700">${b.seatNo}</span>
-      <span style="flex:1">${b.studentName || '-'}</span>
-      <span style="flex:2;color:var(--text2);font-size:12px">${b.email}</span>
-      <button class="btn btn-danger btn-sm" onclick="removeBinding('${d.id}','${b.email}')">移除</button>
+      <span style="width:60px;font-weight:700">${escapeHtml(b.seatNo || '')}</span>
+      <span style="flex:1">${escapeHtml(b.studentName || '-')}</span>
+      <span style="flex:2;color:var(--text2);font-size:12px">${escapeHtml(b.email || '')}</span>
+      <button class="btn btn-danger btn-sm" onclick="removeBinding(${jsArg(d.id)},${jsArg(b.email || '')})">移除</button>
     </div>`;
   }).join('');
   el.innerHTML = rows;
@@ -4265,7 +4265,7 @@ function openBatchReviewModal() {
   const startVal = document.getElementById('t-journals-date-start')?.value || '全部';
   const endVal   = document.getElementById('t-journals-date-end')?.value || '全部';
   document.getElementById('batch-review-info').innerHTML =
-    `📅 查詢範圍：<strong>${startVal} ～ ${endVal}</strong><br>` +
+    `📅 查詢範圍：<strong>${escapeHtml(startVal)} ～ ${escapeHtml(endVal)}</strong><br>` +
     `📋 範圍內月記：<strong>${total} 份</strong><br>` +
     `📝 尚未審閱：<strong style="color:var(--accent-green)">${pending} 份</strong>`;
   if (!pending) return toast('目前查詢範圍內所有月記均已審閱或有評語', 'info');
