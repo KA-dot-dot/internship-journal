@@ -2061,6 +2061,7 @@ async function bindStudent() {
 async function loadBindingList() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const el = document.getElementById('binding-list');
+  showLoading();
   try {
   const snap = await getDocs(collection(db, 'studentBindings'));
   if (snap.empty) {
@@ -2080,6 +2081,8 @@ async function loadBindingList() {
   } catch(e) {
     if (el) el.innerHTML = '<div style="color:var(--accent-red);font-size:13px">綁定清單讀取失敗，請重新整理後再試。</div>';
     toast('綁定清單載入失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -2104,6 +2107,7 @@ async function removeBinding(docId, email) {
 
 // ---- 老師主頁 ----
 async function loadTeacherDashboard() {
+  showLoading();
   try {
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
@@ -2150,6 +2154,8 @@ async function loadTeacherDashboard() {
       const el = document.getElementById(id); if (el) el.textContent = '-';
     });
     document.getElementById('stat-rate').textContent = '-';
+  } finally {
+    hideLoading();
   }
 }
 
@@ -2436,6 +2442,7 @@ async function importStudents() {
 // ---- 截止日期 ----
 async function loadDeadlinesTable() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
+  showLoading();
   try {
   const snap = await getDocs(collection(db, 'deadlines'));
   const now = new Date();
@@ -2452,6 +2459,8 @@ async function loadDeadlinesTable() {
   } catch(e) {
     document.getElementById('deadlines-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:30px">截止日期資料載入失敗，請重新整理後再試。</td></tr>';
     toast('截止日期載入失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
   }
 }
 
