@@ -1073,6 +1073,14 @@ tr:last-child td { border-bottom: none; }
           <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="width:auto;min-width:150px" oninput="loadTeacherJournals()">
           <button class="btn btn-sm t-journals-review-btn" style="background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
         </div>
+        <!-- 審閱隊列導覽列（從主頁未審閱名單進入時顯示）-->
+        <div id="review-queue-nav" style="display:none;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:10px 16px;margin-bottom:10px;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text2);font-weight:600">📋 審閱模式</span>
+          <span id="review-queue-pos" style="font-size:13px;font-weight:700;color:#3b82f6"></span>
+          <span id="review-queue-name" style="font-size:13px;font-weight:600;flex:1;min-width:80px"></span>
+          <button class="btn btn-primary btn-sm" id="review-queue-next-btn" onclick="goToNextInQueue()">下一位 →</button>
+          <button class="btn btn-secondary btn-sm" onclick="endReviewQueue()">✕ 結束</button>
+        </div>
         <div id="t-cache-indicator" style="min-height:18px;margin-bottom:6px;font-size:11px;color:var(--text2)"></div>
         <!-- 批次選取工具列 -->
         <div id="t-batch-toolbar">
@@ -2154,6 +2162,10 @@ async function loadTeacherDashboard() {
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
   };
+  // 本月未審閱的可點擊資料（供審閱隊列使用）
+  window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
+    seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
+  }));
   // 跨月待複審：非本月、teacherReviewed 為 false 的在籍學生月記
   const crossMonthJournals = userJournalData(jSnap).filter(j =>
     activeSeatNos.has(j.seatNo) &&
@@ -2179,6 +2191,8 @@ async function loadTeacherDashboard() {
   window._crossMonthGroups = Object.values(crossMonthMap).sort((a, b) =>
     a.semester !== b.semester ? b.semester.localeCompare(a.semester) : b.month - a.month
   );
+  // 跨月待複審扁平清單（供審閱隊列使用，順序與 _crossMonthGroups 一致）
+  window._crossMonthClickData = window._crossMonthGroups.flatMap(g => g.students);
   const crossMonthEl = document.getElementById('stat-cross-month');
   if (crossMonthEl) {
     crossMonthEl.textContent = crossMonthJournals.length;
@@ -2223,6 +2237,13 @@ function toggleStatList(key) {
     const c = cfg[key];
     if (list.length === 0) {
       namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+    } else if (key === 'unreviewed') {
+      // 未審閱 badge 可點擊，進入審閱隊列
+      const clickData = window._unreviewedClickData || [];
+      namesEl.innerHTML = clickData.map((s, idx) => {
+        const display = escapeHtml(s.seatNo + ' ' + s.name);
+        return `<span onclick="goFromUnreviewed(${idx})" style="background:rgba(234,179,8,0.12);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+      }).join('');
     } else {
       namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
     }
@@ -2247,16 +2268,15 @@ function toggleCrossMonthPanel() {
     if (groups.length === 0) {
       namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 目前無跨月待複審月記</span>';
     } else {
+      let flatIdx = 0;
       namesEl.innerHTML = groups.map(g => {
         const monthLabel = g.isCurSem
           ? escapeHtml(g.month + ' 月')
           : escapeHtml(g.semLabel) + '　' + escapeHtml(g.month + ' 月');
         const badges = g.students.map(s => {
-          const seatArg = jsArg(s.seatNo);
-          const nameArg = jsArg(s.name);
-          const semArg  = jsArg(s.semester);
+          const myIdx = flatIdx++;
           const display = escapeHtml(s.seatNo + ' ' + s.name);
-          return `<span onclick="viewStudentJournals(${seatArg}, ${nameArg}, ${semArg})" style="background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid var(--accent-red);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+          return `<span onclick="goFromCrossMonth(${myIdx})" style="background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid var(--accent-red);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
         }).join('');
         return `<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px">📅 ${monthLabel}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${badges}</div></div>`;
       }).join('');
@@ -2265,6 +2285,62 @@ function toggleCrossMonthPanel() {
   } else {
     panel.style.display = 'none';
   }
+}
+
+// 從本月未審閱名單進入審閱隊列
+function goFromUnreviewed(idx) {
+  const items = window._unreviewedClickData || [];
+  const i = Number(idx);
+  if (!items[i]) return;
+  window._reviewQueue = { items, currentIndex: i };
+  viewStudentJournals(items[i].seatNo, items[i].name, items[i].semester);
+}
+
+// 從跨月待複審名單進入審閱隊列
+function goFromCrossMonth(idx) {
+  const items = window._crossMonthClickData || [];
+  const i = Number(idx);
+  if (!items[i]) return;
+  window._reviewQueue = { items, currentIndex: i };
+  viewStudentJournals(items[i].seatNo, items[i].name, items[i].semester);
+}
+
+// 更新審閱導覽列顯示
+function updateReviewQueueNav() {
+  const nav = document.getElementById('review-queue-nav');
+  if (!nav) return;
+  const q = window._reviewQueue;
+  if (!q || !q.items || q.items.length === 0) { nav.style.display = 'none'; return; }
+  const pos = q.currentIndex + 1;
+  const total = q.items.length;
+  const item = q.items[q.currentIndex];
+  document.getElementById('review-queue-pos').textContent = `${pos} / ${total}`;
+  document.getElementById('review-queue-name').textContent = item ? `${item.seatNo} ${item.name}` : '';
+  const nextBtn = document.getElementById('review-queue-next-btn');
+  if (nextBtn) {
+    const isLast = q.currentIndex >= q.items.length - 1;
+    nextBtn.textContent = isLast ? '✅ 全部完成，回主頁' : '下一位 →';
+  }
+  nav.style.display = 'flex';
+}
+
+// 前往下一位未審閱
+function goToNextInQueue() {
+  const q = window._reviewQueue;
+  if (!q || !q.items) return;
+  if (q.currentIndex >= q.items.length - 1) { endReviewQueue(); return; }
+  q.currentIndex++;
+  const item = q.items[q.currentIndex];
+  viewStudentJournals(item.seatNo, item.name, item.semester);
+}
+
+// 結束審閱模式，回主頁並重整統計
+function endReviewQueue() {
+  window._reviewQueue = null;
+  const nav = document.getElementById('review-queue-nav');
+  if (nav) nav.style.display = 'none';
+  showPage('t-dashboard');
+  loadTeacherDashboard();
 }
 
 async function loadDeadlineInfo(targetId, sem, month) {
@@ -2300,6 +2376,7 @@ function viewStudentJournals(seatNo, name, semester) {
   }
   loadTeacherJournals();
   toast(`📖 顯示 ${seatNo} ${name} 的全部月記`, 'info');
+  updateReviewQueueNav();
 }
 
 async function loadStudentsTable() {
