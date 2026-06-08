@@ -1057,22 +1057,20 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-journals" class="hidden fade-in">
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
-        <div class="t-journals-controls" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
-              <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
-              <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
-            </div>
-            <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
-              <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
-              <input type="date" id="t-journals-date-end" style="width:100%;display:block;box-sizing:border-box">
-            </div>
-            <div class="t-journals-action-row" style="display:flex;gap:10px">
-              <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
-              <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
-            </div>
+        <div class="t-journals-controls" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
+            <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
           </div>
-          <div style="display:flex;gap:10px;align-items:center">
+          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
+            <input type="date" id="t-journals-date-end" style="width:100%;display:block;box-sizing:border-box">
+          </div>
+          <div class="t-journals-action-row" style="display:flex;gap:10px">
+            <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
+          </div>
+          <div id="t-journals-search-row" style="display:flex;gap:10px;align-items:center;flex:1;min-width:200px">
             <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="flex:1;min-width:0" oninput="loadTeacherJournals()">
             <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
           </div>
@@ -2331,6 +2329,8 @@ function updateReviewQueueNav() {
   const nextBtn = document.getElementById('review-queue-next-btn');
   if (prevBtn) { prevBtn.disabled = isFirst; prevBtn.style.opacity = isFirst ? '0.4' : '1'; }
   if (nextBtn) { nextBtn.disabled = isLast;  nextBtn.style.opacity = isLast  ? '0.4' : '1'; }
+  const sr = document.getElementById('t-journals-search-row');
+  if (sr) sr.style.display = 'none';
   nav.style.display = 'flex';
 }
 
@@ -2357,6 +2357,8 @@ function endReviewQueue() {
   window._reviewQueue = null;
   const nav = document.getElementById('review-queue-nav');
   if (nav) nav.style.display = 'none';
+  const sr = document.getElementById('t-journals-search-row');
+  if (sr) sr.style.display = 'flex';
   showPage('t-dashboard');
   loadTeacherDashboard();
 }
