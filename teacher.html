@@ -793,6 +793,19 @@ tr:last-child td { border-bottom: none; }
             <div id="stat-list-names-commented" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
+        <div style="font-size:15px;font-weight:700;margin:18px 0 12px">🔄 跨月待複審</div>
+        <div class="stats-grid" style="grid-template-columns:1fr">
+          <div class="stat-card" onclick="toggleCrossMonthPanel()" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">非本月、學生已更新 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
+            <div class="stat-value" id="stat-cross-month">-</div>
+          </div>
+        </div>
+        <div id="stat-list-panel-cross-month" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:12px">🔄 跨月待複審名單</div>
+            <div id="stat-list-names-cross-month"></div>
+          </div>
+        </div>
         <div class="card" style="margin-bottom:20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
             <div style="font-size:15px;font-weight:700">📅 本月繳交期限</div>
@@ -2141,8 +2154,38 @@ async function loadTeacherDashboard() {
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
   };
+  // 跨月待複審：非本月、teacherReviewed 為 false 的在籍學生月記
+  const crossMonthJournals = userJournalData(jSnap).filter(j =>
+    activeSeatNos.has(j.seatNo) &&
+    !j.teacherReviewed &&
+    !(j.semester === sem && j.month === thisMonth)
+  );
+  const crossMonthMap = {};
+  crossMonthJournals.forEach(j => {
+    const key = `${j.semester}-${j.month}`;
+    if (!crossMonthMap[key]) {
+      crossMonthMap[key] = {
+        key,
+        semester: j.semester,
+        month: j.month,
+        semLabel: semesterLabel(j.semester),
+        isCurSem: j.semester === sem,
+        students: []
+      };
+    }
+    crossMonthMap[key].students.push({ seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester });
+  });
+  // 依學期倒序、月份倒序排列（最近的在前）
+  window._crossMonthGroups = Object.values(crossMonthMap).sort((a, b) =>
+    a.semester !== b.semester ? b.semester.localeCompare(a.semester) : b.month - a.month
+  );
+  const crossMonthEl = document.getElementById('stat-cross-month');
+  if (crossMonthEl) {
+    crossMonthEl.textContent = crossMonthJournals.length;
+    crossMonthEl.style.color = crossMonthJournals.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
+  }
   // 重設所有展開面板
-  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2150,7 +2193,7 @@ async function loadTeacherDashboard() {
   } catch(e) {
     console.error('主頁資料載入失敗', e);
     toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
-    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented'].forEach(id => {
+    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-cross-month'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '-';
     });
     document.getElementById('stat-rate').textContent = '-';
@@ -2171,7 +2214,7 @@ function toggleStatList(key) {
   const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
   // 關閉其他面板
-  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
     if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
   });
   const isHidden = panel.style.display === 'none';
@@ -2182,6 +2225,41 @@ function toggleStatList(key) {
       namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
     } else {
       namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+    }
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function toggleCrossMonthPanel() {
+  const panel = document.getElementById('stat-list-panel-cross-month');
+  const namesEl = document.getElementById('stat-list-names-cross-month');
+  if (!panel) return;
+  // 關閉其他所有面板
+  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
+    const p = document.getElementById(`stat-list-panel-${k}`);
+    if (p) p.style.display = 'none';
+  });
+  const isHidden = panel.style.display === 'none';
+  if (isHidden) {
+    const groups = window._crossMonthGroups || [];
+    if (groups.length === 0) {
+      namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 目前無跨月待複審月記</span>';
+    } else {
+      namesEl.innerHTML = groups.map(g => {
+        const monthLabel = g.isCurSem
+          ? escapeHtml(g.month + ' 月')
+          : escapeHtml(g.semLabel) + '　' + escapeHtml(g.month + ' 月');
+        const badges = g.students.map(s => {
+          const seatArg = jsArg(s.seatNo);
+          const nameArg = jsArg(s.name);
+          const semArg  = jsArg(s.semester);
+          const display = escapeHtml(s.seatNo + ' ' + s.name);
+          return `<span onclick="viewStudentJournals(${seatArg}, ${nameArg}, ${semArg})" style="background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid var(--accent-red);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+        }).join('');
+        return `<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px">📅 ${monthLabel}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${badges}</div></div>`;
+      }).join('');
     }
     panel.style.display = 'block';
   } else {
