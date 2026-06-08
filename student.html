@@ -1355,10 +1355,12 @@ function handleSalaryPhoto(event) {
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       // 薪資單直接存 base64，不上傳外部服務，由 Firestore Rules 保護隱私
       const base64 = canvas.toDataURL('image/jpeg', 0.75);
-      // ★ 硬性阻擋：壓縮後若仍超過 800KB，拒絕儲存並提示重拍
-      // base64 字串長度 × 0.75 = 實際 bytes；1,090,000 chars ≈ 800KB 實際大小
-      if (base64.length > 1090000) {
-        toast('薪資單照片太大（壓縮後仍超過 800KB），請重拍或選解析度較低的圖片', 'error');
+      // ★ 硬性阻擋：Firestore 文件上限 1MB（1,048,576 bytes）
+      // base64 字串全為 ASCII，存入 Firestore 時 1 char = 1 byte
+      // 700,000 chars ≈ 700KB（base64 欄位本身） + ~100KB（其他欄位）= ~800KB，安全低於 1MB
+      // 注意：× 0.75 是解碼後的圖片大小，不是 Firestore 文件大小，兩者不同
+      if (base64.length > 700000) {
+        toast('薪資單照片太大（壓縮後仍超過限制），請重拍或選解析度較低的圖片', 'error');
         event.target.value = '';
         return;
       }
