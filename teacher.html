@@ -1057,23 +1057,28 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-journals" class="hidden fade-in">
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
-        <div class="t-journals-controls" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
-            <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
-            <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
+        <div class="t-journals-controls" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
+              <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
+            </div>
+            <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
+              <input type="date" id="t-journals-date-end" style="width:100%;display:block;box-sizing:border-box">
+            </div>
+            <div class="t-journals-action-row" style="display:flex;gap:10px">
+              <button class="btn btn-primary btn-sm" onclick="queryJournals()">🔍 查詢</button>
+              <button class="btn btn-secondary btn-sm" onclick="queryJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
+            </div>
           </div>
-          <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
-            <label style="font-size:13px;color:var(--text2);white-space:nowrap">結束日期</label>
-            <input type="date" id="t-journals-date-end" style="width:100%;display:block;box-sizing:border-box">
-          </div>
-          <div class="t-journals-action-row" style="display:flex;gap:10px">
-            <button class="btn btn-primary btn-sm" onclick="loadTeacherJournals()">🔍 查詢</button>
-            <button class="btn btn-secondary btn-sm" onclick="loadTeacherJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
-          </div>
-          <div id="t-journals-search-row" style="display:flex;gap:10px;align-items:center;flex:1;min-width:200px">
-            <input type="text" id="t-journals-search" placeholder="搜尋學生姓名/座號" style="flex:1;min-width:0" oninput="loadTeacherJournals()">
+          <div id="t-journals-search-row" style="display:flex;gap:10px;align-items:center">
+            <div style="flex:1;max-width:240px;min-width:80px">
+              <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名" style="width:100%;box-sizing:border-box" oninput="loadTeacherJournals()">
+            </div>
             <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
           </div>
+          <div id="t-journals-review-hint" style="display:none;font-size:12px;color:var(--text2);padding:2px 0">ℹ️ 審閱模式中，先按「✕ 結束」退出才能搜尋其他學生</div>
         </div>
         <!-- 審閱隊列導覽列（從主頁未審閱名單進入時顯示）-->
         <div id="review-queue-nav" style="display:none;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:10px 16px;margin-bottom:10px;flex-wrap:wrap;align-items:center;gap:8px 12px">
@@ -2294,6 +2299,14 @@ function toggleCrossMonthPanel() {
   }
 }
 
+// 查詢按鈕包裝：審閱模式時顯示提示，仍執行查詢
+function queryJournals(force = false) {
+  if (window._reviewQueue && window._reviewQueue.items && window._reviewQueue.items.length > 0) {
+    toast('先按「✕ 結束」退出審閱模式才能搜尋學生月記', 'info');
+  }
+  loadTeacherJournals(force);
+}
+
 // 從本月未審閱名單進入審閱隊列
 function goFromUnreviewed(idx) {
   const items = window._unreviewedClickData || [];
@@ -2331,10 +2344,12 @@ function updateReviewQueueNav() {
   if (nextBtn) { nextBtn.disabled = isLast;  nextBtn.style.opacity = isLast  ? '0.4' : '1'; }
   const sr = document.getElementById('t-journals-search-row');
   if (sr) sr.style.display = 'none';
+  const rh = document.getElementById('t-journals-review-hint');
+  if (rh) rh.style.display = 'block';
   nav.style.display = 'flex';
 }
 
-// 前往下一位未審閱
+// 前往下一位
 function goToNextInQueue() {
   const q = window._reviewQueue;
   if (!q || !q.items || q.currentIndex >= q.items.length - 1) return;
@@ -2359,6 +2374,8 @@ function endReviewQueue() {
   if (nav) nav.style.display = 'none';
   const sr = document.getElementById('t-journals-search-row');
   if (sr) sr.style.display = 'flex';
+  const rh = document.getElementById('t-journals-review-hint');
+  if (rh) rh.style.display = 'none';
   showPage('t-dashboard');
   loadTeacherDashboard();
 }
