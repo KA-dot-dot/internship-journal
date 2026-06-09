@@ -297,10 +297,11 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   #location-detail-table .loc-detail-mobile-table tr:last-child { border-bottom: 0; }
   #location-detail-table .loc-detail-mobile-table td { display: grid; grid-template-columns: 72px 1fr; align-items: start; gap: 0 8px; border-bottom: 0; padding: 3px 0; white-space: normal; word-break: normal; overflow-wrap: anywhere; }
   #location-detail-table .loc-detail-mobile-table td::before { content: attr(data-label); color: var(--text2); font-size: 11px; font-weight: 600; padding-top: 2px; }
-  .t-journals-date-field { display: grid !important; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 8px; }
+  .t-journals-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 10px !important; flex-wrap: unset !important; }
+  .t-journals-date-field { display: grid !important; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 8px; width: 100% !important; }
   .t-journals-date-field label { margin-bottom: 0 !important; }
   .t-journals-date-field input { width: 100% !important; min-width: 0 !important; }
-  .t-journals-action-row { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .t-journals-action-row { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; width: 100% !important; }
   .t-journals-action-row .btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #t-journals-search { width: 100% !important; min-width: 0 !important; }
   #t-journals-search-row .t-journals-review-btn { width: auto !important; flex-shrink: 0 !important; }
@@ -1057,7 +1058,7 @@ tr:last-child td { border-bottom: none; }
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
         <div class="t-journals-controls" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="t-journals-filter-row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center">
               <label style="font-size:13px;color:var(--text2);white-space:nowrap">起始日期</label>
               <input type="date" id="t-journals-date-start" style="width:100%;display:block;box-sizing:border-box">
