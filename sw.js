@@ -14,8 +14,8 @@ const PRECACHE_URLS = [
   './teacher.html',
   './offline.html',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
+  './icon-192.png',
+  './icon-512.png',
 ];
 
 // 完全略過（交給瀏覽器原生處理）的網域
