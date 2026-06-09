@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#2563eb">
+  <title>離線中 — 實習月記</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+      min-height: 100dvh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1rem;
+      background: #f8fafc; color: #1e293b;
+      padding: 2rem; text-align: center;
+    }
+    .icon { font-size: 3.5rem; line-height: 1; }
+    h1 { font-size: 1.375rem; font-weight: 600; }
+    p { font-size: 0.95rem; color: #64748b; }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.65rem 1.75rem;
+      background: #2563eb; color: #fff;
+      border: none; border-radius: 10px;
+      font-size: 1rem; font-weight: 500;
+      cursor: pointer; transition: background .15s;
+    }
+    button:hover  { background: #1d4ed8; }
+    button:active { background: #1e40af; }
+  </style>
+</head>
+<body>
+  <div class="icon">📵</div>
+  <h1>目前無網路連線</h1>
+  <p>請確認網路連線後重新整理</p>
+  <button onclick="location.reload()">重新整理</button>
+</body>
+</html>

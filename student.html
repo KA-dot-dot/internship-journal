@@ -258,6 +258,22 @@ tr:last-child td { border-bottom: none; }
 #s-batch-float:hover { background:#dc2626; transform:translateX(-50%) translateY(-2px); }
 @media (min-width:769px) { #s-batch-float { bottom:24px; } }
 </style>
+  <!-- PWA ▼ -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="實習月記">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').catch(function () {});
+      });
+    }
+  </script>
+  <!-- PWA ▲ -->
 </head>
 <body>
 
