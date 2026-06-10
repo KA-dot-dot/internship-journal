@@ -1,6 +1,6 @@
 // sw.js — Service Worker for 產學班實習月記
 // 升版方式：將 CACHE_VER 數字 +1，舊快取會在下次啟動時自動清除。
-const CACHE_VER = 1;
+const CACHE_VER = 4;
 
 const APP_CACHE = `app-v${CACHE_VER}`;   // HTML 頁面
 const IMG_CACHE = `img-v${CACHE_VER}`;   // Cloudinary 工作照片
@@ -13,7 +13,8 @@ const PRECACHE_URLS = [
   './student.html',
   './teacher.html',
   './offline.html',
-  './manifest.json',
+  './manifest-student.json',
+  './manifest-teacher.json',
   './icon-192.png',
   './icon-512.png',
 ];
