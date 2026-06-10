@@ -4466,7 +4466,8 @@ async function saveTeacherComment() {
   showLoading();
   try {
     await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
-      teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString()
+      teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString(),
+      teacherCommentUnread: true
     });
     hideLoading();
     closeModal('comment-modal');

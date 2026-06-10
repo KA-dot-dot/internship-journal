@@ -1467,7 +1467,8 @@ async function saveJournal() {
     // 學生重新儲存時清除老師評語，讓老師重新審閱
     teacherComment: null,
     teacherReviewed: false,
-    reviewedAt: null
+    reviewedAt: null,
+    teacherCommentUnread: false
   };
   if (JSON.stringify(data).length > 900000) return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
   const saveBtn = document.getElementById('save-journal-btn');
@@ -1557,7 +1558,10 @@ function renderJournalCardSelectable(j) {
   return `<div class="journal-card journal-card-selectable">
     ${cbHtml}
     <div class="journal-card-header">
-      <div><span class="journal-month">${escapeHtml(safeMonth)}月份月記</span></div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="journal-month">${escapeHtml(safeMonth)}月份月記</span>
+        ${j.teacherCommentUnread ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:2px 8px;font-weight:600;white-space:nowrap">● 有新評語</span>' : ''}
+      </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="badge badge-blue">${escapeHtml((j.semester||'').replace('-1','第1學期').replace('-2','第2學期'))}</span>
         ${editBtn}${deleteBtn}
@@ -1721,12 +1725,16 @@ async function exportMyPDF() {
 // ---- 編輯月記 ----
 async function editJournal(seatNo, sem, month) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
-  const { doc, getDoc } = firebase_funcs;
+  const { doc, getDoc, updateDoc } = firebase_funcs;
   showLoading();
   try {
   const snap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`));
   if (!snap.exists()) { hideLoading(); return toast('月記不存在', 'error'); }
   const j = snap.data();
+  // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
+  if (j.teacherCommentUnread) {
+    updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), { teacherCommentUnread: false }).catch(() => {});
+  }
   await initWriteForm();
   document.getElementById('write-semester').value = sem;
   initWriteMonths();
@@ -1855,7 +1863,10 @@ function renderJournalCard(j, isTeacher) {
   const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   return `<div class="journal-card">
     <div class="journal-card-header">
-      <div><span class="journal-month">${escapeHtml(safeMonth)}月份月記</span></div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="journal-month">${escapeHtml(safeMonth)}月份月記</span>
+        ${j.teacherCommentUnread ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:2px 8px;font-weight:600;white-space:nowrap">● 有新評語</span>' : ''}
+      </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="badge badge-blue">${escapeHtml(j.semester?.replace('-1','第1學期').replace('-2','第2學期') || '')}</span>
         ${editBtn}${deleteBtn}

@@ -1,17 +1,19 @@
 // sw.js — Service Worker for 產學班實習月記
-// 升版方式：將 CACHE_VER 數字 +1，舊快取會在下次啟動時自動清除。
-const CACHE_VER = 6;
+// 升版時機：
+//   ✅ 需要強制清除所有使用者舊快取時
+//   ✅ 修改 SW 快取策略或 BYPASS_DOMAINS 時
+//   ❌ 【不需要升版】只更新 student.html / teacher.html
+//      → HTML 頁面採 network-first，每次上線自動拿最新版
+const CACHE_VER = 7;
 
 const APP_CACHE = `app-v${CACHE_VER}`;   // HTML 頁面
 const IMG_CACHE = `img-v${CACHE_VER}`;   // Cloudinary 工作照片
 const CDN_CACHE = `cdn-v${CACHE_VER}`;   // jsdelivr / cdnjs 靜態資源
 
-// 預先快取的頁面（裝置離線時仍可開啟）
+// 預先快取的靜態資源（HTML 頁面改由 network-first 自動更新，不在此列）
 const PRECACHE_URLS = [
   './',
   './index.html',
-  './student.html',
-  './teacher.html',
   './offline.html',
   './manifest-student.json',
   './manifest-teacher.json',
