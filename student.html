@@ -134,7 +134,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 
 /* ===== 主應用 ===== */
 #app { display: none; min-height: 100vh; }
-.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; height: 60px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: env(safe-area-inset-top, 0px) 24px 0; min-height: 60px; height: calc(60px + env(safe-area-inset-top, 0px)); display: flex; align-items: flex-end; padding-bottom: 0; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo { width: 36px; height: 36px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
 .header-title { font-size: 15px; font-weight: 700; }
@@ -158,14 +158,14 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
   .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
   input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
-  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 env(safe-area-inset-bottom, 12px); z-index: 100; }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 calc(env(safe-area-inset-bottom, 0px) + 8px); z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 48px; }
   .mobile-nav-item .icon { font-size: 22px; }
   .mobile-nav-item.active { color: var(--accent); }
   body { padding-bottom: 0; }
   .form-row { flex-direction: column; }
   .form-row .form-group { width: 100%; }
-  .top-header { padding: 0 14px; }
+  .top-header { padding: env(safe-area-inset-top, 0px) 14px 0; }
   .header-title { font-size: 13px; }
   .header-subtitle { display: none; }
   .user-name { font-size: 12px; }
