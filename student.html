@@ -592,11 +592,6 @@ function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
 }
 
-function isStandaloneApp() {
-  return window.matchMedia?.('(display-mode: standalone)')?.matches ||
-    window.navigator.standalone === true;
-}
-
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('studentRedirectLoginPending', '1');
@@ -776,10 +771,6 @@ async function googleStudentLogin() {
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
-    if (isStandaloneApp()) {
-      await startStudentRedirectLogin();
-      return;
-    }
     const { auth, provider, signInWithPopup } = window._auth;
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
@@ -792,7 +783,7 @@ async function googleStudentLogin() {
       try {
         await startStudentRedirectLogin();
       } catch(re) {
-        toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
+        toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
       }
       return;
     }
