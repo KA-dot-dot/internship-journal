@@ -592,6 +592,17 @@ function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
 }
 
+function isStandaloneApp() {
+  return window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator.standalone === true;
+}
+
+async function startStudentRedirectLogin() {
+  const { auth, provider, signInWithRedirect } = window._auth;
+  sessionStorage.setItem('studentRedirectLoginPending', '1');
+  await signInWithRedirect(auth, provider);
+}
+
 // ============ 學期工具 ============
 function getSemesters(years = 5) {
   const now = new Date();
@@ -760,14 +771,16 @@ async function handleLoginUser(user) {
 async function googleStudentLogin() {
   showLoading();
   try {
-    // iOS Safari 要求 signInWithPopup 必須在使用者點擊的同步流程中呼叫
     if (!window._auth) {
       hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
+    if (isStandaloneApp()) {
+      await startStudentRedirectLogin();
+      return;
+    }
     const { auth, provider, signInWithPopup } = window._auth;
-    // 同步觸發 popup（此行之前不能有任何 await）
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
     const result = await popupPromise;
@@ -775,10 +788,9 @@ async function googleStudentLogin() {
   } catch(e) {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
-    if (e.code === 'auth/popup-blocked') {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
       try {
-        const { auth, provider, signInWithRedirect } = window._auth;
-        await signInWithRedirect(auth, provider);
+        await startStudentRedirectLogin();
       } catch(re) {
         toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
       }
@@ -789,10 +801,22 @@ async function googleStudentLogin() {
   }
 }
 
-// Redirect 流程已停用，保留空函式避免呼叫錯誤
 async function handleRedirectResult() {
-  // 不再使用 signInWithRedirect，此函式為空操作
-  return;
+  await waitForFirebaseAsync();
+  try {
+    const { auth, getRedirectResult } = window._auth;
+    const result = await getRedirectResult(auth);
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    if (result?.user && !currentUser) {
+      showLoading();
+      await handleLoginUser(result.user);
+    }
+  } catch(e) {
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    hideLoading();
+    console.error('Redirect 登入失敗', e);
+    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+  }
 }
 
 // ============ 進入應用 ============

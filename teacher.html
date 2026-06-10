@@ -1827,81 +1827,89 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
 }
 
 // ============ Google 老師登入 ============
+function isStandaloneApp() {
+  return window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator.standalone === true;
+}
+
+async function startTeacherRedirectLogin() {
+  const { auth, provider, signInWithRedirect } = window._auth;
+  sessionStorage.setItem('teacherRedirectLoginPending', '1');
+  await signInWithRedirect(auth, provider);
+}
+
+async function handleTeacherLoginUser(user) {
+  const { auth } = window._auth;
+  const email = normalizeEmail(user.email);
+
+  if (!isSchoolEmail(email)) {
+    await window._auth.signOut(auth);
+    hideLoading();
+    toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
+    return;
+  }
+
+  const { doc, getDoc } = firebase_funcs;
+  let isAdmin = false;
+  let adminDocData = null;
+
+  const byUid = await getDoc(doc(db, 'admins', user.uid));
+  if (byUid.exists()) {
+    isAdmin = true;
+    adminDocData = byUid.data();
+  } else {
+    const emailKey = emailToDocId(email);
+    const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+    if (byEmailKey.exists()) {
+      isAdmin = true;
+      adminDocData = byEmailKey.data();
+    }
+  }
+
+  if (!isAdmin) {
+    await window._auth.signOut(auth);
+    hideLoading();
+    toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
+    return;
+  }
+
+  currentUser = {
+    role: 'teacher',
+    uid: user.uid,
+    name: user.displayName || email.split('@')[0],
+    email
+  };
+  try {
+    await ensureAdminUidDocument(user, adminDocData || {});
+  } catch (syncErr) {
+    console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
+  }
+  enterApp();
+}
+
 async function googleTeacherLogin() {
   showLoading();
   try {
-    // iOS Safari 要求 signInWithPopup 必須在使用者點擊的同步流程中呼叫
-    // 先確保 Firebase 已初始化（通常 DOMContentLoaded 後就已完成）
-    // 若尚未初始化，最多等 3 秒；若仍未完成則提示
     if (!window._auth) {
       hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
+    if (isStandaloneApp()) {
+      await startTeacherRedirectLogin();
+      return;
+    }
     const { auth, provider, signInWithPopup } = window._auth;
-    // 同步觸發 popup（必須在此行之前不能有任何 await）
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
     const result = await popupPromise;
-    const user = result.user;
-    const email = normalizeEmail(user.email);
-
-    // 1. 驗證學校網域
-    if (!isSchoolEmail(email)) {
-      await window._auth.signOut(auth);
-      hideLoading();
-      toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
-      return;
-    }
-
-    // 2. 檢查 admins，只用 getDoc 查自己的 uid 和 emailKey
-    //    不使用 getDocs(admins)，避免 Rules 要求 list 權限造成雞生蛋問題
-    const { doc, getDoc, setDoc } = firebase_funcs;
-    let isAdmin = false;
-    let adminDocData = null;
-
-    // 先查 uid（最新格式）
-    const byUid = await getDoc(doc(db, 'admins', user.uid));
-    if (byUid.exists()) {
-      isAdmin = true;
-      adminDocData = byUid.data();
-    } else {
-      // 向下相容：查 emailKey 格式（舊版建立的管理員）
-      const emailKey = emailToDocId(email);
-      const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
-      if (byEmailKey.exists()) {
-        isAdmin = true;
-        adminDocData = byEmailKey.data();
-      }
-    }
-
-    if (!isAdmin) {
-      await window._auth.signOut(auth);
-      hideLoading();
-      toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
-      return;
-    }
-
-    currentUser = {
-      role: 'teacher',
-      uid: user.uid,
-      name: user.displayName || email.split('@')[0],
-      email
-    };
-    try {
-      await ensureAdminUidDocument(user, adminDocData || {});
-    } catch (syncErr) {
-      console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
-    }
-    enterApp();
+    await handleTeacherLoginUser(result.user);
   } catch(e) {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
-    // 手機瀏覽器封鎖 popup 時，改用 redirect 流程
-    if (e.code === 'auth/popup-blocked') {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
       try {
-        const { auth, provider, signInWithRedirect } = window._auth;
-        await signInWithRedirect(auth, provider);
+        await startTeacherRedirectLogin();
       } catch(re) {
         toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
       }
@@ -4812,6 +4820,7 @@ function selectSalaryMonth(monthLabel, clickedEl) {
 document.addEventListener('DOMContentLoaded', () => {
   waitForFirebase(() => {
     console.log('✅ Firebase 連線成功');
+    handleRedirectResult();
     // 檢查是否已有登入狀態
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
@@ -4859,6 +4868,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
+
+async function handleRedirectResult() {
+  await waitForFirebaseAsync();
+  try {
+    const { auth, getRedirectResult } = window._auth;
+    const result = await getRedirectResult(auth);
+    sessionStorage.removeItem('teacherRedirectLoginPending');
+    if (result?.user && !currentUser) {
+      showLoading();
+      await handleTeacherLoginUser(result.user);
+    }
+  } catch(e) {
+    sessionStorage.removeItem('teacherRedirectLoginPending');
+    hideLoading();
+    console.error('Redirect 登入失敗', e);
+    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+  }
+}
 </script>
 </body>
 </html>
