@@ -1741,9 +1741,9 @@ async function deleteSelectedSemesterData() {
     await loadStudentsTable();
     loadDeadlinesTable();
   } catch(e) {
-    hideLoading();
     toast('刪除學期失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 
 async function loadRosterStudentsForSemesters(semesters, journals = []) {
@@ -2035,7 +2035,6 @@ async function addAdmin() {
     const { collection, getDocs, doc, setDoc } = firebase_funcs;
     const stillAdmin = await verifyCurrentAdmin();
     if (!stillAdmin) {
-      hideLoading();
       await window._auth.signOut(window._auth.auth);
       toast('新增老師失敗：目前帳號已不是管理員', 'error');
       return;
@@ -2044,7 +2043,7 @@ async function addAdmin() {
     const safeId = emailToDocId(email);
     const snap = await getDocs(collection(db, 'admins'));
     const existing = snap.docs.find(d => normalizeEmail(d.data().email) === email || d.id === safeId);
-    if (existing) { hideLoading(); toast('此帳號已是老師', 'info'); return; }
+    if (existing) { toast('此帳號已是老師', 'info'); return; }
 
     // 用 email 作為暫時文件 ID（登入後再換成 uid）
     await setDoc(doc(db, 'admins', safeId), {
@@ -2053,13 +2052,13 @@ async function addAdmin() {
       addedAt: new Date().toISOString(),
       addedBy: currentUser.email
     }, { merge: true });
-    hideLoading();
     document.getElementById('new-admin-email').value = '';
     toast('✅ 老師帳號已新增，對方下次登入後生效', 'success');
     loadAdminPage();
   } catch(e) {
-    hideLoading();
     toast('新增失敗：' + e.message, 'error');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -2112,9 +2111,9 @@ async function bindStudent() {
     toast(`✅ 已綁定 ${email} → 座號 ${seat}`, 'success');
     loadBindingList();
   } catch(e) {
-    hideLoading();
     toast('綁定失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 
 async function loadBindingList() {
@@ -2475,9 +2474,9 @@ async function loadStudentsTable() {
     document.getElementById('students-table-body').innerHTML = rows || `<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">${escapeHtml(semesterLabel(semester))} 尚無學生資料</td></tr>`;
     await updateStudentTermStatus();
   } catch(e) {
-    hideLoading();
     toast('載入學生名單失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 
 async function bindStudentInline(seatNo, name) {
@@ -2494,12 +2493,12 @@ async function bindStudentInline(seatNo, name) {
       s.seatNo === seatNo ? { ...s, email, studentName: name } : s
     ));
     if (semester === active) await syncActiveRootFromRoster(semester, next);
-    hideLoading();
     toast(`✅ 已綁定 ${name}（${seatNo}）→ ${email}`, 'success');
     loadStudentsTable();
   } catch(e) {
-    hideLoading();
     toast('綁定失敗：' + e.message, 'error');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -2561,9 +2560,9 @@ async function saveStudent() {
     loadStudentsTable();
     loadExportStudents();
   } catch(e) {
-    hideLoading();
     toast('儲存失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
@@ -2586,9 +2585,9 @@ async function deleteStudent(seatNo, name) {
     loadTeacherJournals(true);
     loadExportStudents();
   } catch(e) {
-    hideLoading();
     toast('刪除學生失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 
 function openImportModal() {
@@ -2652,9 +2651,9 @@ async function importStudents() {
     if (ok > 0) { toast(`成功匯入 ${ok} 筆學生資料${bindOk ? `，綁定 ${bindOk} 筆帳號` : ''}`, 'success'); loadStudentsTable(); loadExportStudents(); }
     else toast('匯入失敗，請確認格式', 'error');
   } catch(e) {
-    hideLoading();
     toast('匯入失敗：' + e.message, 'error');
   }
+finally { hideLoading(); }
 }
 
 // ---- 截止日期 ----
@@ -4476,9 +4475,9 @@ async function saveTeacherComment() {
     toast('✅ 評語已儲存，月記標記為已審閱', 'success');
     loadTeacherJournals();
   } catch(e) {
-    hideLoading();
     toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
   }
+finally { hideLoading(); }
 }
 
 // ============================================================
@@ -4515,9 +4514,9 @@ async function executeBatchReview() {
     _batchReviewJournals = [];
     loadTeacherJournals();
   } catch(e) {
-    hideLoading();
     toast('❌ 批次標記失敗：' + (e.message || '請重試'), 'error');
   }
+finally { hideLoading(); }
 }
 
 // ============================================================
