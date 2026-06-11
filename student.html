@@ -699,7 +699,7 @@ async function handleLoginUser(user) {
   // 2. 查 studentBindings 集合
   const { doc, getDoc, getDocs, collection: col } = firebase_funcs;
   const emailKey = email.replace(/[@.]/g, '_');
-  const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
+  const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
 
   if (!bindSnap.exists()) {
     // ★ 用 getDoc（單筆讀取）判斷是否為老師，避免 list admins 的權限問題
@@ -707,12 +707,12 @@ async function handleLoginUser(user) {
     let isTeacher = false;
     try {
       const { doc: _doc } = firebase_funcs;
-      const uidSnap = await getDoc(_doc(db, 'admins', user.uid));
+      const uidSnap = await withTimeout(getDoc(_doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
       if (uidSnap.exists()) {
         isTeacher = true;
       } else {
         const emailKey2 = email.replace(/[@.]/g, '_');
-        const emailSnap = await getDoc(_doc(db, 'admins', emailKey2));
+        const emailSnap = await withTimeout(getDoc(_doc(db, 'admins', emailKey2)), 10000, '登入逾時，請確認網路後再試');
         isTeacher = emailSnap.exists();
       }
     } catch(e) {
@@ -735,7 +735,7 @@ async function handleLoginUser(user) {
   const seatNo = binding.seatNo;
 
   // 3. 取得學生資料
-  const stuSnap = await getDoc(doc(db, 'students', seatNo));
+  const stuSnap = await withTimeout(getDoc(doc(db, 'students', seatNo)), 10000, '登入逾時，請確認網路後再試');
   if (!stuSnap.exists()) {
     await window._auth.signOut(window._auth.auth);
     hideLoading();
@@ -2218,19 +2218,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const { doc, getDoc } = firebase_funcs;
         const emailKey = email.replace(/[@.]/g, '_');
         try {
-          const bindSnap = await getDoc(doc(db, 'studentBindings', emailKey));
+          const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
           if (!bindSnap.exists()) {
             // ★ Fix A-2：onAuthStateChanged 路徑（Firebase 自動恢復 session）
             //   同樣需要先判斷是否為老師，才能決定要不要 signOut
             let isTeacherAuto = false;
             try {
               const { doc: _doc2 } = firebase_funcs;
-              const uidSnap2 = await getDoc(_doc2(db, 'admins', user.uid));
+              const uidSnap2 = await withTimeout(getDoc(_doc2(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
               if (uidSnap2.exists()) {
                 isTeacherAuto = true;
               } else {
                 const ek2 = user.email.replace(/[@.]/g, '_');
-                const ekSnap2 = await getDoc(_doc2(db, 'admins', ek2));
+                const ekSnap2 = await withTimeout(getDoc(_doc2(db, 'admins', ek2)), 10000, '登入逾時，請確認網路後再試');
                 isTeacherAuto = ekSnap2.exists();
               }
             } catch(e) { isTeacherAuto = false; }
@@ -2245,7 +2245,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           const binding = bindSnap.data();
-          const stuSnap = await getDoc(doc(db, 'students', binding.seatNo));
+          const stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
           if (!stuSnap.exists()) { await window._auth.signOut(auth); hideLoading(); toast('❌ 找不到學生資料，請聯絡老師', 'error'); return; }
           const stuData = stuSnap.data();
           currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
