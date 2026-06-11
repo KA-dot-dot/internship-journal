@@ -1855,13 +1855,13 @@ async function handleTeacherLoginUser(user) {
   let isAdmin = false;
   let adminDocData = null;
 
-  const byUid = await getDoc(doc(db, 'admins', user.uid));
+  const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
   if (byUid.exists()) {
     isAdmin = true;
     adminDocData = byUid.data();
   } else {
     const emailKey = emailToDocId(email);
-    const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+    const byEmailKey = await withTimeout(getDoc(doc(db, 'admins', emailKey)), 10000, '登入逾時，請確認網路後再試');
     if (byEmailKey.exists()) {
       isAdmin = true;
       adminDocData = byEmailKey.data();
@@ -4838,17 +4838,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (user && !currentUser) {
         const email = normalizeEmail(user.email);
         if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
+        showLoading();
         try {
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
           let adminDocData = null;
-          const byUid = await getDoc(doc(db, 'admins', user.uid));
+          const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
           if (byUid.exists()) {
             isAdmin = true;
             adminDocData = byUid.data();
           } else {
             const emailKey = emailToDocId(email);
-            const byEmailKey = await getDoc(doc(db, 'admins', emailKey));
+            const byEmailKey = await withTimeout(getDoc(doc(db, 'admins', emailKey)), 10000, '登入逾時，請確認網路後再試');
             if (byEmailKey.exists()) {
               isAdmin = true;
               adminDocData = byEmailKey.data();
@@ -4862,9 +4863,13 @@ document.addEventListener('DOMContentLoaded', () => {
               console.warn('自動同步老師 UID 權限文件失敗，保留既有登入', syncErr);
             }
             enterApp();
+          } else {
+            hideLoading();
           }
         } catch(e) {
           console.warn('自動恢復登入失敗，請手動登入', e);
+          hideLoading();
+          toast('登入失敗：' + (e.message || '請重試'), 'error');
         }
       }
     });
