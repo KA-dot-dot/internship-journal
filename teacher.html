@@ -1905,7 +1905,6 @@ async function googleTeacherLogin() {
   showLoading();
   try {
     if (!window._auth) {
-      hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
@@ -1919,7 +1918,6 @@ async function googleTeacherLogin() {
     const result = await popupPromise;
     await handleTeacherLoginUser(result.user);
   } catch(e) {
-    hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
       try {
@@ -1931,6 +1929,8 @@ async function googleTeacherLogin() {
     }
     console.error('Google 登入失敗', e);
     toast('登入失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -3714,13 +3714,13 @@ async function executeTeacherBatchDelete(journals) {
   const { deleteDoc } = firebase_funcs;
   let success = 0, fail = 0;
   showLoading();
+  try {
   for (const j of journals) {
     try {
       await deleteDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid));
       success++;
     } catch(e) { fail++; console.error('批次刪除失敗', j, e); }
   }
-  hideLoading();
   closeModal('t-batch-delete-modal');
   document.getElementById('t-batch-float').style.display = 'none';
   toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
@@ -3732,6 +3732,7 @@ async function executeTeacherBatchDelete(journals) {
     );
   }
   loadTeacherJournals();
+  } catch(e) { toast('批次刪除失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
 }
 
 // ---- 匯出 ----
@@ -4901,16 +4902,16 @@ async function handleRedirectResult() {
   try {
     const { auth, getRedirectResult } = window._auth;
     const result = await getRedirectResult(auth);
-    sessionStorage.removeItem('teacherRedirectLoginPending');
     if (result?.user && !currentUser) {
       showLoading();
       await handleTeacherLoginUser(result.user);
     }
   } catch(e) {
-    sessionStorage.removeItem('teacherRedirectLoginPending');
-    hideLoading();
     console.error('Redirect 登入失敗', e);
     toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+  } finally {
+    sessionStorage.removeItem('teacherRedirectLoginPending');
+    hideLoading();
   }
 }
 </script>
