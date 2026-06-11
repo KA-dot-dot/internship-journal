@@ -1665,8 +1665,14 @@ async function copyPreviousTermRoster() {
   if (!roster.length) return toast(`${semesterLabel(source)} 沒有可複製的學生名單`, 'error');
   if (!confirm(`將 ${semesterLabel(source)} 的 ${roster.length} 位學生複製到 ${semesterLabel(target)}？\n現有 ${semesterLabel(target)} 名單會被覆蓋。`)) return;
   showLoading();
-  await saveTermRosterSnapshot(target, roster.map(s => ({ ...s, semester: target })));
-  hideLoading();
+  try {
+    await saveTermRosterSnapshot(target, roster.map(s => ({ ...s, semester: target })));
+  } catch(e) {
+    toast('複製名單失敗：' + (e.message || '請重試'), 'error');
+    return;
+  } finally {
+    hideLoading();
+  }
   toast('✅ 已複製上一學期名單', 'success');
   await updateStudentTermStatus();
   await loadStudentsTable();
@@ -1694,10 +1700,16 @@ async function activateSelectedTermRoster() {
   ].filter(l => l !== null).join('\n');
   if (!confirm(msg)) return;
   showLoading();
-  await saveTermRosterSnapshot(semester, roster);
-  await syncActiveRootFromRoster(semester, roster);
-  await setActiveRosterSemester(semester);
-  hideLoading();
+  try {
+    await saveTermRosterSnapshot(semester, roster);
+    await syncActiveRootFromRoster(semester, roster);
+    await setActiveRosterSemester(semester);
+  } catch(e) {
+    toast('啟用學期失敗：' + (e.message || '請重試'), 'error');
+    return;
+  } finally {
+    hideLoading();
+  }
   toast('✅ 已設為目前登入名單', 'success');
   await updateStudentTermStatus();
   await loadStudentsTable();
@@ -2506,10 +2518,15 @@ async function removeBindingInline(docId, email) {
   if (!confirm(`確定要解除綁定「${email}」嗎？解除後該學生無法用 Google 帳號登入`)) return;
   const { doc, deleteDoc } = firebase_funcs;
   showLoading();
-  await deleteDoc(doc(db, 'studentBindings', docId));
-  hideLoading();
-  toast('已解除綁定', 'success');
-  loadStudentsTable();
+  try {
+    await deleteDoc(doc(db, 'studentBindings', docId));
+    toast('已解除綁定', 'success');
+    loadStudentsTable();
+  } catch(e) {
+    toast('解除綁定失敗：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 function openAddStudentModal() {
@@ -2782,6 +2799,7 @@ async function loadSubmitStats() {
   const { start, end } = getStatsDateRange('submit-stats');
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   showLoading();
+  try {
   const [jSnap, deadlineSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'deadlines'))
@@ -2791,7 +2809,6 @@ async function loadSubmitStats() {
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   const students = await loadRosterStudentsForSemesters(monthSlots.map(s => s.sem), allJournals);
-  hideLoading();
   if (!monthSlots.length) { document.getElementById('submit-stats-content').innerHTML = '<div class="empty-state"><div class="icon">📊</div><p>請選擇日期區間後查詢</p></div>'; return; }
   const deadlineMap = buildDeadlineMap(deadlineSnap);
   const journalMap = {};
@@ -2828,6 +2845,7 @@ async function loadSubmitStats() {
     <tbody>${tbody}</tbody>
   </table></div>`;
   document.getElementById('submit-stats-content').innerHTML = tableHtml;
+  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
 }
 
 function getStatsDateRange(prefix) {
@@ -3190,11 +3208,11 @@ async function loadLocationStats() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('location-stats');
   showLoading();
+  try {
   const [snap, stuCompSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'students'))
   ]);
-  hideLoading();
   const studentMap = {};
   stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
   let journals = userJournalDocs(snap).map(d => {
@@ -3218,6 +3236,7 @@ async function loadLocationStats() {
   // 把 journals 存到全域供篩選用
   window.journals_cache = journals;
   renderFilteredCity(journals);
+  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
 }
 
 function renderFilteredCity(journals) {
@@ -3527,11 +3546,11 @@ async function loadSalaryStats() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('salary-stats');
   showLoading();
+  try {
   const [snap, stuSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
     getDocs(collection(db, 'students'))
   ]);
-  hideLoading();
   const stuCompanyMap = {};
   const stuInfoMap = {};
   stuSnap.docs.forEach(d => {
@@ -3559,6 +3578,7 @@ async function loadSalaryStats() {
   populateCompanyFilter(companies);
   window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap };
   renderSalaryStatsFromCache(window.salary_stats_cache);
+  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
 }
 
 // ---- 月記總覽 ----
