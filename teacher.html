@@ -2184,11 +2184,11 @@ async function loadTeacherDashboard() {
   const semLabel = `${y}學年第${t}學期`;
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
   const { collection, collectionGroup, getDocs, query, where } = firebase_funcs;
-  const stuSnap = await getDocs(collection(db, 'students'));
+  const stuSnap = await withTimeout(getDocs(collection(db, 'students')), 5000, '主頁資料載入逾時');
   const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
   const total = stuSnap.size;
   document.getElementById('stat-total-students').textContent = total;
-  const jSnap = await getDocs(collectionGroup(db, 'journals'));
+  const jSnap = await withTimeout(getDocs(collectionGroup(db, 'journals')), 5000, '主頁資料載入逾時');
   const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth);
   const submitted = activeJournals.length;
   const missing = total - submitted;
@@ -2252,7 +2252,13 @@ async function loadTeacherDashboard() {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
-  await loadDeadlineInfo('t-deadline-info', sem, thisMonth);
+  try {
+    await withTimeout(loadDeadlineInfo('t-deadline-info', sem, thisMonth), 5000, '截止日資訊載入逾時');
+  } catch(e) {
+    console.warn('截止日資訊載入逾時或失敗', e);
+    const el = document.getElementById('t-deadline-info');
+    if (el) el.innerHTML = '<span style="color:var(--accent-yellow)">⚠️ 截止日資訊暫時無法載入</span>';
+  }
   } catch(e) {
     console.error('主頁資料載入失敗', e);
     toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
