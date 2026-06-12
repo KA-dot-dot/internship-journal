@@ -664,6 +664,7 @@ function withTimeout(promise, ms, message) {
 }
 
 async function getMyJournalDocs(timeoutMs = 25000) {
+  if (!currentUser) throw new Error('尚未登入');
   const { collection, getDocs, getDocsFromServer, query } = firebase_funcs;
   const journalsQuery = query(collection(db, 'users', currentUser.uid, 'journals'));
   // 先嘗試一般讀取（有快取加速），再 fallback 到強制伺服器讀取
@@ -855,6 +856,7 @@ function showPage(pageId) {
 // ============================================================
 
 async function loadStudentDashboard() {
+  if (!currentUser) return;
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
   document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
@@ -904,6 +906,7 @@ function initWriteMonths() {
 }
 
 async function initWriteForm() {
+  if (!currentUser) return;
   const { collection, getDocs } = firebase_funcs;
   const snap = await getDocs(collection(db, 'deadlines'));
   const now = new Date();
@@ -935,6 +938,7 @@ async function initWriteForm() {
 }
 
 async function checkMonthDeadline(skipFill = false) {
+  if (!currentUser) return;
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
   if (!sem || !month) return;
@@ -1510,6 +1514,7 @@ async function saveJournal() {
 }
 
 async function loadStudentHistory() {
+  if (!currentUser) return;
   const startVal = document.getElementById('s-history-date-start')?.value || '';
   const endVal = document.getElementById('s-history-date-end')?.value || '';
   const startStr = startVal.replace(/-/g,'');
@@ -1668,6 +1673,7 @@ function checkBrowserForExport() {
 }
 
 async function exportMyPDF() {
+  if (!currentUser) return toast('請先登入', 'error');
   if (!checkBrowserForExport()) return;
   const startVal = document.getElementById('s-export-date-start')?.value || '';
   const endVal = document.getElementById('s-export-date-end')?.value || '';
