@@ -885,10 +885,10 @@ tr:last-child td { border-bottom: none; }
             <span style="color:var(--text2);font-size:13px">學年</span>
             <div style="display:flex;flex-direction:column;gap:6px">
               <label style="display:flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:13px;color:var(--text)">
-                <input type="radio" name="deadline-sem-half" id="deadline-sem1" value="1" checked style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第1學期（8月～隔年1月）
+                <input type="radio" name="deadline-sem-half" id="deadline-sem1" value="1" checked style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第1學期（7月～隔年1月）
               </label>
               <label style="display:flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:13px;color:var(--text)">
-                <input type="radio" name="deadline-sem-half" id="deadline-sem2" value="2" style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第2學期（2月～7月）
+                <input type="radio" name="deadline-sem-half" id="deadline-sem2" value="2" style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第2學期（2月～6月）
               </label>
             </div>
           </div>
@@ -1445,7 +1445,7 @@ function getCurrentSemester() {
   const now = new Date();
   const twYear = now.getFullYear() - 1911;
   const month = now.getMonth() + 1;
-  if (month >= 8) return `${twYear}-1`;
+  if (month >= 7) return `${twYear}-1`;
   if (month === 1) return `${twYear - 1}-1`;
   return `${twYear - 1}-2`;
 }
@@ -1457,7 +1457,7 @@ function getCurrentSemMonth() {
 
 function getSemesterMonths(semKey) {
   const half = parseInt(semKey.split('-')[1]);
-  return half === 1 ? [8,9,10,11,12,1] : [2,3,4,5,6,7];
+  return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
 }
 
 function populateSemesterSelects(selectId) {
@@ -1528,7 +1528,7 @@ async function setActiveRosterSemester(semester) {
   }, { merge: true });
 }
 
-async function loadRootRoster() {
+async function loadRootRoster(semester) {
   const { collection, getDocs } = firebase_funcs;
   const [stuSnap, bindSnap] = await Promise.all([
     getDocs(collection(db, 'students')),
@@ -1539,11 +1539,15 @@ async function loadRootRoster() {
     const b = d.data();
     if (b.seatNo) bindMap[String(b.seatNo).padStart(2, '0')] = { docId: d.id, email: normalizeEmail(b.email || '') };
   });
-  return stuSnap.docs.map(d => {
-    const s = d.data();
-    const seatNo = String(s.seatNo || d.id).padStart(2, '0');
-    return normalizeRosterStudent({ ...s, seatNo, email: bindMap[seatNo]?.email || '' });
-  }).sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+  // doc ID 格式為 {semester}_{seatNo}，若有指定學期則只取該學期
+  const prefix = semester ? (semester + '_') : null;
+  return stuSnap.docs
+    .filter(d => !prefix || d.id.startsWith(prefix))
+    .map(d => {
+      const s = d.data();
+      const seatNo = String(s.seatNo || d.id.split('_').slice(1).join('_')).padStart(2, '0');
+      return normalizeRosterStudent({ ...s, seatNo, email: bindMap[seatNo]?.email || '' });
+    }).sort((a,b) => a.seatNo.localeCompare(b.seatNo));
 }
 
 async function saveTermRosterSnapshot(semester, roster) {
@@ -1575,7 +1579,7 @@ async function loadTermRoster(semester, options = {}) {
     console.warn('讀取學期名單快照失敗', semester, e);
   }
   if (fallbackRoot) {
-    const root = await loadRootRoster();
+    const root = await loadRootRoster(semester);
     return root.map(s => ({ ...s, semester }));
   }
   return [];
@@ -1599,20 +1603,23 @@ async function updateSelectedTermSnapshot(mutator) {
 async function syncActiveRootFromRoster(semester, roster) {
   const { collection, doc, getDocs, setDoc, deleteDoc } = firebase_funcs;
   const students = (roster || []).map(s => normalizeRosterStudent(s, semester)).filter(s => s.seatNo && s.name);
+  // 只刪除同學期前綴的 /students/ 資料，保留其他學期
+  const prefix = semester + '_';
   const [oldStuSnap, oldBindSnap] = await Promise.all([
     getDocs(collection(db, 'students')),
     getDocs(collection(db, 'studentBindings'))
   ]);
   await Promise.all([
-    ...oldStuSnap.docs.map(d => deleteDoc(d.ref)),
+    ...oldStuSnap.docs.filter(d => d.id.startsWith(prefix)).map(d => deleteDoc(d.ref)),
     ...oldBindSnap.docs.map(d => deleteDoc(d.ref))
   ]);
   for (const s of students) {
-    await setDoc(doc(db, 'students', s.seatNo), {
+    await setDoc(doc(db, 'students', `${semester}_${s.seatNo}`), {
       seatNo: s.seatNo,
       studentId: s.studentId || '',
       name: s.name || '',
       company: s.company || '',
+      semester,
       updatedAt: new Date().toISOString()
     });
     if (s.email) {
@@ -1737,12 +1744,12 @@ async function deleteSelectedSemesterData() {
       ...deadlineDocs.map(d => deleteDoc(d.ref)),
       deleteDoc(doc(db, 'settings', termRosterDocId(semester)))
     ];
+    // 永遠刪除該學期前綴的 /students/ 資料（不論是否為 active）
+    const prefix = semester + '_';
+    const stuSnap = await getDocs(collection(db, 'students'));
+    deletes.push(...stuSnap.docs.filter(d => d.id.startsWith(prefix)).map(d => deleteDoc(d.ref)));
     if (active === semester) {
-      const [stuSnap, bindSnap] = await Promise.all([
-        getDocs(collection(db, 'students')),
-        getDocs(collection(db, 'studentBindings'))
-      ]);
-      deletes.push(...stuSnap.docs.map(d => deleteDoc(d.ref)));
+      const bindSnap = await getDocs(collection(db, 'studentBindings'));
       deletes.push(...bindSnap.docs.map(d => deleteDoc(d.ref)));
       _activeRosterSemester = null;
       deletes.push(deleteDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID)));
@@ -2108,9 +2115,10 @@ async function bindStudent() {
   showLoading();
   try {
     const { doc, setDoc, getDoc } = firebase_funcs;
-    // 確認座號存在
-    const stuSnap = await getDoc(doc(db, 'students', seat));
-    if (!stuSnap.exists()) { hideLoading(); toast(`找不到座號 ${seat} 的學生，請先在學生管理新增`, 'error'); return; }
+    // 確認座號存在（查目前選取學期的前綴）
+    const bindSem = getSelectedStudentSemester();
+    const stuSnap = await getDoc(doc(db, 'students', `${bindSem}_${seat}`));
+    if (!stuSnap.exists()) { hideLoading(); toast(`找不到座號 ${seat} 的學生（${semesterLabel(bindSem)}），請先在學生管理新增`, 'error'); return; }
 
     await setDoc(doc(db, 'studentBindings', email.replace(/[@.]/g, '_')), {
       email,
@@ -2187,8 +2195,11 @@ async function loadTeacherDashboard() {
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
   const { collection, collectionGroup, getDocs, query, where } = firebase_funcs;
   const stuSnap = await withTimeout(getDocs(collection(db, 'students')), 5000, '主頁資料載入逾時');
-  const activeSeatNos = new Set(stuSnap.docs.map(d => d.id));
-  const total = stuSnap.size;
+  // doc ID 格式為 {semester}_{seatNo}，只計算目前學期的學生
+  const semPrefix = sem + '_';
+  const activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix));
+  const activeSeatNos = new Set(activeStuDocs.map(d => d.data().seatNo || d.id.slice(semPrefix.length)));
+  const total = activeStuDocs.length;
   document.getElementById('stat-total-students').textContent = total;
   const jSnap = await withTimeout(getDocs(collectionGroup(db, 'journals')), 5000, '主頁資料載入逾時');
   const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth);
@@ -2714,7 +2725,7 @@ function getDeadlineSemKey() {
 }
 
 function getDeadlineSemMonths(half) {
-  return half === 1 ? [8,9,10,11,12,1] : [2,3,4,5,6,7];
+  return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
 }
 
 function renderDeadlineMonthTable() {
@@ -2725,7 +2736,7 @@ function renderDeadlineMonthTable() {
   if (!sem) { tableEl.innerHTML = '<div style="color:var(--text2);font-size:13px">請先在上方填入學年與學期</div>'; labelEl.textContent = ''; saveBtn.style.display = 'none'; return; }
   const months = getDeadlineSemMonths(sem.half);
   const adY1 = sem.y + 1911, adY2 = sem.y + 1912;
-  const semLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/8～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/7)`;
+  const semLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/7～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/6)`;
   labelEl.textContent = semLabel;
   saveBtn.style.display = '';
   let html = `<div style="overflow-x:auto"><table style="min-width:600px"><thead><tr><th>月份</th><th>開放上傳日期</th><th>截止日期</th></tr></thead><tbody>`;
@@ -2761,7 +2772,7 @@ async function saveAllDeadlines() {
   if (!sem) return toast('請先選擇學期', 'error');
   const months = getDeadlineSemMonths(sem.half);
   const adY1 = sem.y + 1911, adY2 = sem.y + 1912;
-  const semesterLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/8～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/7)`;
+  const semesterLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/7～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/6)`;
   const entries = [];
   for (const m of months) {
     const openRaw = document.getElementById(`dl-open-${m}`)?.value || '';
@@ -3242,7 +3253,8 @@ async function loadLocationStats() {
     getDocs(collection(db, 'students'))
   ]);
   const studentMap = {};
-  stuCompSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
+  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
+  stuCompSnap.docs.forEach(d => { const sno = d.data().seatNo || d.id.split('_').slice(1).join('_'); studentMap[sno] = d.data(); });
   let journals = userJournalDocs(snap).map(d => {
     const data = d.data();
     const s = studentMap[data.seatNo] || {};
@@ -3589,10 +3601,12 @@ async function loadSalaryStats() {
   ]);
   const stuCompanyMap = {};
   const stuInfoMap = {};
+  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
   stuSnap.docs.forEach(d => {
     const s = d.data();
-    stuCompanyMap[d.id] = normalizeCompanyName(s.company);
-    stuInfoMap[d.id] = { seatNo: d.id, name: s.name || '', company: normalizeCompanyName(s.company) };
+    const sno = s.seatNo || d.id.split('_').slice(1).join('_');
+    stuCompanyMap[sno] = normalizeCompanyName(s.company);
+    stuInfoMap[sno] = { seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
   });
 
   let allActiveJournals = userJournalData(snap)
@@ -3626,7 +3640,8 @@ async function fetchJournalsFromServer() {
     getDocsWithFallback(collection(db, 'students'), '學生名單')
   ]);
   const studentMap = {};
-  stuSnap.docs.forEach(d => { studentMap[d.id] = d.data(); });
+  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
+  stuSnap.docs.forEach(d => { const sno = d.data().seatNo || d.id.split('_').slice(1).join('_'); studentMap[sno] = d.data(); });
   return userJournalDocs(snap).map(d => {
     const j = d.data();
     const s = studentMap[j.seatNo] || {};
@@ -3823,11 +3838,14 @@ async function loadExportStudents() {
       const snap = await getDocs(collection(db, 'students'));
       const active = await getActiveRosterSemester();
       const label = semesterLabel(active);
+      const activePrefix = active + '_';
       const options = snap.docs
-        .sort((a, b) => a.id.localeCompare(b.id))
+        .filter(d => d.id.startsWith(activePrefix))
+        .sort((a, b) => (a.data().seatNo || '').localeCompare(b.data().seatNo || ''))
         .map(d => {
           const s = d.data();
-          return `<option value="${escapeHtml(d.id)}|${escapeHtml(active)}">${escapeHtml(s.seatNo || d.id)} ${escapeHtml(s.name || '')}</option>`;
+          const sno = s.seatNo || d.id.slice(activePrefix.length);
+          return `<option value="${escapeHtml(sno)}|${escapeHtml(active)}">${escapeHtml(sno)} ${escapeHtml(s.name || '')}</option>`;
         }).join('');
       sel.innerHTML = `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
     }

@@ -616,7 +616,7 @@ function getCurrentSemester() {
   const now = new Date();
   const twYear = now.getFullYear() - 1911;
   const month = now.getMonth() + 1;
-  if (month >= 8) return `${twYear}-1`;
+  if (month >= 7) return `${twYear}-1`;
   if (month === 1) return `${twYear - 1}-1`;
   return `${twYear - 1}-2`;
 }
@@ -628,7 +628,7 @@ function getCurrentSemMonth() {
 
 function getSemesterMonths(semKey) {
   const half = parseInt(semKey.split('-')[1]);
-  return half === 1 ? [8,9,10,11,12,1] : [2,3,4,5,6,7];
+  return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
 }
 
 function populateSemesterSelects(selectId) {
@@ -738,8 +738,9 @@ async function handleLoginUser(user) {
   const binding = bindSnap.data();
   const seatNo = binding.seatNo;
 
-  // 3. 取得學生資料
-  const stuSnap = await withTimeout(getDoc(doc(db, 'students', seatNo)), 10000, '登入逾時，請確認網路後再試');
+  // 3. 取得學生資料（doc ID 格式：{activeSemester}_{seatNo}）
+  const activeSem = getCurrentSemester();
+  const stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem}_${seatNo}`)), 10000, '登入逾時，請確認網路後再試');
   if (!stuSnap.exists()) {
     if (await isTeacherAccount(user)) {
       showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
@@ -2244,7 +2245,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           const binding = bindSnap.data();
-          const stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
+          const activeSem2 = getCurrentSemester();
+          const stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
           if (!stuSnap.exists()) {
             if (await isTeacherAccount(user)) {
               showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
