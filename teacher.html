@@ -175,7 +175,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-role { font-size: 11px; color: var(--text2); }
 .app-body { display: flex; min-height: calc(100vh - 60px); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: calc(100vh - 60px); overflow: hidden; }
+.sidebar-top { padding: 16px 12px 8px; flex-shrink: 0; }
+.sidebar-scroll { flex: 1; overflow-y: auto; padding: 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar-bottom { padding: 12px; flex-shrink: 0; border-top: 1px solid var(--border); }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
@@ -705,37 +708,41 @@ tr:last-child td { border-bottom: none; }
   <div class="app-body">
     <!-- 老師 Sidebar -->
     <div class="sidebar" id="teacher-sidebar">
-      <div class="nav-section">概覽</div>
-      <button class="nav-item active" onclick="showPage('t-dashboard')" data-page="t-dashboard">
-        <span class="icon">📊</span> 主頁
-      </button>
-      <div class="nav-section">管理</div>
-      <button class="nav-item" onclick="showPage('t-students')" data-page="t-students">
-        <span class="icon">👥</span> 學生管理
-      </button>
-      <button class="nav-item" onclick="showPage('t-deadline')" data-page="t-deadline">
-        <span class="icon">📅</span> 截止日期設定
-      </button>
-      <div class="nav-section">統計</div>
-      <button class="nav-item" onclick="showPage('t-stats')" data-page="t-stats">
-        <span class="icon">📊</span> 統計總覽
-      </button>
-      <div class="nav-section">資料</div>
-      <button class="nav-item" onclick="showPage('t-journals')" data-page="t-journals">
-        <span class="icon">📖</span> 月記總覽
-      </button>
-      <button class="nav-item" onclick="showPage('t-export')" data-page="t-export">
-        <span class="icon">⬇️</span> 匯出下載
-      </button>
-      <div class="nav-section">帳號</div>
-      <button class="nav-item" onclick="showPage('t-admin')" data-page="t-admin">
-        <span class="icon">🔑</span> 帳號管理
-      </button>
-      <div class="nav-section">設定</div>
-      <button class="nav-item" onclick="showPage('t-settings')" data-page="t-settings">
-        <span class="icon">⚙️</span> 系統設定
-      </button>
-      <div style="padding:12px;margin-top:auto">
+      <div class="sidebar-top">
+        <div class="nav-section" style="padding-top:4px">概覽</div>
+        <button class="nav-item active" onclick="showPage('t-dashboard')" data-page="t-dashboard">
+          <span class="icon">📊</span> 主頁
+        </button>
+      </div>
+      <div class="sidebar-scroll">
+        <div class="nav-section">管理</div>
+        <button class="nav-item" onclick="showPage('t-students')" data-page="t-students">
+          <span class="icon">👥</span> 學生管理
+        </button>
+        <button class="nav-item" onclick="showPage('t-deadline')" data-page="t-deadline">
+          <span class="icon">📅</span> 截止日期設定
+        </button>
+        <div class="nav-section">統計</div>
+        <button class="nav-item" onclick="showPage('t-stats')" data-page="t-stats">
+          <span class="icon">📊</span> 統計總覽
+        </button>
+        <div class="nav-section">資料</div>
+        <button class="nav-item" onclick="showPage('t-journals')" data-page="t-journals">
+          <span class="icon">📖</span> 月記總覽
+        </button>
+        <button class="nav-item" onclick="showPage('t-export')" data-page="t-export">
+          <span class="icon">⬇️</span> 匯出下載
+        </button>
+        <div class="nav-section">帳號</div>
+        <button class="nav-item" onclick="showPage('t-admin')" data-page="t-admin">
+          <span class="icon">🔑</span> 帳號管理
+        </button>
+        <div class="nav-section">設定</div>
+        <button class="nav-item" onclick="showPage('t-settings')" data-page="t-settings">
+          <span class="icon">⚙️</span> 系統設定
+        </button>
+      </div>
+      <div class="sidebar-bottom">
         <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="window.open('student.html','_blank')">
           🎓 開啟學生端測試
         </button>
