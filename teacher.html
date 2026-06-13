@@ -3076,6 +3076,23 @@ async function exportAllStatsExcel() {
     });
   });
 
+  // ── 各公司平均工作距離統計 ──
+  const companyDistMap = {};
+  locationRows.forEach(r => {
+    const c = r['公司'] || '未填寫';
+    if (!companyDistMap[c]) companyDistMap[c] = { count: 0, distances: [] };
+    companyDistMap[c].count++;
+    const d = Number(r['距學校(直線km)']);
+    if (Number.isFinite(d)) companyDistMap[c].distances.push(d);
+  });
+  const companyDistRows = Object.entries(companyDistMap)
+    .sort((a,b) => a[0].localeCompare(b[0], 'zh-TW'))
+    .map(([name, d]) => ({
+      公司名稱: name,
+      地址筆數: d.count,
+      '平均距學校(直線km)': d.distances.length ? Math.round(d.distances.reduce((a,b)=>a+b,0)/d.distances.length * 10) / 10 : ''
+    }));
+
   const salaryRows = journals
     .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
     .map(j => {
@@ -3179,6 +3196,7 @@ async function exportAllStatsExcel() {
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
   const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(直線km)':'' }]);
+  const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(直線km)':'' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
   salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
@@ -3188,6 +3206,7 @@ async function exportAllStatsExcel() {
   salaryWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 14 }];
   journalWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 40 }, { wch: 8 }];
   locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
+  companyDistWs['!cols'] = [{ wch: 24 }, { wch: 10 }, { wch: 20 }];
 
   XLSX.utils.book_append_sheet(wb, submitWs, '繳交狀況');
   XLSX.utils.book_append_sheet(wb, salarySummaryWs, '薪資摘要');
@@ -3197,10 +3216,11 @@ async function exportAllStatsExcel() {
   XLSX.utils.book_append_sheet(wb, salaryWs, '各月薪資明細');
   XLSX.utils.book_append_sheet(wb, journalWs, '月記清單');
   XLSX.utils.book_append_sheet(wb, locationWs, '出勤地點');
+  XLSX.utils.book_append_sheet(wb, companyDistWs, '各公司平均距離');
 
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
-  toast('✅ 已下載 Excel（8 張工作表，含薪資摘要與異常提醒）', 'success');
+  toast('✅ 已下載 Excel（9 張工作表，含薪資摘要、異常提醒與各公司平均距離）', 'success');
   } catch(e) {
     console.error('匯出 Excel 失敗', e);
     toast('匯出失敗：' + (e.message || '請確認網路或重試'), 'error');
@@ -3345,9 +3365,13 @@ function renderLocationDetailTable(journals, selectedCompanies) {
   detailEl.innerHTML = companies.map((company, idx) => {
     const rows = grouped[company].sort((a,b) => `${a.seatNo}${a.date}`.localeCompare(`${b.seatNo}${b.date}`));
     const subId = `loc-detail-${idx}`;
+    // 計算各公司平均工作距離
+    const validDist = rows.map(r => Number(r.distance)).filter(n => Number.isFinite(n));
+    const avgDist = validDist.length ? (validDist.reduce((a,b)=>a+b,0)/validDist.length).toFixed(1) : null;
+    const avgLabel = avgDist !== null ? ` ｜ 平均 ${avgDist} km` : '';
     return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
       <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:700">
-        <span>🏭 ${escapeHtml(company)}</span><span>${rows.length} 筆 ▾</span>
+        <span>🏭 ${escapeHtml(company)}</span><span>${rows.length} 筆${escapeHtml(avgLabel)} ▾</span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
         <table class="loc-detail-mobile-table"><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(直線km)</th></tr></thead><tbody>
