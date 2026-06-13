@@ -3801,8 +3801,8 @@ function semesterDateBounds(semKey) {
   const [y, half] = String(semKey || '').split('-').map(Number);
   if (!y || !half) return null;
   const wy = y + 1911;
-  if (half === 1) return { start: `${wy}0801`, end: `${wy + 1}0131` };
-  return { start: `${wy + 1}0201`, end: `${wy + 1}0731` };
+  if (half === 1) return { start: `${wy}0701`, end: `${wy + 1}0131` };
+  return { start: `${wy + 1}0201`, end: `${wy + 1}0630` };
 }
 
 // 取得與日期範圍重疊的學期 key 清單（null 代表不限制）
