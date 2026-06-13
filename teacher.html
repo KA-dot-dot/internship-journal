@@ -2231,9 +2231,8 @@ async function loadTeacherDashboard() {
   window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
     seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
   }));
-  // 跨月待複審：非本月、teacherReviewed 為 false 的在籍學生月記
+  // 跨月待複審：非本月、teacherReviewed 為 false 的月記（不限學期格式，userJournalData 已過濾本班）
   const crossMonthJournals = userJournalData(jSnap).filter(j =>
-    activeSeatNos.has(j.seatNo) &&
     !j.teacherReviewed &&
     !(j.semester === sem && j.month === thisMonth)
   );
