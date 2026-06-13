@@ -738,9 +738,13 @@ async function handleLoginUser(user) {
   const binding = bindSnap.data();
   const seatNo = binding.seatNo;
 
-  // 3. 取得學生資料（doc ID 格式：{activeSemester}_{seatNo}）
+  // 3. 取得學生資料（新格式：{activeSemester}_{seatNo}；fallback 舊格式：{seatNo}）
   const activeSem = getCurrentSemester();
-  const stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem}_${seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+  let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem}_${seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+  if (!stuSnap.exists()) {
+    // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
+    stuSnap = await withTimeout(getDoc(doc(db, 'students', seatNo)), 10000, '登入逾時，請確認網路後再試');
+  }
   if (!stuSnap.exists()) {
     if (await isTeacherAccount(user)) {
       showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
@@ -2246,7 +2250,11 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           const binding = bindSnap.data();
           const activeSem2 = getCurrentSemester();
-          const stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+          let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+          if (!stuSnap.exists()) {
+            // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
+            stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
+          }
           if (!stuSnap.exists()) {
             if (await isTeacherAccount(user)) {
               showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
