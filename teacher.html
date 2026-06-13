@@ -3369,13 +3369,13 @@ function renderLocationDetailTable(journals, selectedCompanies) {
     const validDist = rows.map(r => Number(r.distance)).filter(n => Number.isFinite(n));
     const avgDist = validDist.length ? (validDist.reduce((a,b)=>a+b,0)/validDist.length).toFixed(1) : null;
     const distCell = avgDist !== null
-      ? `<span style="color:var(--text3);margin:0 5px">｜</span><span style="display:inline-block;min-width:82px;text-align:right;font-variant-numeric:tabular-nums">📍 平均 ${avgDist} km</span>`
-      : `<span style="display:inline-block;min-width:82px"></span>`;
+      ? `<span style="color:var(--text3);margin:0 5px">｜</span><span style="display:inline-block;width:120px;text-align:right;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis">📍 平均 ${avgDist} km</span>`
+      : `<span style="color:var(--text3);margin:0 5px">｜</span><span style="display:inline-block;width:120px"></span>`;
     return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
       <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:700">
-        <span>🏭 ${escapeHtml(company)}</span>
-        <span style="display:inline-flex;align-items:center;white-space:nowrap;flex-shrink:0">
-          <span style="display:inline-block;min-width:44px;text-align:right;font-variant-numeric:tabular-nums">📄 ${rows.length} 筆</span>${distCell}<span style="margin-left:8px">▾</span>
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏭 ${escapeHtml(company)}</span>
+        <span style="display:inline-flex;align-items:center;white-space:nowrap;flex-shrink:0;margin-left:8px">
+          <span style="display:inline-block;width:56px;text-align:right;font-variant-numeric:tabular-nums">📄 ${rows.length} 筆</span>${distCell}<span style="margin-left:8px">▾</span>
         </span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
