@@ -3368,10 +3368,15 @@ function renderLocationDetailTable(journals, selectedCompanies) {
     // 計算各公司平均工作距離
     const validDist = rows.map(r => Number(r.distance)).filter(n => Number.isFinite(n));
     const avgDist = validDist.length ? (validDist.reduce((a,b)=>a+b,0)/validDist.length).toFixed(1) : null;
-    const avgLabel = avgDist !== null ? ` ｜ 平均 ${avgDist} km` : '';
+    const distCell = avgDist !== null
+      ? `<span style="color:var(--text3);margin:0 5px">｜</span><span style="display:inline-block;min-width:82px;text-align:right;font-variant-numeric:tabular-nums">📍 平均 ${avgDist} km</span>`
+      : `<span style="display:inline-block;min-width:82px"></span>`;
     return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
       <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:700">
-        <span>🏭 ${escapeHtml(company)}</span><span>${rows.length} 筆${escapeHtml(avgLabel)} ▾</span>
+        <span>🏭 ${escapeHtml(company)}</span>
+        <span style="display:inline-flex;align-items:center;white-space:nowrap;flex-shrink:0">
+          <span style="display:inline-block;min-width:44px;text-align:right;font-variant-numeric:tabular-nums">📄 ${rows.length} 筆</span>${distCell}<span style="margin-left:8px">▾</span>
+        </span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
         <table class="loc-detail-mobile-table"><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(直線km)</th></tr></thead><tbody>
