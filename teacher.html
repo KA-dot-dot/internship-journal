@@ -185,8 +185,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .main-content { flex: 1; padding: 28px; overflow-y: auto; max-width: 1200px; margin-left: 220px; min-height: calc(100vh - 60px); }
 
 @media (max-width: 768px) {
+  html, body, #app { width: 100%; max-width: 100%; overflow-x: hidden; }
+  .app-body { display: block; width: 100%; min-width: 0; }
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
-  .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
+  .main-content { padding: 14px; padding-bottom: 80px; width: 100%; max-width: none; min-width: 0; margin-left: 0; box-sizing: border-box; }
   input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
   .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 4px; flex: 1; }
