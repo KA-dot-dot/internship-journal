@@ -4883,7 +4883,9 @@ document.addEventListener('DOMContentLoaded', () => {
     onAuthStateChanged(auth, async (user) => {
       // ★ 處理登出事件：Firebase auth 變成 null 時，重新載入頁面讓老師重新登入
       //   （防止 student.html 登出操作導致 teacher.html session 失效但畫面假裝還在）
+      //   ★ 若老師頁面在背景（分頁未聚焦），忽略此次觸發，避免被其他分頁的 auth 事件誤傷
       if (!user && currentUser) {
+        if (document.hidden) return;
         currentUser = null;
         window._enteringApp = false;
         toast('登入已逾期，請重新登入', 'error');
