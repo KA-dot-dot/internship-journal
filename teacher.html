@@ -1539,13 +1539,18 @@ async function loadRootRoster(semester) {
     const b = d.data();
     if (b.seatNo) bindMap[String(b.seatNo).padStart(2, '0')] = { docId: d.id, email: normalizeEmail(b.email || '') };
   });
-  // doc ID 格式為 {semester}_{seatNo}，若有指定學期則只取該學期
+  // 優先取新格式 {semester}_{seatNo}，若無則 fallback 舊格式（無前綴）
   const prefix = semester ? (semester + '_') : null;
-  return stuSnap.docs
-    .filter(d => !prefix || d.id.startsWith(prefix))
+  let docs = prefix ? stuSnap.docs.filter(d => d.id.startsWith(prefix)) : stuSnap.docs;
+  // fallback：若新格式完全沒資料，改用舊格式（doc ID 不含底線前綴，或 data.semester 不符）
+  if (!docs.length) {
+    docs = stuSnap.docs.filter(d => !d.id.includes('_'));
+  }
+  return docs
     .map(d => {
       const s = d.data();
-      const seatNo = String(s.seatNo || d.id.split('_').slice(1).join('_')).padStart(2, '0');
+      // 新格式：從 data.seatNo 取；舊格式：d.id 本身即座號
+      const seatNo = String(s.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id)).padStart(2, '0');
       return normalizeRosterStudent({ ...s, seatNo, email: bindMap[seatNo]?.email || '' });
     }).sort((a,b) => a.seatNo.localeCompare(b.seatNo));
 }
@@ -2195,10 +2200,11 @@ async function loadTeacherDashboard() {
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
   const { collection, collectionGroup, getDocs, query, where } = firebase_funcs;
   const stuSnap = await withTimeout(getDocs(collection(db, 'students')), 5000, '主頁資料載入逾時');
-  // doc ID 格式為 {semester}_{seatNo}，只計算目前學期的學生
+  // 優先取新格式 {semester}_{seatNo}，若無則 fallback 舊格式（無前綴）
   const semPrefix = sem + '_';
-  const activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix));
-  const activeSeatNos = new Set(activeStuDocs.map(d => d.data().seatNo || d.id.slice(semPrefix.length)));
+  let activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix));
+  if (!activeStuDocs.length) activeStuDocs = stuSnap.docs.filter(d => !d.id.includes('_'));
+  const activeSeatNos = new Set(activeStuDocs.map(d => d.data().seatNo || (d.id.includes('_') ? d.id.slice(semPrefix.length) : d.id)));
   const total = activeStuDocs.length;
   document.getElementById('stat-total-students').textContent = total;
   const jSnap = await withTimeout(getDocs(collectionGroup(db, 'journals')), 5000, '主頁資料載入逾時');
@@ -2216,9 +2222,12 @@ async function loadTeacherDashboard() {
   document.getElementById('stat-commented').textContent = commented;
   // 各名單（供點擊展開）
   const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
-  const missingStudents = stuSnap.docs.filter(d => !submittedSeats.has(d.id));
+  const missingStudents = activeStuDocs.filter(d => {
+    const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+    return !submittedSeats.has(sno);
+  });
   window._statLists = {
-    missing:    missingStudents.map(d => `${d.id} ${d.data().name || d.id}`),
+    missing:    missingStudents.map(d => { const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id); return `${sno} ${d.data().name || sno}`; }),
     submitted:  activeJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
@@ -3253,8 +3262,11 @@ async function loadLocationStats() {
     getDocs(collection(db, 'students'))
   ]);
   const studentMap = {};
-  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
-  stuCompSnap.docs.forEach(d => { const sno = d.data().seatNo || d.id.split('_').slice(1).join('_'); studentMap[sno] = d.data(); });
+  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
+  stuCompSnap.docs.forEach(d => {
+    const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+    studentMap[sno] = d.data();
+  });
   let journals = userJournalDocs(snap).map(d => {
     const data = d.data();
     const s = studentMap[data.seatNo] || {};
@@ -3601,10 +3613,10 @@ async function loadSalaryStats() {
   ]);
   const stuCompanyMap = {};
   const stuInfoMap = {};
-  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
+  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
   stuSnap.docs.forEach(d => {
     const s = d.data();
-    const sno = s.seatNo || d.id.split('_').slice(1).join('_');
+    const sno = s.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
     stuCompanyMap[sno] = normalizeCompanyName(s.company);
     stuInfoMap[sno] = { seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
   });
@@ -3640,8 +3652,11 @@ async function fetchJournalsFromServer() {
     getDocsWithFallback(collection(db, 'students'), '學生名單')
   ]);
   const studentMap = {};
-  // doc ID 格式為 {semester}_{seatNo}，用 data().seatNo 作為 key
-  stuSnap.docs.forEach(d => { const sno = d.data().seatNo || d.id.split('_').slice(1).join('_'); studentMap[sno] = d.data(); });
+  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
+  stuSnap.docs.forEach(d => {
+    const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+    studentMap[sno] = d.data();
+  });
   return userJournalDocs(snap).map(d => {
     const j = d.data();
     const s = studentMap[j.seatNo] || {};
@@ -3839,12 +3854,14 @@ async function loadExportStudents() {
       const active = await getActiveRosterSemester();
       const label = semesterLabel(active);
       const activePrefix = active + '_';
-      const options = snap.docs
-        .filter(d => d.id.startsWith(activePrefix))
-        .sort((a, b) => (a.data().seatNo || '').localeCompare(b.data().seatNo || ''))
+      // 優先新格式，無則 fallback 舊格式
+      let filteredDocs = snap.docs.filter(d => d.id.startsWith(activePrefix));
+      if (!filteredDocs.length) filteredDocs = snap.docs.filter(d => !d.id.includes('_'));
+      const options = filteredDocs
+        .sort((a, b) => (a.data().seatNo || (a.id.includes('_') ? '' : a.id)).localeCompare(b.data().seatNo || (b.id.includes('_') ? '' : b.id)))
         .map(d => {
           const s = d.data();
-          const sno = s.seatNo || d.id.slice(activePrefix.length);
+          const sno = s.seatNo || (d.id.includes('_') ? d.id.slice(activePrefix.length) : d.id);
           return `<option value="${escapeHtml(sno)}|${escapeHtml(active)}">${escapeHtml(sno)} ${escapeHtml(s.name || '')}</option>`;
         }).join('');
       sel.innerHTML = `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
