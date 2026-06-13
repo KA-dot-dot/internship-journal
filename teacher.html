@@ -175,7 +175,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-role { font-size: 11px; color: var(--text2); }
 .app-body { display: flex; min-height: calc(100vh - 60px); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: calc(100vh - 60px); overflow: hidden; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 0; display: flex; flex-direction: column; position: fixed; top: 60px; left: 0; height: calc(100vh - 60px); overflow: hidden; z-index: 50; }
 .sidebar-top { padding: 16px 12px 8px; flex-shrink: 0; }
 .sidebar-scroll { flex: 1; overflow-y: auto; padding: 0 12px; display: flex; flex-direction: column; gap: 4px; }
 .sidebar-bottom { padding: 12px; flex-shrink: 0; border-top: 1px solid var(--border); }
@@ -185,7 +185,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .nav-item .icon { font-size: 16px; min-width: 20px; }
 .nav-section { font-size: 10px; color: var(--text3); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 10px 12px 4px; }
 
-.main-content { flex: 1; padding: 28px; overflow-y: auto; max-width: 1200px; }
+.main-content { flex: 1; padding: 28px; overflow-y: auto; max-width: 1200px; margin-left: 220px; min-height: calc(100vh - 60px); }
 
 @media (max-width: 768px) {
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
