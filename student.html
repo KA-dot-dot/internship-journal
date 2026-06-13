@@ -1,4 +1,4 @@
-﻿
+
 
 <!DOCTYPE html>
 <html lang="zh-TW" style="height:100%;background:#ffffff;">
@@ -685,6 +685,27 @@ async function getMyJournalDocs(timeoutMs = 25000) {
 }
 
 // ============ Google 學生登入 ============
+async function isTeacherAccount(user) {
+  const email = user?.email || '';
+  if (!email.endsWith('@' + SCHOOL_DOMAIN)) return false;
+  const { doc, getDoc } = firebase_funcs;
+  const emailKey = email.replace(/[@.]/g, '_');
+  try {
+    const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
+    if (byUid.exists()) return true;
+    const byEmail = await withTimeout(getDoc(doc(db, 'admins', emailKey)), 10000, '登入逾時，請確認網路後再試');
+    return byEmail.exists();
+  } catch(e) {
+    console.warn('判斷老師帳號失敗', e);
+    return false;
+  }
+}
+
+function showTeacherStudentSetupHint(message) {
+  hideLoading();
+  toast(message || '👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
+}
+
 // ============ 登入後共用：驗證並進入系統 ============
 async function handleLoginUser(user) {
   const email = user.email || '';
@@ -703,29 +724,11 @@ async function handleLoginUser(user) {
   const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
 
   if (!bindSnap.exists()) {
-    // ★ 用 getDoc（單筆讀取）判斷是否為老師，避免 list admins 的權限問題
-    //   Firestore rules：get admins 允許 schoolUser 讀自己的文件，list 則需要 isAdmin
-    let isTeacher = false;
-    try {
-      const { doc: _doc } = firebase_funcs;
-      const uidSnap = await withTimeout(getDoc(_doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
-      if (uidSnap.exists()) {
-        isTeacher = true;
-      } else {
-        const emailKey2 = email.replace(/[@.]/g, '_');
-        const emailSnap = await withTimeout(getDoc(_doc(db, 'admins', emailKey2)), 10000, '登入逾時，請確認網路後再試');
-        isTeacher = emailSnap.exists();
-      }
-    } catch(e) {
-      // 讀取失敗時保守處理，不視為老師
-      isTeacher = false;
-    }
-    hideLoading();
-    if (isTeacher) {
-      // ★ 老師帳號：不 signOut（避免影響同瀏覽器開著的 teacher.html session）
-      //   只顯示提示，讓老師自行關閉此分頁或去綁定座號
-      toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
+    if (await isTeacherAccount(user)) {
+      // 老師帳號測試學生端時，不呼叫 signOut，避免同瀏覽器中的 teacher.html 被 Firebase 跨分頁同步登出。
+      showTeacherStudentSetupHint();
     } else {
+      hideLoading();
       await window._auth.signOut(window._auth.auth);
       toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
@@ -738,9 +741,13 @@ async function handleLoginUser(user) {
   // 3. 取得學生資料
   const stuSnap = await withTimeout(getDoc(doc(db, 'students', seatNo)), 10000, '登入逾時，請確認網路後再試');
   if (!stuSnap.exists()) {
-    await window._auth.signOut(window._auth.auth);
-    hideLoading();
-    toast('❌ 找不到學生資料，請聯絡老師', 'error');
+    if (await isTeacherAccount(user)) {
+      showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
+    } else {
+      await window._auth.signOut(window._auth.auth);
+      hideLoading();
+      toast('❌ 找不到學生資料，請聯絡老師', 'error');
+    }
     return;
   }
 
@@ -2226,25 +2233,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
           if (!bindSnap.exists()) {
-            // ★ Fix A-2：onAuthStateChanged 路徑（Firebase 自動恢復 session）
-            //   同樣需要先判斷是否為老師，才能決定要不要 signOut
-            let isTeacherAuto = false;
-            try {
-              const { doc: _doc2 } = firebase_funcs;
-              const uidSnap2 = await withTimeout(getDoc(_doc2(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
-              if (uidSnap2.exists()) {
-                isTeacherAuto = true;
-              } else {
-                const ek2 = user.email.replace(/[@.]/g, '_');
-                const ekSnap2 = await withTimeout(getDoc(_doc2(db, 'admins', ek2)), 10000, '登入逾時，請確認網路後再試');
-                isTeacherAuto = ekSnap2.exists();
-              }
-            } catch(e) { isTeacherAuto = false; }
-            hideLoading();
-            if (isTeacherAuto) {
+            if (await isTeacherAccount(user)) {
               // 老師帳號：絕對不 signOut，只顯示提示，保護 teacher.html session
-              toast('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面', 'error');
+              showTeacherStudentSetupHint('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面');
             } else {
+              hideLoading();
               await window._auth.signOut(auth);
               toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
             }
@@ -2252,7 +2245,16 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           const binding = bindSnap.data();
           const stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
-          if (!stuSnap.exists()) { await window._auth.signOut(auth); hideLoading(); toast('❌ 找不到學生資料，請聯絡老師', 'error'); return; }
+          if (!stuSnap.exists()) {
+            if (await isTeacherAccount(user)) {
+              showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
+            } else {
+              await window._auth.signOut(auth);
+              hideLoading();
+              toast('❌ 找不到學生資料，請聯絡老師', 'error');
+            }
+            return;
+          }
           const stuData = stuSnap.data();
           currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
           // 補寫 uid 到 studentBindings，供 Firestore Rules 使用

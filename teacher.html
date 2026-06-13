@@ -1,4 +1,4 @@
-﻿
+
 
 <!DOCTYPE html>
 <html lang="zh-TW" style="height:100%;background:#ffffff;">
@@ -736,7 +736,7 @@ tr:last-child td { border-bottom: none; }
         <span class="icon">⚙️</span> 系統設定
       </button>
       <div style="padding:12px;margin-top:auto">
-        <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="window.open('student.html','_blank')">
+        <button class="btn btn-secondary" style="width:100%;font-size:12px;border:1px dashed var(--accent-yellow);color:var(--accent-yellow)" onclick="try{sessionStorage.setItem('teacherOpeningStudentTest',String(Date.now()))}catch(e){};window.open('student.html?teacherTest=1','_blank','noopener')">
           🎓 開啟學生端測試
         </button>
       </div>
@@ -4872,6 +4872,12 @@ function selectSalaryMonth(monthLabel, clickedEl) {
 
 // 學生端模式：直接開新分頁（不需要中間頁）
 // 老師若需測試，請至「學生管理」將自己的 email 綁定到一個測試座號，再開啟 student.html
+window.openStudentTestPage = function openStudentTestPage() {
+  try {
+    sessionStorage.setItem('teacherOpeningStudentTest', String(Date.now()));
+  } catch(e) {}
+  window.open('student.html?teacherTest=1', '_blank', 'noopener');
+};
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
@@ -4888,6 +4894,11 @@ document.addEventListener('DOMContentLoaded', () => {
       //     會造成 teacher.html onAuthStateChanged 瞬間收到 null，
       //     800ms 不夠（student.html 初始化需時較長），延長至 3000ms 避免誤觸登出。
       if (!user && currentUser) {
+        const openingStudentTestAt = Number(sessionStorage.getItem('teacherOpeningStudentTest') || 0);
+        if (openingStudentTestAt && Date.now() - openingStudentTestAt < 15000) {
+          console.warn('開啟學生端測試期間收到暫時性 auth null，已略過重新登入流程');
+          return;
+        }
         if (_authNullTimer) return;
         _authNullTimer = setTimeout(() => {
           _authNullTimer = null;
