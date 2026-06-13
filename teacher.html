@@ -4880,17 +4880,26 @@ document.addEventListener('DOMContentLoaded', () => {
     handleRedirectResult();
     // 檢查是否已有登入狀態
     const { auth, onAuthStateChanged } = window._auth;
+    let _authNullTimer = null;
     onAuthStateChanged(auth, async (user) => {
       // ★ 處理登出事件：Firebase auth 變成 null 時，重新載入頁面讓老師重新登入
       //   （防止 student.html 登出操作導致 teacher.html session 失效但畫面假裝還在）
-      //   ★ 若老師頁面在背景（分頁未聚焦），忽略此次觸發，避免被其他分頁的 auth 事件誤傷
+      //   ★ debounce：user 變 null 時先等 800ms，若 Firebase 自行恢復（跨分頁 token 刷新造成的瞬間 null）則取消
       if (!user && currentUser) {
-        if (document.hidden) return;
-        currentUser = null;
-        window._enteringApp = false;
-        toast('登入已逾期，請重新登入', 'error');
-        setTimeout(() => location.reload(), 1500);
+        if (_authNullTimer) return;
+        _authNullTimer = setTimeout(() => {
+          _authNullTimer = null;
+          if (auth.currentUser) return;
+          currentUser = null;
+          window._enteringApp = false;
+          toast('登入已逾期，請重新登入', 'error');
+          setTimeout(() => location.reload(), 1500);
+        }, 800);
         return;
+      }
+      if (user && _authNullTimer) {
+        clearTimeout(_authNullTimer);
+        _authNullTimer = null;
       }
       if (user && !currentUser) {
         const email = normalizeEmail(user.email);
