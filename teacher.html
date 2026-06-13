@@ -3371,13 +3371,11 @@ function renderLocationDetailTable(journals, selectedCompanies) {
     const fileSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.55"><path d="M14 2H6a2 2 0 0 0-2 2v16c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
     const pinSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.55"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
     return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
-      <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 14px;display:grid;grid-template-columns:1fr 16px 52px 16px 64px 16px;align-items:center;column-gap:5px;cursor:pointer;font-weight:700;box-sizing:border-box">
-        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding-right:8px">🏭 ${escapeHtml(company)}</span>
-        <span style="display:flex;align-items:center;justify-content:center;opacity:0.55">${fileSvg}</span>
-        <span style="font-size:12px;color:var(--text2);font-weight:400;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">${rows.length} 筆</span>
-        <span style="display:flex;align-items:center;justify-content:center;opacity:0.55">${avgDist !== null ? pinSvg : ''}</span>
-        <span style="font-size:12px;color:var(--text2);font-weight:400;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">${avgDist !== null ? avgDist + ' km' : ''}</span>
-        <span style="display:flex;align-items:center;justify-content:flex-end;font-size:12px;color:var(--text2)">▶</span>
+      <button type="button" onclick="toggleLocDetail('${subId}')" style="width:100%;border:0;background:var(--bg3);color:var(--text);padding:10px 14px;display:grid;grid-template-columns:1fr auto auto 16px;align-items:center;column-gap:12px;cursor:pointer;font-weight:700;box-sizing:border-box">
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">🏭 ${escapeHtml(company)}</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0">${fileSvg}${rows.length} 筆</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0">${avgDist !== null ? pinSvg + avgDist + ' km' : ''}</span>
+        <span style="display:flex;align-items:center;justify-content:flex-end;font-size:12px;color:var(--text2);font-weight:400">▶</span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
         <table class="loc-detail-mobile-table"><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(直線km)</th></tr></thead><tbody>
