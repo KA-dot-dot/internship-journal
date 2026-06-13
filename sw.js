@@ -4,16 +4,15 @@
 //   ✅ 修改 SW 快取策略或 BYPASS_DOMAINS 時
 //   ❌ 【不需要升版】只更新 student.html / teacher.html
 //      → HTML 頁面採 network-first，每次上線自動拿最新版
-const CACHE_VER = 7;
+const CACHE_VER = 8;
 
 const APP_CACHE = `app-v${CACHE_VER}`;   // HTML 頁面
 const IMG_CACHE = `img-v${CACHE_VER}`;   // Cloudinary 工作照片
 const CDN_CACHE = `cdn-v${CACHE_VER}`;   // jsdelivr / cdnjs 靜態資源
 
 // 預先快取的靜態資源（HTML 頁面改由 network-first 自動更新，不在此列）
+// 注意：此資料夾沒有 index.html，因此不要預快取 ./ 或 ./index.html，避免 SW 安裝失敗。
 const PRECACHE_URLS = [
-  './',
-  './index.html',
   './offline.html',
   './manifest-student.json',
   './manifest-teacher.json',
