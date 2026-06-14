@@ -940,7 +940,7 @@ async function initWriteForm() {
   } else {
     const cur = getCurrentSemester();
     sems.sort((a, b) => (a === cur ? -1 : b === cur ? 1 : semMap[b].latestOpen - semMap[a].latestOpen));
-    writeSemSel.innerHTML = sems.map(k => `<option value="${k}">${semMap[k].label}</option>`).join('');
+    writeSemSel.innerHTML = sems.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(semMap[k].label || '')}</option>`).join('');
     writeSemSel.value = sems.includes(cur) ? cur : sems[0];
   }
   initWriteMonths();
