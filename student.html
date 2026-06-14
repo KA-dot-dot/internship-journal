@@ -928,7 +928,8 @@ async function initWriteForm() {
     const dd = d.data();
     const openDate = new Date(dd.openDate);
     const closeDate = new Date(dd.closeDate);
-    if (dd.semester && dd.month && openDate <= now) {
+    if (dd.semester && dd.month) {
+      // 收錄所有有截止日設定的學期（含未開放），未開放月份由 checkMonthDeadline() 鎖定儲存
       if (!semMap[dd.semester]) semMap[dd.semester] = { label: dd.semesterLabel || dd.semester, latestOpen: openDate };
       else if (openDate > semMap[dd.semester].latestOpen) semMap[dd.semester].latestOpen = openDate;
     }
@@ -2036,22 +2037,6 @@ async function preparePdfJournalImages(journals) {
   }));
 }
 
-function pdfJournalYear(j) {
-  // 優先取第一筆工作摘要的西元年份
-  const entryYear = (j.entries || [])[0]?.date?.slice(0, 4);
-  if (entryYear && /^\d{4}$/.test(entryYear)) return entryYear;
-  // Fallback：依學期+月份推算（與 AI_CONTEXT.md 學期定義一致）
-  const sem = j.semester || '';
-  const [y, half] = sem.split('-').map(Number);
-  if (!y || !half) return '';
-  const adBase = y + 1911;
-  const month = j.month || 0;
-  let year = adBase;
-  if (half === 1 && month === 1) year = adBase + 1; // 第1學期1月跨年
-  if (half === 2) year = adBase + 1;                // 第2學期全部+1
-  return String(year);
-}
-
 function pdfInfoTable(j) {
   return {
     table: {
@@ -2061,14 +2046,14 @@ function pdfInfoTable(j) {
           { text: '座號', style: 'tableHead' },
           { text: '姓名', style: 'tableHead' },
           { text: '實習公司', style: 'tableHead' },
-          { text: '年份', style: 'tableHead' },
+          { text: '學期', style: 'tableHead' },
           { text: '月份', style: 'tableHead' }
         ],
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
-          { text: pdfText(j.company || ''), style: 'tableCell', alignment: 'center' },
-          { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.company || ''), style: 'tableCell' },
+          { text: pdfText(j.semester || ''), style: 'tableCell', alignment: 'center' },
           { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
         ]
       ]
