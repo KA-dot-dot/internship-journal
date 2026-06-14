@@ -885,26 +885,67 @@ tr:last-child td { border-bottom: none; }
             <span style="color:var(--text2);font-size:13px">學年</span>
             <div style="display:flex;flex-direction:column;gap:6px">
               <label style="display:flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:13px;color:var(--text)">
-                <input type="radio" name="deadline-sem-half" id="deadline-sem1" value="1" checked style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第1學期（7月～隔年1月）
+                <input type="radio" name="deadline-sem-half" id="deadline-sem1" value="1" checked style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第1學期（今年7月～隔年1月）
               </label>
               <label style="display:flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:13px;color:var(--text)">
-                <input type="radio" name="deadline-sem-half" id="deadline-sem2" value="2" style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第2學期（2月～6月）
+                <input type="radio" name="deadline-sem-half" id="deadline-sem2" value="2" style="width:auto;accent-color:var(--accent)" onchange="renderDeadlineMonthTable()"> 第2學期（隔年2月～隔年6月）
               </label>
             </div>
           </div>
         </div>
+
+        <!-- ② 快速套用：兩子區塊 -->
         <div class="card" style="margin-bottom:16px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:14px">② 共用日期快速套用</div>
-          <div class="form-row" style="margin-bottom:10px">
-            <div class="form-group"><label>共用開放上傳日期</label><input type="date" id="batch-open-date"></div>
-            <div class="form-group"><label>共用截止日期</label><input type="date" id="batch-close-date"></div>
+          <div style="font-size:15px;font-weight:700;margin-bottom:14px">② 快速套用</div>
+
+          <!-- 子區塊 A：全部相同 -->
+          <div style="margin-bottom:14px">
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text)">
+              <input type="radio" name="batch-mode" id="batch-mode-same" value="same" checked style="width:auto;accent-color:var(--accent)" onchange="toggleBatchMode()">
+              A. 全部相同（所有月份套用同一組日期）
+            </label>
+            <div id="batch-same-body" style="padding-left:22px">
+              <div class="form-row" style="margin-bottom:10px">
+                <div class="form-group"><label>共用開放上傳日期</label><input type="date" id="batch-open-date"></div>
+                <div class="form-group"><label>共用截止日期</label><input type="date" id="batch-close-date"></div>
+              </div>
+              <button class="btn btn-secondary" onclick="applyBatchDates()">📋 套用到所有月份</button>
+            </div>
           </div>
-          <button class="btn btn-secondary" onclick="applyBatchDates()">📋 套用到所有月份</button>
+
+          <!-- 子區塊 B：N 個月模式 -->
+          <div>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text)">
+              <input type="radio" name="batch-mode" id="batch-mode-nmonth" value="nmonth" style="width:auto;accent-color:var(--accent)" onchange="toggleBatchMode()">
+              B. 每月開放 N 個月（各月份自動推算截止日）
+            </label>
+            <div id="batch-nmonth-body" style="padding-left:22px;display:none">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <label style="margin:0;white-space:nowrap;font-size:13px">每月第</label>
+                  <input type="number" id="nmonth-open-day" placeholder="1" min="1" max="28" value="1" style="width:64px" oninput="updateNMonthPreview()">
+                  <label style="margin:0;white-space:nowrap;font-size:13px">號開放，開放</label>
+                  <input type="number" id="nmonth-n" placeholder="1" min="1" max="6" value="1" style="width:64px" oninput="updateNMonthPreview()">
+                  <label style="margin:0;white-space:nowrap;font-size:13px">個月</label>
+                </div>
+              </div>
+              <div id="nmonth-preview" style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.7"></div>
+              <button class="btn btn-secondary" onclick="applyNMonthDates()">📋 套用到所有月份</button>
+            </div>
+          </div>
         </div>
+
+        <!-- ③ 逐月微調（預設收合） -->
         <div class="card" style="margin-bottom:16px" id="deadline-month-card">
-          <div style="font-size:15px;font-weight:700;margin-bottom:14px">③ 逐月微調 <span id="deadline-sem-label" style="font-size:12px;color:var(--text2);font-weight:400"></span></div>
-          <div id="deadline-month-table"><div style="color:var(--text2);font-size:13px">請先在上方填入學年與學期</div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none" onclick="toggleMonthTable()">
+            <div style="font-size:15px;font-weight:700">③ 逐月微調 <span id="deadline-sem-label" style="font-size:12px;color:var(--text2);font-weight:400"></span></div>
+            <span id="month-table-toggle-icon" style="font-size:18px;color:var(--text2);transition:transform 0.2s">▶</span>
+          </div>
+          <div id="deadline-month-table-wrap" style="display:none;margin-top:14px">
+            <div id="deadline-month-table"><div style="color:var(--text2);font-size:13px">請先在上方填入學年與學期</div></div>
+          </div>
         </div>
+
         <button class="btn btn-primary btn-lg" onclick="saveAllDeadlines()" id="save-all-deadlines-btn" style="display:none">💾 一次儲存全部月份期限</button>
         <div class="card" style="margin-top:20px">
           <div style="font-size:15px;font-weight:700;margin-bottom:16px">📋 已設定期限總覽</div>
@@ -2752,18 +2793,109 @@ function renderDeadlineMonthTable() {
   tableEl.innerHTML = html;
 }
 
+// 切換逐月微調展開/收合
+function toggleMonthTable() {
+  const wrap = document.getElementById('deadline-month-table-wrap');
+  const icon = document.getElementById('month-table-toggle-icon');
+  if (!wrap) return;
+  const isOpen = wrap.style.display !== 'none';
+  wrap.style.display = isOpen ? 'none' : 'block';
+  if (icon) icon.textContent = isOpen ? '▶' : '▼';
+}
+
+// 切換快速套用子區塊 A / B 顯示
+function toggleBatchMode() {
+  const mode = document.querySelector('input[name="batch-mode"]:checked')?.value || 'same';
+  document.getElementById('batch-same-body').style.display = mode === 'same' ? '' : 'none';
+  document.getElementById('batch-nmonth-body').style.display = mode === 'nmonth' ? '' : 'none';
+  if (mode === 'nmonth') updateNMonthPreview();
+}
+
+// 計算 N 個月模式的截止日（該月第X號 + (N-1)個月後的最後一天）
+function calcNMonthDates(year, month, openDay, n) {
+  // openDate：指定年月第X號
+  const openDate = `${year}-${String(month).padStart(2,'0')}-${String(openDay).padStart(2,'0')}`;
+  // closeDate：開放月 + (N-1) 個月後的最後一天
+  const closeMonthOffset = (month - 1 + (n - 1));
+  const closeYear = year + Math.floor(closeMonthOffset / 12);
+  const closeMonthIdx = (closeMonthOffset % 12) + 1; // 1-based
+  const lastDay = new Date(closeYear, closeMonthIdx, 0).getDate(); // 該月最後一天
+  const closeDate = `${closeYear}-${String(closeMonthIdx).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  return { openDate, closeDate };
+}
+
+// N 個月模式：更新預覽文字
+function updateNMonthPreview() {
+  const sem = getDeadlineSemKey();
+  const previewEl = document.getElementById('nmonth-preview');
+  if (!previewEl) return;
+  if (!sem) { previewEl.textContent = '請先選擇學期'; return; }
+  const openDay = parseInt(document.getElementById('nmonth-open-day')?.value || '1');
+  const n = parseInt(document.getElementById('nmonth-n')?.value || '1');
+  if (!openDay || openDay < 1 || openDay > 28 || !n || n < 1) { previewEl.textContent = '請填入有效數字（開放日1~28、個月1~6）'; return; }
+  const months = getDeadlineSemMonths(sem.half);
+  const adY1 = sem.y + 1911;
+  // 第1學期：7月起算 adY1年；1月是 adY1+1年
+  // 第2學期：2~6月是 adY1+1年
+  const lines = months.map(m => {
+    let yr;
+    if (sem.half === 1) { yr = m >= 7 ? adY1 : adY1 + 1; }
+    else { yr = adY1 + 1; }
+    const { openDate, closeDate } = calcNMonthDates(yr, m, openDay, n);
+    const fmtShort = s => s.replace(/^\d{4}-/, '').replace('-', '/');
+    return `${m}月：開放 ${fmtShort(openDate)} ～ 截止 ${fmtShort(closeDate)}`;
+  });
+  previewEl.innerHTML = lines.join('　');
+}
+
 function applyBatchDates() {
   const sem = getDeadlineSemKey();
   if (!sem) return toast('請先選擇學期', 'error');
   const openVal = document.getElementById('batch-open-date').value;
   const closeVal = document.getElementById('batch-close-date').value;
   if (!openVal && !closeVal) return toast('請至少填寫共用開放日或截止日', 'error');
+  // 確保逐月微調已展開
+  _ensureMonthTableOpen();
   const months = getDeadlineSemMonths(sem.half);
   months.forEach(m => {
     if (openVal) { const el = document.getElementById(`dl-open-${m}`); if(el) el.value = openVal; }
     if (closeVal) { const el = document.getElementById(`dl-close-${m}`); if(el) el.value = closeVal; }
   });
   toast('已套用到所有月份', 'success');
+}
+
+function applyNMonthDates() {
+  const sem = getDeadlineSemKey();
+  if (!sem) return toast('請先選擇學期', 'error');
+  const openDay = parseInt(document.getElementById('nmonth-open-day')?.value || '1');
+  const n = parseInt(document.getElementById('nmonth-n')?.value || '1');
+  if (!openDay || openDay < 1 || openDay > 28) return toast('開放日請填 1～28（避免部分月份無此日）', 'error');
+  if (!n || n < 1 || n > 6) return toast('開放月數請填 1～6', 'error');
+  const months = getDeadlineSemMonths(sem.half);
+  const adY1 = sem.y + 1911;
+  // 確保逐月微調已展開
+  _ensureMonthTableOpen();
+  months.forEach(m => {
+    let yr;
+    if (sem.half === 1) { yr = m >= 7 ? adY1 : adY1 + 1; }
+    else { yr = adY1 + 1; }
+    const { openDate, closeDate } = calcNMonthDates(yr, m, openDay, n);
+    const openEl = document.getElementById(`dl-open-${m}`);
+    const closeEl = document.getElementById(`dl-close-${m}`);
+    if (openEl) openEl.value = openDate;
+    if (closeEl) closeEl.value = closeDate;
+  });
+  toast(`已套用：每月第${openDay}號開放，共 ${n} 個月`, 'success');
+}
+
+// 套用後自動展開逐月微調（讓老師看到結果）
+function _ensureMonthTableOpen() {
+  const wrap = document.getElementById('deadline-month-table-wrap');
+  const icon = document.getElementById('month-table-toggle-icon');
+  if (wrap && wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    if (icon) icon.textContent = '▼';
+  }
 }
 
 function normalizeToISODate(val) {
