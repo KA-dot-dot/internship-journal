@@ -1222,26 +1222,45 @@ function localKnownTaiwanPoint(cleanAddr) {
   if (a.includes('臺中工業高級中等學校') || a.includes('台中高工') || a.includes('臺中高工')) return { lat: SCHOOL_LAT, lng: SCHOOL_LNG };
   if ((a.includes('臺中市西區') || a.includes('台中市西區')) && a.includes('三民路一段199號')) return { lat: 24.140226, lng: 120.67571 };
   if ((a.includes('臺中市南屯區') || a.includes('台中市南屯區')) && a.includes('文心南三路289號')) return { lat: 24.13291595050519, lng: 120.6493542741656 };
+  if ((a.includes('臺中市西屯區') || a.includes('台中市西屯區')) && a.includes('臺灣大道二段666號')) return { lat: 24.1589910919562, lng: 120.65658837199564 };
   return null;
 }
 
 async function geocodeTaiwanNLSC(addr) {
   try {
     const res = await fetch(`https://geocode.nlsc.gov.tw/hgeocode?address=${encodeURIComponent(addr)}&format=JSON&targetSR=4326`);
-    if (!res.ok) return null;
+    if (!res.ok) { console.warn('[NLSC] HTTP錯誤', res.status); return null; }
     const data = await res.json();
     const pt = data?.data?.result?.[0];
-    if (!pt) return null;
+    if (!pt) { console.warn('[NLSC] 查無結果', addr); return null; }
     const lat = Number(pt.wy), lng = Number(pt.wx);
     if (isTaiwanCoord(lat, lng)) return { lat, lng };
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[NLSC] 呼叫失敗（可能是CORS被擋或網路問題）：', e.message);
+  }
   return null;
+}
+
+// 從地址中取出門牌號碼數字，用於驗證 geocoding 結果是否對應正確門牌
+function extractHouseNumber(addr) {
+  const m = (addr || '').match(/(\d+)\s*號/);
+  return m ? m[1] : null;
+}
+
+// 檢查 Nominatim 回傳結果的門牌號碼是否與查詢地址一致
+function houseNumberMatches(item, targetHouseNo) {
+  if (!targetHouseNo) return true; // 沒有門牌號碼可比對時不過濾
+  const itemHouseNo = item?.address?.house_number;
+  if (!itemHouseNo) return false; // Nominatim沒回門牌號碼，視為不可信，優先選有號碼的結果
+  return String(itemHouseNo).replace(/\D/g, '') === targetHouseNo;
 }
 
 async function geocodeTaiwanAddress(addr) {
   const p = parseTaiwanAddress(addr);
   const localPoint = localKnownTaiwanPoint(p.clean);
   if (localPoint) return localPoint;
+
+  const targetHouseNo = extractHouseNumber(p.clean);
 
   // 建立多種查詢變體，從精確到模糊
   const variants = [];
@@ -1256,17 +1275,38 @@ async function geocodeTaiwanAddress(addr) {
     if (nlscPoint) return nlscPoint;
   }
 
-  // Nominatim 查詢（備援）
+  // Nominatim 結構化查詢（優先，準確度通常優於單一字串模糊比對）
+  if (p.city && p.street) {
+    try {
+      const qs = new URLSearchParams({
+        format: 'jsonv2', countrycodes: 'tw', limit: '5',
+        'accept-language': 'zh-TW', addressdetails: '1',
+        country: '台灣', city: p.city, street: p.street,
+      });
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs}`);
+      if (res.ok) {
+        const data = await res.json();
+        const candidates = (data || []).filter(item => isTaiwanCoord(Number(item.lat), Number(item.lon)));
+        // 優先選門牌號碼相符的結果
+        const exact = candidates.find(item => houseNumberMatches(item, targetHouseNo));
+        const best = exact || candidates[0];
+        if (best) return { lat: Number(best.lat), lng: Number(best.lon) };
+      }
+      await new Promise(r => setTimeout(r, 300));
+    } catch (e) { console.warn('[Nominatim結構化查詢] 失敗：', e.message); }
+  }
+
+  // Nominatim 模糊查詢（備援）
   for (const q of variants) {
     try {
-      const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '3', q, 'accept-language': 'zh-TW', addressdetails: '1' });
+      const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '5', q, 'accept-language': 'zh-TW', addressdetails: '1' });
       const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs}`);
       if (!res.ok) continue;
       const data = await res.json();
-      for (const item of (data || [])) {
-        const point = { lat: Number(item.lat), lng: Number(item.lon) };
-        if (isTaiwanCoord(point.lat, point.lng)) return point;
-      }
+      const candidates = (data || []).filter(item => isTaiwanCoord(Number(item.lat), Number(item.lon)));
+      const exact = candidates.find(item => houseNumberMatches(item, targetHouseNo));
+      const best = exact || candidates[0];
+      if (best) return { lat: Number(best.lat), lng: Number(best.lon) };
     } catch(e) {}
     await new Promise(r => setTimeout(r, 300)); // 避免頻率限制
   }
