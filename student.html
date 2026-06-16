@@ -579,6 +579,8 @@ tr:last-child td { border-bottom: none; }
 let currentUser = null; // { role:'student', uid, seatNo, name, email, studentId, company, gender }
 let writeDeadlineDocs = [];
 let db, firebase_funcs;
+// Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行 handleLoginUser
+let _loginHandling = false;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
@@ -607,6 +609,26 @@ function waitForFirebase(cb) {
 }
 function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
+}
+
+function isStoragePartitionedEnv() {
+  // LINE 內建瀏覽器：UA 一定含 "Line/"。
+  // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
+  // 仍會被 LINE 透過 seapp.com 代理，造成 origin 不一致。
+  if (/Line\//i.test(navigator.userAgent)) return true;
+  // seapp.com hostname：LINE 代理網域（也涵蓋未必含 "Line/" UA 的邊角情況）
+  if (/seapp\.com/i.test(location.hostname)) return true;
+  // sessionStorage 完全無法使用（私密模式等）
+  try {
+    const key = '_ssptest_' + Date.now();
+    sessionStorage.setItem(key, '1');
+    const readable = sessionStorage.getItem(key) === '1';
+    sessionStorage.removeItem(key);
+    if (!readable) return true;
+  } catch (e) {
+    return true;
+  }
+  return false;
 }
 
 async function startStudentRedirectLogin() {
@@ -729,6 +751,7 @@ async function handleLoginUser(user) {
   if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
     await window._auth.signOut(window._auth.auth);
     hideLoading();
+    _loginHandling = false;
     toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
     return;
   }
@@ -747,6 +770,7 @@ async function handleLoginUser(user) {
       await window._auth.signOut(window._auth.auth);
       toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
+    _loginHandling = false;
     return;
   }
 
@@ -768,6 +792,7 @@ async function handleLoginUser(user) {
       hideLoading();
       toast('❌ 找不到學生資料，請聯絡老師', 'error');
     }
+    _loginHandling = false;
     return;
   }
 
@@ -790,6 +815,7 @@ async function handleLoginUser(user) {
     await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
   } catch(e) { console.warn('補寫 uid 失敗', e); }
 
+  _loginHandling = false;
   enterApp();
 }
 
@@ -810,6 +836,13 @@ async function googleStudentLogin() {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+      // seapp.com / LINE 代理：redirect 往返後 sessionStorage 被清空，
+      // Firebase 無法讀到自己的 redirect state → "missing initial state" 錯誤。
+      // 直接告知使用者改用外部瀏覽器，不觸發 redirect。
+      if (isStoragePartitionedEnv()) {
+        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+        return;
+      }
       try {
         await startStudentRedirectLogin();
       } catch(re) {
@@ -823,6 +856,20 @@ async function googleStudentLogin() {
 }
 
 async function handleRedirectResult() {
+  // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
+  // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
+  // 呼叫會拋出 "missing initial state" 錯誤。
+  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
+  // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
+  // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
+  // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
+  if (isStoragePartitionedEnv()) {
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    return;
+  }
+  // 設旗標：告知 onAuthStateChanged callback 這條路徑正在處理，不要搶先執行
+  _loginHandling = true;
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
@@ -831,12 +878,22 @@ async function handleRedirectResult() {
     if (result?.user && !currentUser) {
       showLoading();
       await handleLoginUser(result.user);
+    } else {
+      // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
+      _loginHandling = false;
     }
   } catch(e) {
     sessionStorage.removeItem('studentRedirectLoginPending');
+    _loginHandling = false;
     hideLoading();
     console.error('Redirect 登入失敗', e);
-    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
+    // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
+    if (e.code === 'auth/missing-initial-state' || e.message?.includes('missing initial state')) {
+      toast('⚠️ 登入狀態遺失，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    } else {
+      toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    }
   }
 }
 
@@ -2483,6 +2540,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
+        // 若 handleRedirectResult 正在處理 redirect 登入，等待它完成再決定是否接手。
+        // 避免兩條路徑同時執行 handleLoginUser 造成 Firestore 競爭查詢。
+        if (_loginHandling) {
+          // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
+          const waitStart = Date.now();
+          while (_loginHandling && Date.now() - waitStart < 15000) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (currentUser) return; // redirect 路徑已登入成功
+        }
         showLoading();
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
