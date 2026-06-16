@@ -594,6 +594,24 @@ function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
 }
 
+// ============ 環境偵測 ============
+// 偵測是否在 sessionStorage 不穩定的環境（seapp.com 代理、LINE 內建瀏覽器等）。
+// 在這些環境中，signInWithRedirect 的跨域 redirect 過程會清空 sessionStorage，
+// 導致 Firebase 拋出 "missing initial state" 錯誤。
+function isStoragePartitionedEnv() {
+  try {
+    const key = '_ssptest_' + Date.now();
+    sessionStorage.setItem(key, '1');
+    const readable = sessionStorage.getItem(key) === '1';
+    sessionStorage.removeItem(key);
+    if (!readable) return true; // sessionStorage 完全無法寫入
+  } catch (e) {
+    return true; // sessionStorage 被 block（私密模式等）
+  }
+  // seapp.com 是 LINE 的代理網域：目前可讀寫，但 redirect 往返後會被清空
+  return /seapp\.com/i.test(location.hostname);
+}
+
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('studentRedirectLoginPending', '1');
@@ -795,6 +813,13 @@ async function googleStudentLogin() {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+      // seapp.com / LINE 代理：redirect 往返後 sessionStorage 被清空，
+      // Firebase 無法讀到自己的 redirect state → "missing initial state" 錯誤。
+      // 直接告知使用者改用外部瀏覽器，不觸發 redirect。
+      if (isStoragePartitionedEnv()) {
+        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+        return;
+      }
       try {
         await startStudentRedirectLogin();
       } catch(re) {
@@ -825,7 +850,13 @@ async function handleRedirectResult() {
     sessionStorage.removeItem('studentRedirectLoginPending');
     hideLoading();
     console.error('Redirect 登入失敗', e);
-    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
+    // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
+    if (e.code === 'auth/missing-initial-state' || e.message?.includes('missing initial state')) {
+      toast('⚠️ 登入狀態遺失，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    } else {
+      toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    }
   }
 }
 
@@ -2252,7 +2283,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // LINE 內建瀏覽器偵測
   (function() {
     const ua = navigator.userAgent;
-    if (!/Line/i.test(ua)) return;
+    // seapp.com 是 LINE 的代理網域，UA 不含 "Line" 字串但行為相同（sessionStorage 跨域被清空）
+    const isLineLike = /Line/i.test(ua) || /seapp\.com/i.test(location.hostname);
+    if (!isLineLike) return;
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const symbol = isIOS ? '⋯' : '⋮';
     const platform = isIOS ? 'iPhone / iPad' : 'Android';
