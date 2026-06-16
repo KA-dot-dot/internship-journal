@@ -564,6 +564,8 @@ tr:last-child td { border-bottom: none; }
 let currentUser = null; // { role:'student', uid, seatNo, name, email, studentId, company, gender }
 let writeDeadlineDocs = [];
 let db, firebase_funcs;
+// Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行 handleLoginUser
+let _loginHandling = false;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
@@ -739,6 +741,7 @@ async function handleLoginUser(user) {
   if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
     await window._auth.signOut(window._auth.auth);
     hideLoading();
+    _loginHandling = false;
     toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
     return;
   }
@@ -757,6 +760,7 @@ async function handleLoginUser(user) {
       await window._auth.signOut(window._auth.auth);
       toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
+    _loginHandling = false;
     return;
   }
 
@@ -778,6 +782,7 @@ async function handleLoginUser(user) {
       hideLoading();
       toast('❌ 找不到學生資料，請聯絡老師', 'error');
     }
+    _loginHandling = false;
     return;
   }
 
@@ -800,6 +805,7 @@ async function handleLoginUser(user) {
     await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
   } catch(e) { console.warn('補寫 uid 失敗', e); }
 
+  _loginHandling = false;
   enterApp();
 }
 
@@ -852,6 +858,8 @@ async function handleRedirectResult() {
     toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
     return;
   }
+  // 設旗標：告知 onAuthStateChanged callback 這條路徑正在處理，不要搶先執行
+  _loginHandling = true;
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
@@ -860,9 +868,13 @@ async function handleRedirectResult() {
     if (result?.user && !currentUser) {
       showLoading();
       await handleLoginUser(result.user);
+    } else {
+      // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
+      _loginHandling = false;
     }
   } catch(e) {
     sessionStorage.removeItem('studentRedirectLoginPending');
+    _loginHandling = false;
     hideLoading();
     console.error('Redirect 登入失敗', e);
     // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
@@ -2327,6 +2339,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
+        // 若 handleRedirectResult 正在處理 redirect 登入，等待它完成再決定是否接手。
+        // 避免兩條路徑同時執行 handleLoginUser 造成 Firestore 競爭查詢。
+        if (_loginHandling) {
+          // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
+          const waitStart = Date.now();
+          while (_loginHandling && Date.now() - waitStart < 15000) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (currentUser) return; // redirect 路徑已登入成功
+        }
         showLoading();
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
