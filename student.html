@@ -1537,7 +1537,7 @@ async function calcDistance(id) {
   const resultEl = document.getElementById(`${id}-dist-result`);
   const addressError = validateCompleteTaiwanAddress(addr);
   if (addressError) {
-    resultEl.innerHTML = `<div class="dist-calculating" style="color:var(--accent-red)">❌ ${addressError}</div>`;
+    resultEl.innerHTML = `<div class="dist-calculating" style="color:var(--accent-red)">❌ ${escapeHtml(addressError)}</div>`;
     return toast(addressError, 'error');
   }
   resultEl.innerHTML = '<div class="dist-calculating">🔍 正在查詢地址，請稍候...</div>';
