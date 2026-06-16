@@ -137,7 +137,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 
 /* ===== 主應用 ===== */
 #app { display: none; min-height: 100vh; min-height: 100dvh; background: var(--bg); }
-.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: env(safe-area-inset-top) 24px 0; min-height: calc(60px + env(safe-area-inset-top)); height: calc(60px + env(safe-area-inset-top)); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; min-height: 60px; height: 60px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo { width: 36px; height: 36px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
 .header-title { font-size: 15px; font-weight: 700; }
@@ -146,9 +146,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-info { text-align: right; }
 .user-name { font-size: 13px; font-weight: 600; }
 .user-role { font-size: 11px; color: var(--text2); }
-.app-body { display: flex; min-height: calc(100dvh - 60px - env(safe-area-inset-top)); }
+.app-body { display: flex; min-height: calc(100vh - 60px); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100dvh - 60px - env(safe-area-inset-top)); overflow-y: auto; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
@@ -168,7 +168,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   body { padding-bottom: 0; }
   .form-row { flex-direction: column; }
   .form-row .form-group { width: 100%; }
-  .top-header { padding: env(safe-area-inset-top) 14px 0; }
+  .top-header { padding: 0 14px; }
   .header-title { font-size: 13px; }
   .header-subtitle { display: none; }
   .user-name { font-size: 12px; }
@@ -564,8 +564,6 @@ tr:last-child td { border-bottom: none; }
 let currentUser = null; // { role:'student', uid, seatNo, name, email, studentId, company, gender }
 let writeDeadlineDocs = [];
 let db, firebase_funcs;
-// Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行 handleLoginUser
-let _loginHandling = false;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
@@ -594,31 +592,6 @@ function waitForFirebase(cb) {
 }
 function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
-}
-
-// ============ 環境偵測 ============
-// 偵測是否在 sessionStorage 不穩定的環境（LINE 內建瀏覽器、seapp.com 代理等）。
-// 在這些環境中，signInWithRedirect 的跨域 redirect 回調被 LINE 透過 seapp.com 代理，
-// 導致 Firebase auth handler 的 sessionStorage origin 改變 → 找不到 state →
-// Firebase 拋出 "missing initial state" 並顯示白頁錯誤。
-function isStoragePartitionedEnv() {
-  // LINE 內建瀏覽器：UA 一定含 "Line/"。
-  // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
-  // 仍會被 LINE 透過 seapp.com 代理，造成 origin 不一致。
-  if (/Line\//i.test(navigator.userAgent)) return true;
-  // seapp.com hostname：LINE 代理網域（也涵蓋未必含 "Line/" UA 的邊角情況）
-  if (/seapp\.com/i.test(location.hostname)) return true;
-  // sessionStorage 完全無法使用（私密模式等）
-  try {
-    const key = '_ssptest_' + Date.now();
-    sessionStorage.setItem(key, '1');
-    const readable = sessionStorage.getItem(key) === '1';
-    sessionStorage.removeItem(key);
-    if (!readable) return true;
-  } catch (e) {
-    return true;
-  }
-  return false;
 }
 
 async function startStudentRedirectLogin() {
@@ -741,7 +714,6 @@ async function handleLoginUser(user) {
   if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
     await window._auth.signOut(window._auth.auth);
     hideLoading();
-    _loginHandling = false;
     toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
     return;
   }
@@ -760,7 +732,6 @@ async function handleLoginUser(user) {
       await window._auth.signOut(window._auth.auth);
       toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
-    _loginHandling = false;
     return;
   }
 
@@ -782,7 +753,6 @@ async function handleLoginUser(user) {
       hideLoading();
       toast('❌ 找不到學生資料，請聯絡老師', 'error');
     }
-    _loginHandling = false;
     return;
   }
 
@@ -805,7 +775,6 @@ async function handleLoginUser(user) {
     await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
   } catch(e) { console.warn('補寫 uid 失敗', e); }
 
-  _loginHandling = false;
   enterApp();
 }
 
@@ -826,13 +795,6 @@ async function googleStudentLogin() {
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
-      // seapp.com / LINE 代理：redirect 往返後 sessionStorage 被清空，
-      // Firebase 無法讀到自己的 redirect state → "missing initial state" 錯誤。
-      // 直接告知使用者改用外部瀏覽器，不觸發 redirect。
-      if (isStoragePartitionedEnv()) {
-        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
-        return;
-      }
       try {
         await startStudentRedirectLogin();
       } catch(re) {
@@ -846,20 +808,6 @@ async function googleStudentLogin() {
 }
 
 async function handleRedirectResult() {
-  // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
-  // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
-  // 呼叫會拋出 "missing initial state" 錯誤。
-  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
-  // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
-  // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
-  // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
-  if (isStoragePartitionedEnv()) {
-    sessionStorage.removeItem('studentRedirectLoginPending');
-    toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
-    return;
-  }
-  // 設旗標：告知 onAuthStateChanged callback 這條路徑正在處理，不要搶先執行
-  _loginHandling = true;
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
@@ -868,22 +816,12 @@ async function handleRedirectResult() {
     if (result?.user && !currentUser) {
       showLoading();
       await handleLoginUser(result.user);
-    } else {
-      // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
-      _loginHandling = false;
     }
   } catch(e) {
     sessionStorage.removeItem('studentRedirectLoginPending');
-    _loginHandling = false;
     hideLoading();
     console.error('Redirect 登入失敗', e);
-    // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
-    // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
-    if (e.code === 'auth/missing-initial-state' || e.message?.includes('missing initial state')) {
-      toast('⚠️ 登入狀態遺失，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
-    } else {
-      toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
-    }
+    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
   }
 }
 
@@ -904,11 +842,10 @@ function enterApp() {
 
 // ============ 登出 ============
 async function logout() {
-  try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) { console.warn('登出時 Firebase 錯誤', e); }
+  try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
   currentUser = null;
   window._enteringApp = false;
-  // 加時間戳避免 PWA/Service Worker 回應快取舊頁面，確保登出後回到乾淨的登入畫面
-  window.location.href = window.location.pathname + '?_t=' + Date.now();
+  location.reload();
 }
 
 // ============ 頁面切換 ============
@@ -1244,8 +1181,8 @@ function showWorkTypeExample(id) {
 function removeEntry(id) { document.getElementById(id)?.remove(); }
 
 // ---- 地址轉距離 ----
-const SCHOOL_LAT = 24.1133614;
-const SCHOOL_LNG = 120.6614906;
+const SCHOOL_LAT = 24.114599;
+const SCHOOL_LNG = 120.661876;
 
 function stripPostalCode(addr) { return addr.replace(/^\d{3,6}[\s]?/, '').trim(); }
 function normalizeTaiwanAddress(addr) { return (addr || '').trim().replace(/\s+/g, '').replace(/台/g, '臺'); }
@@ -1287,6 +1224,19 @@ function localKnownTaiwanPoint(cleanAddr) {
   return null;
 }
 
+async function geocodeTaiwanNLSC(addr) {
+  try {
+    const res = await fetch(`https://geocode.nlsc.gov.tw/hgeocode?address=${encodeURIComponent(addr)}&format=JSON&targetSR=4326`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const pt = data?.data?.result?.[0];
+    if (!pt) return null;
+    const lat = Number(pt.wy), lng = Number(pt.wx);
+    if (isTaiwanCoord(lat, lng)) return { lat, lng };
+  } catch (e) {}
+  return null;
+}
+
 async function geocodeTaiwanAddress(addr) {
   const p = parseTaiwanAddress(addr);
   const localPoint = localKnownTaiwanPoint(p.clean);
@@ -1299,7 +1249,13 @@ async function geocodeTaiwanAddress(addr) {
   variants.push(p.clean);
   if (p.city) variants.push(p.city);
 
-  // Nominatim 查詢
+  // 內政部國土測繪中心 geocoding（台灣門牌準確度較高，優先查詢）
+  for (const q of variants) {
+    const nlscPoint = await geocodeTaiwanNLSC(q);
+    if (nlscPoint) return nlscPoint;
+  }
+
+  // Nominatim 查詢（備援）
   for (const q of variants) {
     try {
       const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '3', q, 'accept-language': 'zh-TW', addressdetails: '1' });
@@ -2100,20 +2056,6 @@ async function preparePdfJournalImages(journals) {
   }));
 }
 
-function pdfJournalYear(j) {
-  const entryYear = (j.entries || [])[0]?.date?.slice(0, 4);
-  if (entryYear && /^\d{4}$/.test(entryYear)) return entryYear;
-  const sem = j.semester || '';
-  const [y, half] = sem.split('-').map(Number);
-  if (!y || !half) return '';
-  const adBase = y + 1911;
-  const month = j.month || 0;
-  let year = adBase;
-  if (half === 1 && month === 1) year = adBase + 1;
-  if (half === 2) year = adBase + 1;
-  return String(year);
-}
-
 function pdfInfoTable(j) {
   return {
     table: {
@@ -2123,14 +2065,14 @@ function pdfInfoTable(j) {
           { text: '座號', style: 'tableHead' },
           { text: '姓名', style: 'tableHead' },
           { text: '實習公司', style: 'tableHead' },
-          { text: '年份', style: 'tableHead' },
+          { text: '學期', style: 'tableHead' },
           { text: '月份', style: 'tableHead' }
         ],
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
-          { text: pdfText(j.company || ''), style: 'tableCell', alignment: 'center' },
-          { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.company || ''), style: 'tableCell' },
+          { text: pdfText(j.semester || ''), style: 'tableCell', alignment: 'center' },
           { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
         ]
       ]
@@ -2310,9 +2252,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // LINE 內建瀏覽器偵測
   (function() {
     const ua = navigator.userAgent;
-    // seapp.com 是 LINE 的代理網域，UA 不含 "Line" 字串但行為相同（sessionStorage 跨域被清空）
-    const isLineLike = /Line/i.test(ua) || /seapp\.com/i.test(location.hostname);
-    if (!isLineLike) return;
+    if (!/Line/i.test(ua)) return;
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const symbol = isIOS ? '⋯' : '⋮';
     const platform = isIOS ? 'iPhone / iPad' : 'Android';
@@ -2339,16 +2279,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
       if (user && !currentUser) {
-        // 若 handleRedirectResult 正在處理 redirect 登入，等待它完成再決定是否接手。
-        // 避免兩條路徑同時執行 handleLoginUser 造成 Firestore 競爭查詢。
-        if (_loginHandling) {
-          // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
-          const waitStart = Date.now();
-          while (_loginHandling && Date.now() - waitStart < 15000) {
-            await new Promise(r => setTimeout(r, 200));
-          }
-          if (currentUser) return; // redirect 路徑已登入成功
-        }
         showLoading();
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
