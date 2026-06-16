@@ -595,21 +595,28 @@ function waitForFirebaseAsync() {
 }
 
 // ============ 環境偵測 ============
-// 偵測是否在 sessionStorage 不穩定的環境（seapp.com 代理、LINE 內建瀏覽器等）。
-// 在這些環境中，signInWithRedirect 的跨域 redirect 過程會清空 sessionStorage，
-// 導致 Firebase 拋出 "missing initial state" 錯誤。
+// 偵測是否在 sessionStorage 不穩定的環境（LINE 內建瀏覽器、seapp.com 代理等）。
+// 在這些環境中，signInWithRedirect 的跨域 redirect 回調被 LINE 透過 seapp.com 代理，
+// 導致 Firebase auth handler 的 sessionStorage origin 改變 → 找不到 state →
+// Firebase 拋出 "missing initial state" 並顯示白頁錯誤。
 function isStoragePartitionedEnv() {
+  // LINE 內建瀏覽器：UA 一定含 "Line/"。
+  // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
+  // 仍會被 LINE 透過 seapp.com 代理，造成 origin 不一致。
+  if (/Line\//i.test(navigator.userAgent)) return true;
+  // seapp.com hostname：LINE 代理網域（也涵蓋未必含 "Line/" UA 的邊角情況）
+  if (/seapp\.com/i.test(location.hostname)) return true;
+  // sessionStorage 完全無法使用（私密模式等）
   try {
     const key = '_ssptest_' + Date.now();
     sessionStorage.setItem(key, '1');
     const readable = sessionStorage.getItem(key) === '1';
     sessionStorage.removeItem(key);
-    if (!readable) return true; // sessionStorage 完全無法寫入
+    if (!readable) return true;
   } catch (e) {
-    return true; // sessionStorage 被 block（私密模式等）
+    return true;
   }
-  // seapp.com 是 LINE 的代理網域：目前可讀寫，但 redirect 往返後會被清空
-  return /seapp\.com/i.test(location.hostname);
+  return false;
 }
 
 async function startStudentRedirectLogin() {
@@ -837,6 +844,14 @@ async function handleRedirectResult() {
   // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
   // 呼叫會拋出 "missing initial state" 錯誤。
   if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
+  // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
+  // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
+  // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
+  if (isStoragePartitionedEnv()) {
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    return;
+  }
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
