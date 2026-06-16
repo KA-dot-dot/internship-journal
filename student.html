@@ -137,7 +137,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 
 /* ===== 主應用 ===== */
 #app { display: none; min-height: 100vh; min-height: 100dvh; background: var(--bg); }
-.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; min-height: 60px; height: 60px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: env(safe-area-inset-top) 24px 0; min-height: calc(60px + env(safe-area-inset-top)); height: calc(60px + env(safe-area-inset-top)); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo { width: 36px; height: 36px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
 .header-title { font-size: 15px; font-weight: 700; }
@@ -146,9 +146,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-info { text-align: right; }
 .user-name { font-size: 13px; font-weight: 600; }
 .user-role { font-size: 11px; color: var(--text2); }
-.app-body { display: flex; min-height: calc(100vh - 60px); }
+.app-body { display: flex; min-height: calc(100dvh - 60px - env(safe-area-inset-top)); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100dvh - 60px - env(safe-area-inset-top)); overflow-y: auto; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
@@ -168,7 +168,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   body { padding-bottom: 0; }
   .form-row { flex-direction: column; }
   .form-row .form-group { width: 100%; }
-  .top-header { padding: 0 14px; }
+  .top-header { padding: env(safe-area-inset-top) 14px 0; }
   .header-title { font-size: 13px; }
   .header-subtitle { display: none; }
   .user-name { font-size: 12px; }
@@ -808,6 +808,10 @@ async function googleStudentLogin() {
 }
 
 async function handleRedirectResult() {
+  // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
+  // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
+  // 呼叫會拋出 "missing initial state" 錯誤。
+  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
@@ -842,10 +846,11 @@ function enterApp() {
 
 // ============ 登出 ============
 async function logout() {
-  try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
+  try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) { console.warn('登出時 Firebase 錯誤', e); }
   currentUser = null;
   window._enteringApp = false;
-  location.reload();
+  // 加時間戳避免 PWA/Service Worker 回應快取舊頁面，確保登出後回到乾淨的登入畫面
+  window.location.href = window.location.pathname + '?_t=' + Date.now();
 }
 
 // ============ 頁面切換 ============
