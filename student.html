@@ -218,7 +218,7 @@ tr:last-child td { border-bottom: none; }
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
 
-.dist-result { display: inline-flex; align-items: center; gap: 6px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 13px; color: var(--accent-green); margin-top: 6px; }
+.dist-result { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 13px; color: var(--accent-green); margin-top: 6px; }
 .dist-calculating { color: var(--accent-yellow); font-size: 12px; margin-top: 6px; }
 
 .photo-upload-area { border: 2px dashed var(--border); border-radius: var(--radius-sm); padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
@@ -1121,12 +1121,10 @@ function addWorkEntry() {
     </div>
     <div class="form-group">
       <label>工作地點地址（用於計算距學校直線距離）</label>
-      <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
-        <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="flex:1;min-width:0" oninput="clearDistResult('${id}')">
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn btn-secondary btn-sm" style="white-space:nowrap;margin-top:0" onclick="calcDistance('${id}')">📍 計算距離</button>
-          <button class="btn btn-secondary btn-sm" style="white-space:nowrap;margin-top:0" onclick="useCurrentLocation('${id}')">📌 目前位置</button>
-        </div>
+      <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="width:100%" oninput="clearDistResult('${id}')">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="calcDistance('${id}')">📍 計算距離</button>
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="useCurrentLocation('${id}')">📌 目前位置</button>
       </div>
       <div id="${id}-dist-result"></div>
       <div id="${id}-dist-manual-wrap" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1406,7 +1404,7 @@ function useCurrentLocation(id) {
       }
       const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, latitude, longitude);
       const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
-      resultEl.innerHTML = `<div class="dist-result">📌 GPS 定位：距台中高工約 <strong>${finalKm} km</strong>（直線距離）</div>`;
+      resultEl.innerHTML = `<div class="dist-result">📌 距台中高工 <strong>${finalKm} km</strong>（直線）</div>`;
       const manualInput = document.getElementById(`${id}-dist-manual`);
       if (manualInput) { manualInput.value = finalKm; manualInput.dataset.autoFilled = '1'; }
     },
@@ -1436,16 +1434,16 @@ function distWarningHtml(level, id, distLabel) {
       color: '#c2410c',
       bg: 'rgba(234,88,12,0.10)',
       border: '#ea580c',
-      msg: `無法精確定位此地址（可能為工業區或社區內部道路）。距離為模糊估算，建議使用 GPS 定位或手動核對。`,
-      showGps: true,
+      msg: `無法精確定位此地址（可能為工業區或社區內部道路）。距離為模糊估算，請手動確認距離。`,
+      showGps: false,
     },
     red: {
       icon: '🚨',
       color: '#b91c1c',
       bg: 'rgba(239,68,68,0.10)',
       border: '#ef4444',
-      msg: `所有定位服務均無法找到此地址。請使用 GPS 定位，或手動輸入正確距離。`,
-      showGps: true,
+      msg: `所有定位服務均無法找到此地址，請使用上方「目前位置」或手動輸入距離。`,
+      showGps: false,
     },
   };
   const c = configs[level];
@@ -1487,7 +1485,7 @@ async function calcDistance(id) {
     const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, geoResult.lat, geoResult.lng);
     const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
     const isSchool = distKm < 0.1;
-    const distLabel = isSchool ? '（本校地址）' : `📍 距台中高工約 <strong>${finalKm} km</strong>（直線距離）`;
+    const distLabel = isSchool ? '（本校地址）' : `📍 距台中高工 <strong>${finalKm} km</strong>（直線）`;
 
     if (geoResult.confidence === 'exact') {
       // ── 精確定位 ──
