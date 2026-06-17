@@ -1515,7 +1515,7 @@ function distWarningHtml(level, id, distLabel) {
       color: '#c2410c',
       bg: 'rgba(234,88,12,0.10)',
       border: '#ea580c',
-      msg: `無法精確定位此地址（可能為工業區或社區內部道路）。距離為模糊估算，請以 Google Maps 確認後手動填入。`,
+      msg: `地址定位失敗，請手動查詢並填入距離`,
       showGps: false,
       showGoogleMaps: true,
     },
@@ -1524,7 +1524,7 @@ function distWarningHtml(level, id, distLabel) {
       color: '#b91c1c',
       bg: 'rgba(239,68,68,0.10)',
       border: '#ef4444',
-      msg: `所有定位服務均無法找到此地址，請以 Google Maps 查詢開車距離後手動填入，或使用上方「目前位置」。`,
+      msg: `地址定位失敗，請手動查詢並填入距離`,
       showGps: false,
       showGoogleMaps: true,
     },
@@ -1562,9 +1562,7 @@ async function calcDistance(id) {
 
     // ── 步驟 3 雙斷頭：完全無法定位 ──
     if (!geoResult) {
-      resultEl.innerHTML =
-        `<div class="dist-calculating" style="color:var(--accent-red)">❌ 找不到此地址，請確認地址是否正確</div>` +
-        distWarningHtml('red', id, '');
+      resultEl.innerHTML = distWarningHtml('red', id, '');
       if (manualInput) { manualInput.value = ''; manualInput.dataset.autoFilled = ''; }
       return;
     }
@@ -1599,16 +1597,7 @@ async function calcDistance(id) {
     }
   } catch(e) {
     console.error('[calcDistance]', e);
-    const addrVal = document.getElementById(`${id}-address`)?.value?.trim() || '';
-    const gmapsBtn = addrVal
-      ? `<button class="btn btn-secondary btn-sm" style="margin-top:8px;white-space:nowrap" onclick="openGoogleMapsDistance(${jsArg(addrVal)})">🗺 用 Google Maps 查開車距離</button>`
-      : '';
-    resultEl.innerHTML =
-      `<div class="dist-calculating" style="color:var(--accent-red)">❌ 查詢失敗，請確認網路連線</div>` +
-      `<div style="margin-top:6px;padding:8px 12px;border-radius:8px;border:1px solid #ef4444;background:rgba(239,68,68,0.10)">` +
-      `<div style="font-size:12px;color:#b91c1c;line-height:1.5">🚨 <strong>系統提示：</strong>網路查詢失敗，可改用 Google Maps 查詢開車距離後手動填入。</div>` +
-      gmapsBtn +
-      `</div>`;
+    resultEl.innerHTML = distWarningHtml('red', id, '');
   }
 }
 
