@@ -1192,7 +1192,7 @@ function addWorkEntry() {
       </div>
     </div>
     <div class="form-group">
-      <label>工作地點地址（用於計算距學校直線距離）</label>
+      <label>工作地點地址（用於計算距學校參考距離）</label>
       <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="width:100%" oninput="clearDistResult('${id}')">
       <div style="display:flex;gap:6px;margin-top:6px">
         <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="calcDistance('${id}')">📍 計算距離</button>
@@ -1476,7 +1476,7 @@ function useCurrentLocation(id) {
       }
       const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, latitude, longitude);
       const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
-      resultEl.innerHTML = `<div class="dist-result">📌 距台中高工 <strong>${finalKm} km</strong>（直線）</div>`;
+      resultEl.innerHTML = `<div class="dist-result">📌 距台中高工 <strong>${finalKm} km</strong>（參考）</div>`;
       const manualInput = document.getElementById(`${id}-dist-manual`);
       if (manualInput) { manualInput.value = finalKm; manualInput.dataset.autoFilled = '1'; }
     },
@@ -1570,7 +1570,7 @@ async function calcDistance(id) {
     const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, geoResult.lat, geoResult.lng);
     const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
     const isSchool = distKm < 0.1;
-    const distLabel = isSchool ? '（本校地址）' : `📍 距台中高工 <strong>${finalKm} km</strong>（直線）`;
+    const distLabel = isSchool ? '（本校地址）' : `📍 距台中高工 <strong>${finalKm} km</strong>（參考）`;
 
     if (geoResult.confidence === 'exact') {
       // ── 精確定位 ──
@@ -1861,7 +1861,7 @@ function renderJournalCardSelectable(j) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（直線）` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => `<img src="${escapeHtml(resolveImgSrc(p))}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
@@ -2194,7 +2194,7 @@ function renderJournalCard(j, isTeacher) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（直線）` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}

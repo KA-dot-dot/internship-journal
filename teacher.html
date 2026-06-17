@@ -1003,8 +1003,8 @@ tr:last-child td { border-bottom: none; }
                   <div id="city-chart-filtered" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📍</div><p>查詢後顯示</p></div></div>
                 </div>
                 <div class="card">
-                  <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工直線距離</div>
-                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">各公司工作紀錄依距離區間分段統計｜直線距離，非行車里程</div>
+                  <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工參考距離</div>
+                  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">各公司工作紀錄依距離區間分段統計｜數值供參考，實際以開車距離為準</div>
                   <div id="distance-chart" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📏</div><p>查詢後顯示</p></div></div>
                   <div id="distance-company-detail" style="margin-top:14px"></div>
                 </div>
@@ -3234,7 +3234,7 @@ async function exportAllStatsExcel() {
         日期: e.date || '',
         縣市: city,
         工作地址: address,
-        '距學校(直線km)': e.distance ?? ''
+        '距學校(km)': e.distance ?? ''
       });
     });
   });
@@ -3245,7 +3245,7 @@ async function exportAllStatsExcel() {
     const c = r['公司'] || '未填寫';
     if (!companyDistMap[c]) companyDistMap[c] = { count: 0, distances: [] };
     companyDistMap[c].count++;
-    const d = Number(r['距學校(直線km)']);
+    const d = Number(r['距學校(km)']);
     if (Number.isFinite(d)) companyDistMap[c].distances.push(d);
   });
   const companyDistRows = Object.entries(companyDistMap)
@@ -3253,7 +3253,7 @@ async function exportAllStatsExcel() {
     .map(([name, d]) => ({
       公司名稱: name,
       地址筆數: d.count,
-      '平均距學校(直線km)': d.distances.length ? Math.round(d.distances.reduce((a,b)=>a+b,0)/d.distances.length * 10) / 10 : ''
+      '平均距學校(km)': d.distances.length ? Math.round(d.distances.reduce((a,b)=>a+b,0)/d.distances.length * 10) / 10 : ''
     }));
 
   const salaryRows = journals
@@ -3358,8 +3358,8 @@ async function exportAllStatsExcel() {
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
   const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
-  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(直線km)':'' }]);
-  const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(直線km)':'' }]);
+  const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
+  const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
   salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
@@ -3545,7 +3545,7 @@ function renderLocationDetailTable(journals, selectedCompanies) {
         <span style="display:flex;align-items:center;justify-content:flex-end;font-size:12px;color:var(--text2);font-weight:400">▶</span>
       </button>
       <div id="${subId}" class="hidden table-wrap" style="border-top:1px solid var(--border)">
-        <table class="loc-detail-mobile-table"><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(直線km)</th></tr></thead><tbody>
+        <table class="loc-detail-mobile-table"><thead><tr><th style="text-align:center">座號</th><th>姓名</th><th>日期</th><th>工作地址</th><th>距學校(km)</th></tr></thead><tbody>
           ${rows.map(r => `<tr><td data-label="座號">${escapeHtml(r.seatNo)}</td><td data-label="姓名">${escapeHtml(r.name || '-')}</td><td data-label="日期">${escapeHtml(r.date || '-')}</td><td class="loc-address-cell" data-label="工作地址">${escapeHtml(r.address)}</td><td data-label="距學校">${r.distance == null ? '-' : `${escapeHtml(String(r.distance))} km`}</td></tr>`).join('')}
         </tbody></table>
       </div>
@@ -4301,7 +4301,7 @@ function renderJournalCard(j, isTeacher) {
   const entryHtml = (j.entries || []).map(e => `
     <div class="entry-item">
       <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（直線）` : ''}</div>` : ''}
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=escapeHtml(resolveImgSrc(p));return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
@@ -4533,7 +4533,7 @@ function pdfWorkEntry(e, idx) {
   const stack = [
     { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
   ];
-  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}`, color: '#555', margin: [0, 0, 0, 3] });
+  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}${e.distance != null ? `（距學校 ${e.distance} km）` : ''}`, color: '#555', margin: [0, 0, 0, 3] });
   stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, e._pdfPhotos?.length ? 4 : 0] });
   if (e._pdfPhotos?.length) {
     stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
