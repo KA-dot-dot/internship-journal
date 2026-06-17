@@ -2368,7 +2368,7 @@ function pdfWorkEntry(e, idx) {
   const stack = [
     { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
   ];
-  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}`, color: '#555', margin: [0, 0, 0, 3] });
+  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}${e.distance != null ? `（距學校 ${e.distance} km）` : ''}`, color: '#555', margin: [0, 0, 0, 3] });
   stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, e._pdfPhotos?.length ? 4 : 0] });
   if (e._pdfPhotos?.length) {
     stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
