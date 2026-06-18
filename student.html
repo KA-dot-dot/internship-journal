@@ -1751,12 +1751,17 @@ async function saveJournal() {
   const entries = [];
   let distanceError = false;
   let addressError = '';
+  let photoError = '';
   let entryIndex = 0;
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
     entryIndex += 1;
     const id = div.id;
     const noPhoto = document.getElementById(`${id}-nophoto`)?.checked;
     const photos = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap img`)).map(img => img.dataset.base64);
+    // 工作照片驗證：未勾「不便拍照」且沒有上傳照片 → 阻止儲存
+    if (!noPhoto && photos.length === 0 && !photoError) {
+      photoError = `第 ${entryIndex} 筆工作摘要尚未上傳工作照片，請上傳照片或勾選「📵 不便拍照」`;
+    }
     const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
     const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
     const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
@@ -1770,6 +1775,7 @@ async function saveJournal() {
   });
   if (addressError) return toast(addressError, 'error');
   if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
+  if (photoError) return toast(photoError, 'error');
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name, company: currentUser.company || '',
@@ -2404,13 +2410,15 @@ function pdfWorkEntry(e, idx) {
     { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
   ];
   if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}${e.distance != null ? `（距學校 ${e.distance} km）` : ''}`, color: '#555', margin: [0, 0, 0, 3] });
-  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, e._pdfPhotos?.length ? 4 : 0] });
+  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, (e._pdfPhotos?.length || e.noPhoto) ? 4 : 0] });
   if (e._pdfPhotos?.length) {
     stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
     stack.push({
       columns: e._pdfPhotos.slice(0, 3).map(img => ({ image: img, fit: [210, 92], margin: [0, 0, 6, 0] })),
       columnGap: 6
     });
+  } else if (e.noPhoto) {
+    stack.push({ text: '📵 不便拍照', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
   }
   return {
     table: { widths: ['*'], body: [[{ stack }]] },
