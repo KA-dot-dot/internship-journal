@@ -1,0 +1,14 @@
+{
+  "name": "rules-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Firestore Security Rules 單元測試（emulator）。直接讀取 rule.txt，窮舉所有 match block 的允許/拒絕情境，不依賴正式環境，不消耗 Firebase 配額。",
+  "scripts": {
+    "pretest": "node copy-rules.js",
+    "test": "firebase emulators:exec --only firestore --project demo-internship-journal \"node test-rules.js\""
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.29.0",
+    "@firebase/rules-unit-testing": "^3.0.4"
+  }
+}

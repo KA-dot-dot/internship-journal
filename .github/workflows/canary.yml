@@ -1,0 +1,59 @@
+name: 學生端健康檢查（Canary）
+
+# 三個觸發時機：
+#   1. push 到 main：部署後幾分鐘內就知道有沒有壞掉（如果你的預設分支不是 main，請把下面改成你的分支名）
+#   2. schedule：每天固定時間跑一次，就算當天沒有改動也會檢查（防範 Firebase 端、GitHub Pages 快取等外部變化）
+#   3. workflow_dispatch：在 GitHub 網頁上手動按按鈕就能立刻跑一次
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 00:00（台北時間早上 8:00）
+  workflow_dispatch: {}
+
+jobs:
+  canary:
+    name: 學生端自動化測試（針對正式環境）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安裝測試套件相依套件
+        working-directory: test-suite
+        run: npm ci
+
+      - name: 安裝 Playwright 瀏覽器（Chromium）
+        working-directory: test-suite
+        run: npx playwright install --with-deps chromium
+
+      - name: 執行學生端自動化測試（直接打正式環境）
+        working-directory: test-suite
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          TEST_STUDENT_EMAIL: ${{ secrets.TEST_STUDENT_EMAIL }}
+          TEST_STUDENT_PASSWORD: ${{ secrets.TEST_STUDENT_PASSWORD }}
+          HEADLESS: 'true'
+        run: node run-tests.js --student
+
+      - name: 上傳測試報告與失敗截圖（無論成功或失敗都保留）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-report-${{ github.run_number }}
+          path: |
+            test-suite/test-report.txt
+            test-suite/screenshots/
+          retention-days: 14
+
+      - name: 測試失敗時推送 Discord 通知
+        if: failure()
+        working-directory: test-suite
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: node notify-discord.js

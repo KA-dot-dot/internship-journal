@@ -1,0 +1,48 @@
+
+G:\�y���\���ǯZ���\0617(�s�Ǵ�)\test-suite\rules-tests>﻿@echo off 
+
+G:\�y���\���ǯZ���\0617(�s�Ǵ�)\test-suite\rules-tests>chcp 65001  1>nul 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo.
+
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo ================================================ 
+================================================
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo   產學班實習月記系統 - Rules 單元測試（Layer 1） 
+  產學班實習月記系統 - Rules 單元測試（Layer 1）
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo ================================================ 
+================================================
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo.
+
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>cd /d "G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests\" 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>node -v  1>nul 2>&1 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>if 0 NEQ 0 goto no_node 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>java -version  1>nul 2>&1 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>if 0 NEQ 0 goto no_java 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>if exist "node_modules" goto run_test 
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo 開始執行 Rules 單元測試（第一次執行需下載 Firestore Emulator，請確保網路暢通）... 
+開始執行 Rules 單元測試（第一次執行需下載 Firestore Emulator，請確保網路暢通）...
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>echo.
+
+
+G:\座位表\產學班月紀\0617(新學期)\test-suite\rules-tests>call npm test 
+
+> rules-tests@1.0.0 pretest
+> node copy-rules.js
+
+✅ 已同步最新 rule.txt → firestore.rules（emulator 測試用）
+
+> rules-tests@1.0.0 test
+> firebase emulators:exec --only firestore --project demo-internship-journal "node test-rules.js"
+

@@ -1,0 +1,139 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function schoolUser() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('^[^@]+@tcivs\\.tc\\.edu\\.tw$');
+    }
+    function emailKey() {
+      return request.auth.token.email
+        .replace('@', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_')
+        .replace('\\.', '_');
+    }
+    function isAdmin() {
+      return schoolUser()
+        && (
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+          || exists(/databases/$(database)/documents/admins/$(emailKey()))
+        );
+    }
+    function validAdminWrite() {
+      return request.resource.data.email is string
+        && request.resource.data.email.matches('^[^@]+@tcivs\\.tc\\.edu\\.tw$')
+        && (
+          !request.resource.data.keys().hasAny(['protected'])
+          || request.resource.data.protected is bool
+        );
+    }
+    function keepsProtectedFlag() {
+      return !resource.data.keys().hasAny(['protected'])
+        || resource.data.protected != true
+        || (
+          request.resource.data.keys().hasAny(['protected'])
+          && request.resource.data.protected == true
+        );
+    }
+    match /admins/{adminId} {
+      allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() && validAdminWrite();
+      allow update: if isAdmin() && validAdminWrite() && keepsProtectedFlag();
+      allow delete: if isAdmin()
+        && (
+          !resource.data.keys().hasAny(['protected'])
+          || resource.data.protected != true
+        );
+    }
+    match /studentBindings/{bindingId} {
+      allow get: if bindingId == emailKey() || isAdmin();
+      allow list, create, delete: if isAdmin();
+      allow update: if (
+          schoolUser()
+          && resource.data.email == request.auth.token.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
+        ) || isAdmin();
+    }
+    match /students/{docId} {
+      // docId 格式為 {semester}_{seatNo}（新）或 {seatNo}（舊）
+      // 學生可讀取自己座號的任何學期文件
+      allow get: if (schoolUser() && (
+          docId == get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo
+          || docId.matches('.*_' + get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo)
+        )) || isAdmin();
+      allow list, create, update, delete: if isAdmin();
+    }
+    match /journals/{journalId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /users/{userId} {
+      allow read, write: if false;
+      match /journals/{journalId} {
+        allow get: if (
+            schoolUser()
+            && request.auth.uid == userId
+            && (resource == null || resource.data.ownerUid == request.auth.uid)
+          ) || isAdmin();
+        allow list: if (
+            schoolUser()
+            && request.auth.uid == userId
+          ) || isAdmin();
+        allow create: if (
+            schoolUser()
+            && request.auth.uid == userId
+            && request.resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerEmail == request.auth.token.email
+            && request.resource.data.storagePath == 'user'
+            // 學生不得在建立時寫入老師評語欄位（值必須為初始空值）
+            && request.resource.data.get('teacherComment', null) == null
+            && request.resource.data.get('teacherReviewed', false) == false
+            && request.resource.data.get('reviewedAt', null) == null
+            && request.resource.data.get('teacherCommentUnread', false) == false
+          ) || isAdmin();
+        allow update: if (
+            schoolUser()
+            && request.auth.uid == userId
+            && resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerUid == resource.data.ownerUid
+            && request.resource.data.ownerEmail == resource.data.ownerEmail
+            && request.resource.data.storagePath == 'user'
+            && request.resource.data.get('teacherComment', null) == null
+            && request.resource.data.get('teacherReviewed', false) == false
+            && request.resource.data.get('reviewedAt', null) == null
+            && request.resource.data.get('teacherCommentUnread', false) == false
+          ) || (
+            // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
+            schoolUser()
+            && request.auth.uid == userId
+            && resource.data.ownerUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherCommentUnread'])
+            && request.resource.data.teacherCommentUnread == false
+          ) || isAdmin();
+        allow delete: if (
+            schoolUser()
+            && request.auth.uid == userId
+            && resource.data.ownerUid == request.auth.uid
+          ) || isAdmin();
+      }
+    }
+    match /{path=**}/journals/{journalId} {
+      allow read: if isAdmin();
+    }
+    match /deadlines/{deadlineId} {
+      allow read: if schoolUser();
+      allow create, update, delete: if isAdmin();
+    }
+    match /settings/{settingId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

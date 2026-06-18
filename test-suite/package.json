@@ -1,0 +1,16 @@
+{
+  "name": "internship-journal-tests",
+  "version": "5.0.0",
+  "description": "產學班實習月記系統自動化測試（支援自動學生 session）",
+  "scripts": {
+    "test":                  "node run-tests.js",
+    "test:teacher":          "node run-tests.js --teacher",
+    "test:student":          "node run-tests.js --student",
+    "save-session":          "node save-session.js",
+    "save-session:student":  "node save-session.js --student",
+    "save-session:auto":     "node save-session.js --auto"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0"
+  }
+}

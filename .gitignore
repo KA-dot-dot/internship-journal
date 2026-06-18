@@ -1,0 +1,15 @@
+# 測試帳號憑證與登入 session，絕對不能上傳到公開的 GitHub repo
+test-suite/.env
+test-suite/.env.txt
+test-suite/session.json
+test-suite/session-student.json
+
+# npm 套件資料夾，不需要進版控
+test-suite/node_modules/
+test-suite/rules-tests/node_modules/
+
+# 自動產生的暫存/紀錄檔案
+test-suite/rules-tests/firestore.rules
+test-suite/rules-tests/firestore-debug.log
+test-suite/test-report.txt
+test-suite/screenshots/
