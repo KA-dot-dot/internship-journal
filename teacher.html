@@ -2116,7 +2116,7 @@ function showPage(pageId) {
     't-deadline': loadDeadlinesTable,
     't-stats': () => { initStatsDateSelects(); ensureStatsCompanyFilterReady(); },
     't-journals': () => { initStatsDateSelects(); },
-    't-export': () => { loadExportStudents(); initStatsDateSelects(); },
+    't-export': () => { initStatsDateSelects(); loadExportStudents(); },
     't-admin': loadAdminPage,
     't-settings': () => { loadStorageInfo(); },
   };
@@ -4228,11 +4228,16 @@ async function loadExportStudents() {
   const sel = document.getElementById('export-student-select');
   if (!sel) return;
   try {
+    const activeSems = semKeysInExportRange(); // null = 全部，陣列 = 限定學期
     const settingsSnap = await getDocs(collection(db, 'settings'));
-    // 按學生匯出：下拉選單永遠顯示所有學期，不受上方日期範圍篩選影響
     let rosterDocs = settingsSnap.docs
       .filter(d => d.id.startsWith(TERM_ROSTER_PREFIX) && Array.isArray(d.data().students) && d.data().students.length)
       .sort((a, b) => b.data().semester.localeCompare(a.data().semester));
+
+    // 有日期範圍時，只保留重疊學期的學生
+    if (activeSems !== null) {
+      rosterDocs = rosterDocs.filter(d => activeSems.includes(d.data().semester));
+    }
 
     if (rosterDocs.length) {
       sel.innerHTML = rosterDocs.map(d => {
@@ -4843,7 +4848,6 @@ function pdfJournalBlock(j, idx) {
     content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
     content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
   }
-  content.push(pdfSubmittedRow(j));
   content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
   const entries = j._pdfEntries || [];
   if (entries.length) entries.forEach((e, i) => content.push(pdfWorkEntry(e, i)));

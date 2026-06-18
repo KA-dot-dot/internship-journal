@@ -2346,6 +2346,22 @@ async function preparePdfJournalImages(journals) {
   }));
 }
 
+function pdfJournalYear(j) {
+  // 優先取第一筆工作摘要的西元年份
+  const entryYear = (j.entries || [])[0]?.date?.slice(0, 4);
+  if (entryYear && /^\d{4}$/.test(entryYear)) return entryYear;
+  // Fallback：依學期+月份推算（與 AI_CONTEXT.md 學期定義一致）
+  const sem = j.semester || '';
+  const [y, half] = sem.split('-').map(Number);
+  if (!y || !half) return '';
+  const adBase = y + 1911;
+  const month = j.month || 0;
+  let year = adBase;
+  if (half === 1 && month === 1) year = adBase + 1; // 第1學期1月跨年
+  if (half === 2) year = adBase + 1;                // 第2學期全部+1
+  return String(year);
+}
+
 function pdfInfoTable(j) {
   return {
     table: {
@@ -2355,14 +2371,14 @@ function pdfInfoTable(j) {
           { text: '座號', style: 'tableHead' },
           { text: '姓名', style: 'tableHead' },
           { text: '實習公司', style: 'tableHead' },
-          { text: '學期', style: 'tableHead' },
+          { text: '年份', style: 'tableHead' },
           { text: '月份', style: 'tableHead' }
         ],
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.company || ''), style: 'tableCell' },
-          { text: pdfText(j.semester || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
           { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
         ]
       ]
@@ -2424,7 +2440,6 @@ function pdfJournalBlock(j, idx) {
     content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
     content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
   }
-  content.push(pdfSubmittedRow(j));
   content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
   const entries = j._pdfEntries || [];
   if (entries.length) entries.forEach((e, i) => content.push(pdfWorkEntry(e, i)));
