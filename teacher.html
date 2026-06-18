@@ -212,7 +212,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   #page-t-students .student-mobile-table thead { display: none; }
   #page-t-students .student-mobile-table tr {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto auto minmax(0, 1fr);
     gap: 8px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -235,8 +235,15 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     font-weight: 600;
     margin-bottom: 3px;
   }
-  #page-t-students .student-mobile-table td.student-seat-cell {
+  #page-t-students .student-mobile-table td.student-photo-cell {
     grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    padding: 0;
+  }
+  #page-t-students .student-mobile-table td.student-photo-cell::before { display: none; }
+  #page-t-students .student-mobile-table td.student-seat-cell {
+    grid-column: 2;
     grid-row: 1;
     text-align: left !important;
   }
@@ -255,7 +262,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
     font-family: 'Space Mono', monospace;
   }
   #page-t-students .student-mobile-table td.student-name-cell {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
     align-self: center;
     font-size: 17px;
@@ -858,16 +865,29 @@ tr:last-child td { border-bottom: none; }
           <button class="btn btn-primary" onclick="openAddStudentModal()">➕ 新增學生</button>
           <button class="btn btn-secondary" onclick="openImportModal()">📥 批次匯入</button>
         </div>
+        <div class="card" style="margin-bottom:18px">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">🖼️ 批次上傳大頭照</div>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+            <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
+            <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
+          </div>
+          <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
+            <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
+            <span id="batch-photo-progress-text">準備中...</span>
+          </div>
+          <div id="batch-photo-result" style="font-size:13px;line-height:1.7"></div>
+        </div>
         <div class="card">
           <div class="table-wrap">
             <table class="student-mobile-table">
               <thead>
                 <tr>
-                  <th style="text-align:center">座號</th><th>姓名</th><th>實習公司</th><th style="width:320px">Google 帳號綁定</th><th>操作</th>
+                  <th style="text-align:center;width:56px">大頭照</th><th style="text-align:center">座號</th><th>姓名</th><th>實習公司</th><th style="width:320px">Google 帳號綁定</th><th>操作</th>
                 </tr>
               </thead>
               <tbody id="students-table-body">
-                <tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">載入中...</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:var(--text2);padding:30px">載入中...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1341,8 +1361,9 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
-<div class="modal-overlay hidden" id="photo-modal" onclick="closeModal('photo-modal')">
-  <img id="photo-modal-img" style="max-width:90vw;max-height:90vh;border-radius:10px">
+<div class="modal-overlay hidden" id="photo-modal" onclick="closeModal('photo-modal')" style="flex-direction:column;gap:12px">
+  <img id="photo-modal-img" style="max-width:min(88vw,480px);max-height:80vh;border-radius:14px;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,0.6);display:block">
+  <div id="photo-modal-name" style="color:#fff;font-size:15px;font-weight:600;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,0.6);letter-spacing:0.05em"></div>
 </div>
 
 <div class="modal-overlay hidden" id="delete-journal-modal">
@@ -1514,6 +1535,56 @@ function populateSemesterSelects(selectId) {
 const TERM_ROSTER_PREFIX = 'termRoster_';
 const ACTIVE_TERM_SETTING_ID = 'activeSemester';
 
+// ======== Cloudinary（大頭照）========
+const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
+const CLOUDINARY_UPLOAD_PRESET = 'nhnw3vi7';
+
+async function uploadToCloudinary(blob, folder) {
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) return null;
+  try {
+    const formData = new FormData();
+    formData.append('file', blob);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    if (folder) formData.append('folder', folder);
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error('上傳失敗 ' + res.status);
+    const data = await res.json();
+    return data.secure_url;
+  } catch(e) {
+    console.warn('Cloudinary 上傳失敗：', e.message);
+    return null;
+  }
+}
+
+// 縮圖 URL：表格用 size×size，modal 點擊用原圖（不加參數）
+function cloudinaryThumb(url, size = 64) {
+  if (!url || !url.includes('/upload/')) return url;
+  return url.replace('/upload/', `/upload/w_${size},h_${size},c_thumb,g_face,q_auto/`);
+}
+
+// 上傳前壓縮：長邊限 maxDim px，JPEG 0.85
+async function compressImageFile(file, maxDim = 800) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 function semesterLabel(semKey) {
   const [y, half] = String(semKey || '').split('-').map(Number);
   return y && half ? `${y}學年第${half}學期` : String(semKey || '');
@@ -1542,7 +1613,8 @@ function normalizeRosterStudent(s, semester = '') {
     name: String(s.name || s.studentName || '').trim(),
     company: String(s.company || '').trim(),
     email: normalizeEmail(s.email || ''),
-    semester: semester || s.semester || ''
+    semester: semester || s.semester || '',
+    photoUrl: String(s.photoUrl || '').trim()
   };
 }
 
@@ -1661,6 +1733,7 @@ async function syncActiveRootFromRoster(semester, roster) {
       name: s.name || '',
       company: s.company || '',
       semester,
+      ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
       updatedAt: new Date().toISOString()
     });
     if (s.email) {
@@ -2531,6 +2604,11 @@ async function loadStudentsTable() {
       const seatNo = s.seatNo;
       const safeSeat = jsArg(seatNo);
       const safeNameArg = jsArg(s.name || '');
+      const thumbUrl = s.photoUrl ? escapeHtml(cloudinaryThumb(s.photoUrl, 48)) : '';
+      const origUrl  = s.photoUrl ? escapeHtml(s.photoUrl) : '';
+      const photoCell = s.photoUrl
+        ? `<img src="${thumbUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;cursor:pointer;border:2px solid var(--border);display:block" onclick="openPhotoModal('${origUrl}','${escapeHtml(s.name)}')" title="${escapeHtml(s.name)}">`
+        : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text3)" title="未上傳">👤</div>`;
       const googleCell = s.email
         ? `<span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.email)}">✅ ${escapeHtml(s.email)}</span>`
         : `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -2539,6 +2617,7 @@ async function loadStudentsTable() {
           <button class="btn btn-primary btn-sm" onclick="bindStudentInline(${safeSeat},${safeNameArg})">綁定</button>
         </div>`;
       return `<tr>
+        <td class="student-photo-cell" data-label="大頭照" style="text-align:center">${photoCell}</td>
         <td class="student-seat-cell" data-label="座號" style="text-align:center"><strong>${escapeHtml(seatNo)}</strong></td>
         <td class="student-name-cell" data-label="姓名">${escapeHtml(s.name)}</td>
         <td class="student-company-cell" data-label="實習公司">${escapeHtml(s.company || '-')}</td>
@@ -2550,7 +2629,7 @@ async function loadStudentsTable() {
         </td>
       </tr>`;
     }).join('');
-    document.getElementById('students-table-body').innerHTML = rows || `<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:30px">${escapeHtml(semesterLabel(semester))} 尚無學生資料</td></tr>`;
+    document.getElementById('students-table-body').innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:30px">${escapeHtml(semesterLabel(semester))} 尚無學生資料</td></tr>`;
     await updateStudentTermStatus();
   } catch(e) {
     toast('載入學生名單失敗：' + e.message, 'error');
@@ -2740,7 +2819,104 @@ async function importStudents() {
 finally { hideLoading(); }
 }
 
-// ---- 截止日期 ----
+async function batchImportPhotos() {
+  const input = document.getElementById('batch-photo-input');
+  if (!input || !input.files.length) return toast('請先選擇圖片檔案', 'error');
+
+  const files = Array.from(input.files);
+  const semester = getSelectedStudentSemester();
+  const roster = await getRosterForSelectedTerm();
+  const rosterSeats = new Set(roster.map(s => s.seatNo));
+
+  // ── 解析檔名 → 座號 ──
+  const toProcess = [], skipped = [];
+  for (const file of files) {
+    const base = file.name.replace(/\.[^.]+$/, '');          // 去副檔名
+    if (!/^\d+$/.test(base)) {
+      skipped.push(`「${file.name}」（檔名非純數字）`);
+      continue;
+    }
+    const num = parseInt(base, 10);
+    if (num <= 0 || num > 99) {
+      skipped.push(`「${file.name}」（座號超出範圍 1–99）`);
+      continue;
+    }
+    const seatNo = String(num).padStart(2, '0');
+    if (!rosterSeats.has(seatNo)) {
+      skipped.push(`「${file.name}」（座號 ${seatNo} 不在 ${semesterLabel(semester)} 名單）`);
+      continue;
+    }
+    toProcess.push({ file, seatNo });
+  }
+
+  if (!toProcess.length) {
+    const msg = skipped.length ? `沒有可處理的照片：${skipped[0]}` : '沒有可處理的照片，請確認檔名為純數字';
+    return toast(msg, 'error');
+  }
+
+  const progressEl = document.getElementById('batch-photo-progress');
+  const progressText = document.getElementById('batch-photo-progress-text');
+  const resultEl = document.getElementById('batch-photo-result');
+  progressEl.classList.remove('hidden');
+  resultEl.innerHTML = '';
+  showLoading();
+
+  const { doc, updateDoc } = firebase_funcs;
+  const photoUrlMap = {};  // seatNo → cloudinary url
+  const failed = [];
+
+  try {
+    // ── Phase 1：逐一壓縮 → 上傳 Cloudinary ──
+    for (let i = 0; i < toProcess.length; i++) {
+      const { file, seatNo } = toProcess[i];
+      if (progressText) progressText.textContent = `上傳第 ${i + 1}/${toProcess.length} 張：座號 ${seatNo}`;
+      try {
+        const blob = await compressImageFile(file, 800);
+        const url = await uploadToCloudinary(blob, 'tcivs-photos');
+        if (!url) throw new Error('Cloudinary 回傳空 URL');
+        photoUrlMap[seatNo] = url;
+      } catch(e) {
+        failed.push(`座號 ${seatNo}：${e.message}`);
+      }
+    }
+
+    // ── Phase 2：批次寫入 Firestore（students doc + roster snapshot）──
+    const uploaded = Object.keys(photoUrlMap);
+    if (uploaded.length) {
+      if (progressText) progressText.textContent = '寫入資料庫中...';
+      await Promise.all(
+        uploaded.map(seatNo =>
+          updateDoc(doc(db, 'students', `${semester}_${seatNo}`), { photoUrl: photoUrlMap[seatNo] })
+        )
+      );
+      await updateSelectedTermSnapshot(roster =>
+        roster.map(s => photoUrlMap[s.seatNo] ? { ...s, photoUrl: photoUrlMap[s.seatNo] } : s)
+      );
+    }
+  } catch(e) {
+    toast('上傳過程發生錯誤：' + e.message, 'error');
+  } finally {
+    progressEl.classList.add('hidden');
+    hideLoading();
+  }
+
+  // ── 結果顯示 ──
+  const uploaded = Object.keys(photoUrlMap);
+  let html = `<div style="color:var(--accent-green);font-weight:600">✅ 成功上傳 ${uploaded.length} / ${toProcess.length} 張</div>`;
+  if (skipped.length) {
+    html += `<div style="color:var(--text2);margin-top:6px;font-size:12px">⏭ 跳過 ${skipped.length} 個：${skipped.map(s => escapeHtml(s)).join('、')}</div>`;
+  }
+  if (failed.length) {
+    html += `<div style="color:var(--accent-red);margin-top:6px;font-size:12px">❌ 失敗：${failed.map(s => escapeHtml(s)).join('<br>')}</div>`;
+  }
+  resultEl.innerHTML = html;
+
+  if (uploaded.length > 0) {
+    toast(`✅ 成功上傳 ${uploaded.length} 張大頭照`, 'success');
+    loadStudentsTable();
+  }
+  input.value = '';
+}
 async function loadDeadlinesTable() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   showLoading();
@@ -4404,8 +4580,10 @@ async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
 }
 
-function openPhotoModal(src) {
+function openPhotoModal(src, name) {
   document.getElementById('photo-modal-img').src = src;
+  const label = document.getElementById('photo-modal-name');
+  if (label) label.textContent = name || '';
   openModal('photo-modal');
 }
 
