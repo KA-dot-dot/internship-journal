@@ -1063,7 +1063,7 @@ async function checkMonthDeadline(skipFill = false) {
   const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
   // 快取查詢結果供 saveJournal 直接使用，避免儲存時重複 Firestore 讀取
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, submittedAt: journalSnap.data().submittedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
     : { exists: false };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -1770,13 +1770,29 @@ async function saveJournal() {
   });
   if (addressError) return toast(addressError, 'error');
   if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
+  let cached = window._currentJournalCache;
+  const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
+  if (!cached || typeof cached.exists !== 'boolean') {
+    try {
+      const existingSnap = await getDoc(journalRef);
+      cached = existingSnap.exists()
+        ? { exists: true, submittedAt: existingSnap.data().submittedAt, updatedAt: existingSnap.data().updatedAt, teacherReviewed: existingSnap.data().teacherReviewed, teacherComment: existingSnap.data().teacherComment }
+        : { exists: false };
+    } catch (e) {
+      console.warn('既有月記查詢失敗，取消儲存以避免覆蓋第一次繳交時間', e);
+      return toast('讀取既有月記失敗，請確認網路連線後再儲存', 'error');
+    }
+  }
+  const nowIso = new Date().toISOString();
+  const firstSubmittedAt = (cached?.exists && cached.submittedAt) ? cached.submittedAt : nowIso;
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name, company: currentUser.company || '',
     city: currentUser.city || '', semester: sem, month,
     salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
-    submittedAt: new Date().toISOString(),
+    submittedAt: firstSubmittedAt,
+    updatedAt: cached?.exists ? nowIso : null,
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
     storagePath: 'user',
@@ -1791,9 +1807,7 @@ async function saveJournal() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 儲存中...'; }
   showLoading();
   try {
-    const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
     // 優先使用 checkMonthDeadline 預先快取的查詢結果，避免重複 Firestore 讀取造成延遲
-    const cached = window._currentJournalCache;
     if (cached?.exists) {
       const submittedDate = (cached.submittedAt || '').slice(0, 10) || '未知日期';
       const wasReviewed = !!(cached.teacherReviewed || cached.teacherComment);
@@ -1883,7 +1897,7 @@ function renderJournalCardSelectable(j) {
       </div>
     </div>
     <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
-      <span>公司：${escapeHtml(j.company||'-')}</span><span>繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}</span>${salaryHtml}${mentorHtml}
+      <span>公司：${escapeHtml(j.company||'-')}</span><span>繳交：${escapeHtml(journalDateText(j.submittedAt)||'-')}</span>${journalUpdatedMeta(j)}${salaryHtml}${mentorHtml}
     </div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
@@ -2134,6 +2148,16 @@ function safeNumber(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function journalDateText(v) {
+  return v ? String(v).slice(0, 10) : '';
+}
+
+function journalUpdatedMeta(j) {
+  const updated = journalDateText(j?.updatedAt);
+  if (!updated) return '';
+  return `<span>最後更新：${escapeHtml(updated)}</span>`;
+}
+
 function journalMonthInRange(j, start8, end8) {
   const sem = j.semester || '';
   const [y, half] = sem.split('-').map(Number);
@@ -2216,7 +2240,7 @@ function renderJournalCard(j, isTeacher) {
       </div>
     </div>
     <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
-      <span>公司：${escapeHtml(j.company||'-')}</span><span>繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}</span>${salaryHtml}${mentorHtml}
+      <span>公司：${escapeHtml(j.company||'-')}</span><span>繳交：${escapeHtml(journalDateText(j.submittedAt)||'-')}</span>${journalUpdatedMeta(j)}${salaryHtml}${mentorHtml}
     </div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
@@ -2333,21 +2357,23 @@ async function preparePdfJournalImages(journals) {
 function pdfInfoTable(j) {
   return {
     table: {
-      widths: [44, 72, '*', 60, 44],
+      widths: [34, 58, '*', 54, 34, 64],
       body: [
         [
           { text: '座號', style: 'tableHead' },
           { text: '姓名', style: 'tableHead' },
           { text: '實習公司', style: 'tableHead' },
           { text: '學期', style: 'tableHead' },
-          { text: '月份', style: 'tableHead' }
+          { text: '月份', style: 'tableHead' },
+          { text: '繳交日期', style: 'tableHead' }
         ],
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.company || ''), style: 'tableCell' },
           { text: pdfText(j.semester || ''), style: 'tableCell', alignment: 'center' },
-          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
+          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' },
+          { text: pdfText(journalDateText(j.submittedAt)), style: 'tableCell', alignment: 'center' }
         ]
       ]
     },
