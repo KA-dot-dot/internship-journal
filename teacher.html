@@ -865,19 +865,6 @@ tr:last-child td { border-bottom: none; }
           <button class="btn btn-primary" onclick="openAddStudentModal()">➕ 新增學生</button>
           <button class="btn btn-secondary" onclick="openImportModal()">📥 批次匯入</button>
         </div>
-        <div class="card" style="margin-bottom:18px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px">🖼️ 批次上傳大頭照</div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-            <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
-            <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
-          </div>
-          <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
-            <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
-            <span id="batch-photo-progress-text">準備中...</span>
-          </div>
-          <div id="batch-photo-result" style="font-size:13px;line-height:1.7"></div>
-        </div>
         <div class="card">
           <div class="table-wrap">
             <table class="student-mobile-table">
@@ -1341,22 +1328,45 @@ tr:last-child td { border-bottom: none; }
 <div class="modal-overlay hidden" id="import-modal">
   <div class="modal">
     <div class="modal-header">
-      <div class="modal-title">📥 批次匯入學生</div>
+      <div class="modal-title">📥 批次匯入</div>
       <button class="modal-close" onclick="closeModal('import-modal')">×</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　實習公司　Google帳號綁定</code>（Google帳號可留空）</p>
-      <div class="config-code" style="margin-bottom:12px;font-size:12px">
-        王小明　01　1130001　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
-        李小華　02　1130002　OO工業有限公司　u333102@tcivs.tc.edu.tw
+      <div class="import-tab-row" style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px">
+        <button type="button" class="btn btn-primary btn-sm import-tab-btn" id="import-tab-btn-info" onclick="switchImportTab('info')">📝 學生資訊</button>
+        <button type="button" class="btn btn-secondary btn-sm import-tab-btn" id="import-tab-btn-photo" onclick="switchImportTab('photo')">🖼️ 大頭照</button>
       </div>
-      <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="importStudents()">📥 匯入</button>
-        <button class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
+
+      <div id="import-tab-info">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　實習公司　Google帳號綁定</code>（Google帳號可留空）</p>
+        <div class="config-code" style="margin-bottom:12px;font-size:12px">
+          王小明　01　1130001　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
+          李小華　02　1130002　OO工業有限公司　u333102@tcivs.tc.edu.tw
+        </div>
+        <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" onclick="importStudents()">📥 匯入</button>
+          <button class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
+        </div>
+        <div id="import-result" style="margin-top:12px;font-size:13px"></div>
       </div>
-      <div id="import-result" style="margin-top:12px;font-size:13px"></div>
+
+      <div id="import-tab-photo" class="hidden">
+        <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
+        </div>
+        <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
+          <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
+          <span id="batch-photo-progress-text">準備中...</span>
+        </div>
+        <div id="batch-photo-result" style="font-size:13px;line-height:1.7"></div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn btn-secondary" onclick="closeModal('import-modal')">關閉</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -2756,7 +2766,26 @@ finally { hideLoading(); }
 function openImportModal() {
   document.getElementById('import-data').value = '';
   const r = document.getElementById('import-result'); if(r) r.innerHTML='';
+  const photoInput = document.getElementById('batch-photo-input'); if(photoInput) photoInput.value = '';
+  const photoResult = document.getElementById('batch-photo-result'); if(photoResult) photoResult.innerHTML = '';
+  const photoProgress = document.getElementById('batch-photo-progress'); if(photoProgress) photoProgress.classList.add('hidden');
+  switchImportTab('info');
   openModal('import-modal');
+}
+
+function switchImportTab(tab) {
+  const infoPane = document.getElementById('import-tab-info');
+  const photoPane = document.getElementById('import-tab-photo');
+  const infoBtn = document.getElementById('import-tab-btn-info');
+  const photoBtn = document.getElementById('import-tab-btn-photo');
+  if (!infoPane || !photoPane || !infoBtn || !photoBtn) return;
+  const isInfo = tab === 'info';
+  infoPane.classList.toggle('hidden', !isInfo);
+  photoPane.classList.toggle('hidden', isInfo);
+  infoBtn.classList.toggle('btn-primary', isInfo);
+  infoBtn.classList.toggle('btn-secondary', !isInfo);
+  photoBtn.classList.toggle('btn-primary', !isInfo);
+  photoBtn.classList.toggle('btn-secondary', isInfo);
 }
 
 async function importStudents() {
