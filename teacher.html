@@ -1654,7 +1654,7 @@ async function setActiveRosterSemester(semester) {
   await setDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID), {
     semester,
     semesterLabel: semesterLabel(semester),
-    updatedAt: new Date().toISOString(),
+    updatedAt: localISOStr(),
     updatedBy: currentUser?.email || ''
   }, { merge: true });
 }
@@ -1691,7 +1691,7 @@ async function saveTermRosterSnapshot(semester, roster) {
     semester,
     semesterLabel: semesterLabel(semester),
     students,
-    updatedAt: new Date().toISOString(),
+    updatedAt: localISOStr(),
     updatedBy: currentUser?.email || ''
   }, { merge: true });
   return students;
@@ -1752,14 +1752,14 @@ async function syncActiveRootFromRoster(semester, roster) {
       company: s.company || '',
       semester,
       ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
-      updatedAt: new Date().toISOString()
+      updatedAt: localISOStr()
     });
     if (s.email) {
       await setDoc(doc(db, 'studentBindings', emailToDocId(s.email)), {
         email: s.email,
         seatNo: s.seatNo,
         studentName: s.name || '',
-        boundAt: new Date().toISOString(),
+        boundAt: localISOStr(),
         boundBy: currentUser?.email || ''
       }, { merge: true });
     }
@@ -1974,7 +1974,7 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
     email,
     uid: user.uid,
     name: adminDocData.name || user.displayName || email.split('@')[0],
-    lastLoginAt: new Date().toISOString(),
+    lastLoginAt: localISOStr(),
     migratedFrom: emailToDocId(email)
   };
   if (adminDocData.protected === true) payload.protected = true;
@@ -2202,7 +2202,7 @@ async function addAdmin() {
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
-      addedAt: new Date().toISOString(),
+      addedAt: localISOStr(),
       addedBy: currentUser.email
     }, { merge: true });
     document.getElementById('new-admin-email').value = '';
@@ -2256,7 +2256,7 @@ async function bindStudent() {
       email,
       seatNo: seat,
       studentName: stuSnap.data().name || '',
-      boundAt: new Date().toISOString(),
+      boundAt: localISOStr(),
       boundBy: currentUser.email
     });
     hideLoading();
@@ -3180,7 +3180,7 @@ async function saveAllDeadlines() {
     const closeDate = normalizeToISODate(closeRaw);
     if (!openDate || !closeDate) { toast(`${m}月的日期格式有誤，請重新確認`, 'error'); return; }
     if (openDate > closeDate) { toast(`${m}月的開放日不能晚於截止日`, 'error'); return; }
-    entries.push({ id: `${sem.key}-${m}`, data: { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: new Date().toISOString() } });
+    entries.push({ id: `${sem.key}-${m}`, data: { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() } });
   }
   if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
@@ -4228,16 +4228,11 @@ async function loadExportStudents() {
   const sel = document.getElementById('export-student-select');
   if (!sel) return;
   try {
-    const activeSems = semKeysInExportRange(); // null = 全部，陣列 = 限定學期
     const settingsSnap = await getDocs(collection(db, 'settings'));
+    // 按學生匯出：下拉選單永遠顯示所有學期，不受上方日期範圍篩選影響
     let rosterDocs = settingsSnap.docs
       .filter(d => d.id.startsWith(TERM_ROSTER_PREFIX) && Array.isArray(d.data().students) && d.data().students.length)
       .sort((a, b) => b.data().semester.localeCompare(a.data().semester));
-
-    // 方案A：有日期範圍時，只保留重疊學期
-    if (activeSems !== null) {
-      rosterDocs = rosterDocs.filter(d => activeSems.includes(d.data().semester));
-    }
 
     if (rosterDocs.length) {
       sel.innerHTML = rosterDocs.map(d => {
@@ -4255,7 +4250,6 @@ async function loadExportStudents() {
       const active = await getActiveRosterSemester();
       const label = semesterLabel(active);
       const activePrefix = active + '_';
-      // 只取目前學期新格式資料
       const filteredDocs = snap.docs.filter(d => d.id.startsWith(activePrefix));
       const options = filteredDocs
         .sort((a, b) => (a.data().seatNo || '').localeCompare(b.data().seatNo || ''))
@@ -4384,7 +4378,7 @@ async function saveStorageUsage() {
   const snap = await getDoc(doc(db, 'settings', 'storage'));
   const existing = snap.exists() ? snap.data() : {};
   const thresholdGb = existing.thresholdGb || 20;
-  await setDoc(doc(db, 'settings', 'storage'), { ...existing, usedGb: val, updatedAt: new Date().toISOString() });
+  await setDoc(doc(db, 'settings', 'storage'), { ...existing, usedGb: val, updatedAt: localISOStr() });
   renderStorageBar(val, thresholdGb);
   toast('✅ 已更新儲存用量', 'success');
 }
@@ -4397,7 +4391,7 @@ async function saveStorageThreshold() {
   const snap = await getDoc(doc(db, 'settings', 'storage'));
   const existing = snap.exists() ? snap.data() : {};
   const usedGb = existing.usedGb || 0;
-  await setDoc(doc(db, 'settings', 'storage'), { ...existing, thresholdGb: val, updatedAt: new Date().toISOString() });
+  await setDoc(doc(db, 'settings', 'storage'), { ...existing, thresholdGb: val, updatedAt: localISOStr() });
   renderStorageBar(usedGb, val);
   toast('✅ 警戒線已儲存', 'success');
 }
@@ -4688,6 +4682,19 @@ function setupPdfMakeFonts() {
   return true;
 }
 
+// 取本地時區日期字串 YYYY-MM-DD，避免 toISOString() UTC 時差導致日期偏一天
+function localDateStr(d) {
+  const dt = d || new Date();
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function localISOStr(d) {
+  const dt = d || new Date();
+  return localDateStr(dt) + 'T' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0') + ':' + String(dt.getSeconds()).padStart(2,'0');
+}
+
 function pdfText(v) {
   const s = String(v ?? '');
   return s.replace(/([A-Za-z0-9]{18})(?=[A-Za-z0-9])/g, '$1\u200b');
@@ -4829,7 +4836,6 @@ function pdfJournalBlock(j, idx) {
   const content = [
     { text: `${pdfText(j.studentName || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
     pdfInfoTable(j),
-    pdfSubmittedRow(j),
     { text: `主要師傅/學長姐：${pdfText(j.mentor || '')}`, margin: [0, 0, 0, 4] },
     { text: `本月薪資：${pdfText(salaryText)}`, margin: [0, 0, 0, 6] }
   ];
@@ -4837,6 +4843,7 @@ function pdfJournalBlock(j, idx) {
     content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
     content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
   }
+  content.push(pdfSubmittedRow(j));
   content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
   const entries = j._pdfEntries || [];
   if (entries.length) entries.forEach((e, i) => content.push(pdfWorkEntry(e, i)));
@@ -4996,7 +5003,7 @@ async function saveTeacherComment() {
   showLoading();
   try {
     await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
-      teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString(),
+      teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       teacherCommentUnread: true
     });
     hideLoading();
@@ -5033,7 +5040,7 @@ async function executeBatchReview() {
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
-    const now = new Date().toISOString();
+    const now = localISOStr();
     await Promise.all(_batchReviewJournals.map(j =>
       updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now })
     ));
