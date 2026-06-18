@@ -867,7 +867,7 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div class="card" style="margin-bottom:18px">
           <div style="font-size:15px;font-weight:700;margin-bottom:6px">🖼️ 批次上傳大頭照</div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。圖片上傳至 Cloudinary <code style="background:var(--bg3);padding:1px 5px;border-radius:4px">tcivs-photos/</code> 資料夾，不影響工作照片空間統計。</p>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
             <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
             <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
@@ -2604,11 +2604,11 @@ async function loadStudentsTable() {
       const seatNo = s.seatNo;
       const safeSeat = jsArg(seatNo);
       const safeNameArg = jsArg(s.name || '');
-      const thumbUrl = s.photoUrl ? escapeHtml(cloudinaryThumb(s.photoUrl, 64)) : '';
+      const thumbUrl = s.photoUrl ? escapeHtml(cloudinaryThumb(s.photoUrl, 48)) : '';
       const origUrl  = s.photoUrl ? escapeHtml(s.photoUrl) : '';
       const photoCell = s.photoUrl
-        ? `<img src="${thumbUrl}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;cursor:pointer;border:1.5px solid var(--border);display:block;transition:box-shadow 0.2s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.35)'" onmouseout="this.style.boxShadow=''" onclick="openPhotoModal('${origUrl}','${escapeHtml(s.name)}')" title="${escapeHtml(s.name)}">`
-        : `<div style="width:64px;height:64px;border-radius:10px;background:var(--bg3);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--text3)" title="未上傳">👤</div>`;
+        ? `<img src="${thumbUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;cursor:pointer;border:2px solid var(--border);display:block" onclick="openPhotoModal('${origUrl}','${escapeHtml(s.name)}')" title="${escapeHtml(s.name)}">`
+        : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text3)" title="未上傳">👤</div>`;
       const googleCell = s.email
         ? `<span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.email)}">✅ ${escapeHtml(s.email)}</span>`
         : `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
