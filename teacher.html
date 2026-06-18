@@ -3605,6 +3605,7 @@ async function exportAllStatsExcel() {
     學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
     月份: `${j.month}月`,
     繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
+    最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
     老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
@@ -3616,7 +3617,7 @@ async function exportAllStatsExcel() {
   const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
-  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
+  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
 
@@ -3761,16 +3762,6 @@ function safeDomIdPart(v) {
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function journalDateText(v) {
-  return v ? String(v).slice(0, 10) : '';
-}
-
-function journalUpdatedMeta(j) {
-  const updated = journalDateText(j?.updatedAt);
-  if (!updated) return '';
-  return `<span>最後更新：${escapeHtml(updated)}</span>`;
 }
 
 function renderLocationDetailTable(journals, selectedCompanies) {
@@ -4563,7 +4554,7 @@ function renderJournalCard(j, isTeacher) {
         <div><span style="color:var(--accent-red);font-size:12px">${escapeHtml(j.seatNo)} 已刪除學生</span><br><span style="font-size:15px;font-weight:700">${escapeHtml(j.month)}月份月記</span></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span><span class="badge badge-blue">${escapeHtml(semLabel)}</span>${deleteBtn}</div>
       </div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${escapeHtml(journalDateText(j.submittedAt)||'-')}</span>${journalUpdatedMeta(j)}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</div>
     </div>`;
   }
   // ★ 2026-05-23 修正：所有使用者輸入欄位套用 escapeHtml 防 XSS
@@ -4606,7 +4597,7 @@ function renderJournalCard(j, isTeacher) {
       <div>${isTeacher ? `<span style="color:var(--text2);font-size:12px">${escapeHtml(j.seatNo)} ${escapeHtml(j.studentName || '-')}</span><br>` : ''}<span style="font-size:15px;font-weight:700">${escapeHtml(j.month)}月份月記</span></div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reviewedBadge}<span class="badge badge-blue">${escapeHtml(semLabel)}</span>${commentBtn}${deleteBtn}</div>
     </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span>繳交：${escapeHtml(journalDateText(j.submittedAt)||'-')}</span>${journalUpdatedMeta(j)}${salaryHtml}${mentorHtml}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
@@ -4769,23 +4760,21 @@ function pdfJournalYear(j) {
 function pdfInfoTable(j) {
   return {
     table: {
-      widths: [34, 58, '*', 52, 34, 64],
+      widths: [44, 72, '*', 60, 44],
       body: [
         [
           { text: '座號', style: 'tableHead' },
           { text: '姓名', style: 'tableHead' },
           { text: '實習公司', style: 'tableHead' },
           { text: '年份', style: 'tableHead' },
-          { text: '月份', style: 'tableHead' },
-          { text: '繳交日期', style: 'tableHead' }
+          { text: '月份', style: 'tableHead' }
         ],
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.company || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
-          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' },
-          { text: pdfText(journalDateText(j.submittedAt)), style: 'tableCell', alignment: 'center' }
+          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
         ]
       ]
     },
@@ -4798,8 +4787,11 @@ function pdfInfoTable(j) {
       paddingTop: () => 4,
       paddingBottom: () => 4
     },
-    margin: [0, 0, 0, 10]
+    margin: [0, 0, 0, 4]
   };
+}
+function pdfSubmittedRow(j) {
+  return { text: `繳交日期：${pdfText(j.submittedAt?.slice(0,10) || '-')}`, fontSize: 9, color: '#555', margin: [0, 0, 0, 8] };
 }
 
 function pdfWorkEntry(e, idx) {
@@ -4837,6 +4829,7 @@ function pdfJournalBlock(j, idx) {
   const content = [
     { text: `${pdfText(j.studentName || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
     pdfInfoTable(j),
+    pdfSubmittedRow(j),
     { text: `主要師傅/學長姐：${pdfText(j.mentor || '')}`, margin: [0, 0, 0, 4] },
     { text: `本月薪資：${pdfText(salaryText)}`, margin: [0, 0, 0, 6] }
   ];
