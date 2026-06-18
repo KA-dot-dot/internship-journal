@@ -1317,6 +1317,11 @@ tr:last-child td { border-bottom: none; }
       </div>
       <div class="form-group"><label>Google 學校帳號</label><input type="text" id="add-google-email" placeholder="u333101@tcivs.tc.edu.tw"></div>
       <p style="font-size:12px;color:var(--text3);margin-top:-8px;margin-bottom:14px">可在此新增或更新帳號；刪除學生時會一併移除 Google 帳號綁定</p>
+      <div class="form-group">
+        <label>大頭照</label>
+        <input type="file" id="add-student-photo" accept="image/*" onchange="handleStudentPhotoSelect()" style="font-size:13px;color:var(--text)">
+        <div id="add-student-photo-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
+      </div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" onclick="saveStudent()">💾 儲存</button>
         <button class="btn btn-secondary" onclick="closeModal('add-student-modal')">取消</button>
@@ -2687,7 +2692,11 @@ async function removeBindingInline(docId, email) {
 
 function openAddStudentModal() {
   ['add-seat','add-student-id','add-name','add-company','add-google-email'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('add-student-modal').dataset.editId = '';
+  const modal = document.getElementById('add-student-modal');
+  modal.dataset.editId = '';
+  modal.dataset.photoUrl = '';
+  const photoInput = document.getElementById('add-student-photo'); if (photoInput) photoInput.value = '';
+  const photoStatus = document.getElementById('add-student-photo-status'); if (photoStatus) photoStatus.textContent = '';
   openModal('add-student-modal');
 }
 
@@ -2701,8 +2710,32 @@ async function editStudent(seatNo) {
   document.getElementById('add-company').value = s.company || '';
   const googleEl = document.getElementById('add-google-email');
   if (googleEl) googleEl.value = s.email || '';
-  document.getElementById('add-student-modal').dataset.editId = seatNo;
+  const modal = document.getElementById('add-student-modal');
+  modal.dataset.editId = seatNo;
+  modal.dataset.photoUrl = s.photoUrl || '';
+  const photoInput = document.getElementById('add-student-photo'); if (photoInput) photoInput.value = '';
+  const photoStatus = document.getElementById('add-student-photo-status');
+  if (photoStatus) photoStatus.textContent = s.photoUrl ? '目前已有大頭照，選擇新檔案即可更換' : '';
   openModal('add-student-modal');
+}
+
+async function handleStudentPhotoSelect() {
+  const input = document.getElementById('add-student-photo');
+  const statusEl = document.getElementById('add-student-photo-status');
+  const modal = document.getElementById('add-student-modal');
+  if (!input || !input.files.length) return;
+  const file = input.files[0];
+  if (statusEl) statusEl.textContent = '⏳ 上傳中...';
+  try {
+    const blob = await compressImageFile(file, 800);
+    const url = await uploadToCloudinary(blob, 'tcivs-photos');
+    if (!url) throw new Error('Cloudinary 回傳空 URL');
+    modal.dataset.photoUrl = url;
+    if (statusEl) statusEl.textContent = '✅ 上傳完成，按「儲存」後生效';
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ 上傳失敗：' + e.message;
+    input.value = '';
+  }
 }
 
 async function saveStudent() {
@@ -2713,12 +2746,14 @@ async function saveStudent() {
   if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
   const semester = getSelectedStudentSemester();
   const active = await getActiveRosterSemester();
+  const photoUrl = document.getElementById('add-student-modal')?.dataset.photoUrl || '';
   const data = normalizeRosterStudent({
     seatNo: seat,
     studentId: document.getElementById('add-student-id').value.trim(),
     name,
     company: document.getElementById('add-company').value.trim(),
-    email: googleEmail
+    email: googleEmail,
+    photoUrl
   }, semester);
   showLoading();
   try {
