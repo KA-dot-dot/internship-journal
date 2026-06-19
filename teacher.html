@@ -779,7 +779,10 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div id="stat-list-panel-missing" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
-            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">📋 本月未繳名單</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700;color:var(--accent-red)">📋 本月未繳名單</div>
+              <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
+            </div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
@@ -2416,6 +2419,42 @@ async function loadTeacherDashboard() {
   } finally {
     hideLoading();
   }
+}
+
+async function copyMissingList() {
+  const list = (window._statLists || {}).missing || [];
+  if (list.length === 0) {
+    toast('本月所有學生皆已繳交，無需提醒', 'info');
+    return;
+  }
+  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
+  const semLabel = semesterLabel(sem);
+  // 讀取截止日
+  let deadlineStr = '';
+  try {
+    const { doc, getDoc } = firebase_funcs;
+    const snap = await getDoc(doc(db, 'deadlines', `${sem}-${thisMonth}`));
+    if (snap.exists()) {
+      const raw = snap.data().closeDate || '';   // 格式 YYYY-MM-DD
+      if (raw) {
+        const parts = raw.split('-');             // ['2025','11','15']
+        deadlineStr = `${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '11/15'
+      }
+    }
+  } catch(e) {
+    console.warn('複製名單：截止日讀取失敗', e);
+  }
+  const deadlineLine = deadlineStr
+    ? `請於 ${deadlineStr} 前完成：`
+    : '請盡快完成：';
+  const text = `【月記提醒】${semLabel} ${thisMonth}月份\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
+  const btn = document.getElementById('copy-missing-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
+    toast('已複製未繳名單，可直接貼到 LINE 群組', 'success');
+  }).catch(() => {
+    prompt('請手動複製以下內容：', text);
+  });
 }
 
 function toggleStatList(key) {
