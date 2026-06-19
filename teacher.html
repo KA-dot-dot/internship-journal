@@ -3384,7 +3384,7 @@ async function ensureStatsCompanyFilterReady() {
     // 從月記讀公司清單：刪了月記的學生公司就不會出現
     const snap = await getDocsWithFallback(collectionGroup(db, 'journals'), '公司清單', 10000);
     const companies = [...new Set(
-      snap.docs.map(d => d.data().company).filter(Boolean)
+      userJournalDocs(snap).map(d => d.data().company).filter(Boolean)
     )];
     populateCompanyFilter(companies);
   } catch(e) {
@@ -4040,10 +4040,8 @@ async function loadSalaryStats() {
     .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
     .map(j => ({ ...j, salary: Number(j.salary) }));
 
-  const companies = [
-    ...stuSnap.docs.map(d => d.data().company).filter(Boolean),
-    ...allActiveJournals.map(j => j.company).filter(Boolean)
-  ];
+  // 公司清單只從「目前日期範圍內的月記」取得，不再抓整個 students 集合（避免跨學期/已刪除學生的公司殘留）
+  const companies = allActiveJournals.map(j => getJournalCompany(j, stuCompanyMap)).filter(Boolean);
   populateCompanyFilter(companies);
   window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap };
   renderSalaryStatsFromCache(window.salary_stats_cache);
