@@ -2428,7 +2428,7 @@ async function copyMissingList() {
     return;
   }
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
-  const semLabel = semesterLabel(sem);
+  const ceYear = new Date().getFullYear();  // 西元年，例如 2026
   // 讀取截止日
   let deadlineStr = '';
   try {
@@ -2437,8 +2437,8 @@ async function copyMissingList() {
     if (snap.exists()) {
       const raw = snap.data().closeDate || '';   // 格式 YYYY-MM-DD
       if (raw) {
-        const parts = raw.split('-');             // ['2025','11','15']
-        deadlineStr = `${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '11/15'
+        const parts = raw.split('-');             // ['2026','06','30']
+        deadlineStr = `${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '6/30'
       }
     }
   } catch(e) {
@@ -2447,7 +2447,7 @@ async function copyMissingList() {
   const deadlineLine = deadlineStr
     ? `請於 ${deadlineStr} 前完成：`
     : '請盡快完成：';
-  const text = `【月記提醒】${semLabel} ${thisMonth}月份\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
+  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
   const btn = document.getElementById('copy-missing-btn');
   navigator.clipboard.writeText(text).then(() => {
     if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
