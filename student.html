@@ -2396,7 +2396,7 @@ function pdfInfoTable(j) {
         [
           { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
-          { text: pdfText(j.company || ''), style: 'tableCell' },
+          { text: pdfText(j.company || ''), style: 'tableCell', alignment: 'center' },
           { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
           { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
         ]
