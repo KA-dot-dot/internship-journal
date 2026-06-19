@@ -2804,6 +2804,10 @@ async function deleteStudent(seatNo, name) {
     const allJournalDocs = userJournalDocs(journalSnap).filter(d => d.data().seatNo === seatNo);
     await Promise.all(allJournalDocs.map(d => deleteDoc(d.ref)));
     if (semester === active) await syncActiveRootFromRoster(semester, next);
+    // 重置公司清單快取，讓統計頁重新載入（確保刪除後公司消失）
+    const cbList = document.getElementById('company-checkbox-list');
+    if (cbList) cbList.innerHTML = '<div class="company-filter-hint" style="margin:8px">查詢後顯示公司清單</div>';
+    _statsCompanyLoading = false;
     hideLoading();
     toast(`✅ 已刪除「${name}」的所有資料，清除 ${allJournalDocs.length} 筆月記`, 'success');
     loadStudentsTable();
@@ -4822,7 +4826,7 @@ function pdfWorkEntry(e, idx) {
       margin: [0, 0, 0, 0]
     });
   } else if (e.noPhoto) {
-    stack.push({ text: '⊘ 不便拍照', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
+    stack.push({ text: '【不便拍照】', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
   }
   return {
     table: { widths: ['*'], body: [[{ stack }]] },
