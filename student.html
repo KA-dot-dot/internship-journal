@@ -1752,6 +1752,7 @@ async function saveJournal() {
   let distanceError = false;
   let addressError = '';
   let photoError = '';
+  let contentError = '';
   let entryIndex = 0;
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
     entryIndex += 1;
@@ -1765,14 +1766,26 @@ async function saveJournal() {
     const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
     const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
     const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
+    const content = document.getElementById(`${id}-content`)?.value?.trim() || '';
+    // 工作內容描述至少 10 字
+    if (content.length < 10 && !contentError) {
+      contentError = `第 ${entryIndex} 筆工作摘要的「工作內容描述」至少需要 10 個字（目前 ${content.length} 字）`;
+    }
+    // 地址必填
+    if (!address && !addressError) {
+      addressError = `第 ${entryIndex} 筆工作摘要尚未填寫工作地點地址`;
+    }
+    // 地址格式驗證（原有功能保留）
     const msg = address ? validateCompleteTaiwanAddress(address) : '';
     if (msg && !addressError) addressError = `第 ${entryIndex} 筆工作地址：${msg}`;
-    if (address && (distance === null || isNaN(distance))) distanceError = true;
+    // 距離必填（地址填了才能算距離，兩者都要有）
+    if (address && (distance === null || isNaN(distance)) && !distanceError) distanceError = true;
     const typeEl = document.getElementById(`${id}-type`);
     let workType = typeEl ? typeEl.value : '';
     if (workType === '其他') { const oi = document.getElementById(`${id}-other-input`)?.value?.trim(); if (oi) workType = `其他（${oi}）`; }
     entries.push({ date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
   });
+  if (contentError) return toast(contentError, 'error');
   if (addressError) return toast(addressError, 'error');
   if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
   if (photoError) return toast(photoError, 'error');
@@ -2418,7 +2431,7 @@ function pdfWorkEntry(e, idx) {
       columnGap: 6
     });
   } else if (e.noPhoto) {
-    stack.push({ text: '📵 不便拍照', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
+    stack.push({ text: '⊘ 不便拍照', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
   }
   return {
     table: { widths: ['*'], body: [[{ stack }]] },
