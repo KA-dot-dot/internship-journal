@@ -1042,8 +1042,8 @@ async function checkMonthDeadline(skipFill = false) {
   } else {
     const d = deadlineSnap.data();
     const now = new Date();
-    const open = new Date(d.openDate);
-    const close = new Date(d.closeDate);
+    const open = new Date(d.openDate + 'T00:00:00+08:00');
+    const close = new Date(d.closeDate + 'T23:59:59+08:00');
     if (now < open) {
       el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${escapeHtml(d.openDate)}（尚未開放）</span>`;
       if (saveBtn) {
@@ -1473,7 +1473,7 @@ async function saveJournal() {
     if (deadlineSnap.exists()) {
       const deadline = deadlineSnap.data();
       const now = new Date();
-      const open = new Date(deadline.openDate);
+      const open = new Date(deadline.openDate + 'T00:00:00+08:00');
       if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
     }
   } catch(e) {
