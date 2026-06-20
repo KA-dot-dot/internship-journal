@@ -1608,7 +1608,12 @@ async function saveJournal() {
     if (!workType && !typeError) {
       typeError = `第 ${entryIndex} 筆工作摘要尚未選擇工作類型`;
     }
-    if (workType === '其他') { const oi = document.getElementById(`${id}-other-input`)?.value?.trim(); if (oi) workType = `其他（${oi}）`; }
+    const otherInputVal = document.getElementById(`${id}-other-input`)?.value?.trim() || '';
+    // 選「其他」時，補充說明欄位必填
+    if (workType === '其他' && !otherInputVal && !typeError) {
+      typeError = `第 ${entryIndex} 筆工作摘要選擇「其他」類型時，請填寫補充說明`;
+    }
+    if (workType === '其他' && otherInputVal) workType = `其他（${otherInputVal}）`;
     entries.push({ date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
   });
   if (typeError) return toast(typeError, 'error');
