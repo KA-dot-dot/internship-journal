@@ -1264,17 +1264,6 @@ function stripNeighborhood(addr) {
 }
 function preprocessAddress(addr) { let a = normalizeTaiwanAddress(addr); a = stripPostalCode(a); a = stripNeighborhood(a); return a; }
 
-function parseTaiwanAddress(addr) {
-  const clean = preprocessAddress(addr);
-  const city = clean.match(/^(.+?[縣市])/i)?.[1] || '';
-  let rest = city ? clean.slice(city.length) : clean;
-  const district = rest.match(/^(.+?[區鄉鎮市])/i)?.[1] || '';
-  if (district) rest = rest.slice(district.length);
-  const street = rest || clean;
-  const streetNo = street.match(/^(.+?[路街道巷弄][^,，]*)/)?.[1] || street;
-  return { clean, city, district, street: streetNo };
-}
-
 function validateCompleteTaiwanAddress(addr) {
   const clean = preprocessAddress(addr);
   if (!clean) return '請輸入工作地點地址';
@@ -1288,164 +1277,6 @@ function validateCompleteTaiwanAddress(addr) {
 }
 
 function isTaiwanCoord(lat, lng) { return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 21.5 && lat <= 25.5 && lng >= 119 && lng <= 122.5; }
-
-function localKnownTaiwanPoint(cleanAddr) {
-  const a = normalizeTaiwanAddress(cleanAddr);
-  if ((a.includes('臺中市南區') || a.includes('台中市南區')) && a.includes('高工路191號')) return { lat: SCHOOL_LAT, lng: SCHOOL_LNG };
-  if (a.includes('臺中工業高級中等學校') || a.includes('台中高工') || a.includes('臺中高工')) return { lat: SCHOOL_LAT, lng: SCHOOL_LNG };
-  if ((a.includes('臺中市西區') || a.includes('台中市西區')) && a.includes('三民路一段199號')) return { lat: 24.140226, lng: 120.67571 };
-  if ((a.includes('臺中市南屯區') || a.includes('台中市南屯區')) && a.includes('文心南三路289號')) return { lat: 24.13291595050519, lng: 120.6493542741656 };
-  if ((a.includes('臺中市西屯區') || a.includes('台中市西屯區')) && a.includes('臺灣大道二段666號')) return { lat: 24.1589910919562, lng: 120.65658837199564 };
-  return null;
-}
-
-// ---- Geocoding 精確度等級定義 ----
-// 'exact'  : 精確門牌（NLSC 精確 or Nominatim place_rank=30）
-// 'fuzzy'  : 模糊定位（Nominatim place_rank<30，僅到路/區層級）
-// 'failed' : 完全無法定位
-
-async function geocodeTaiwanNLSC(addr) {
-  try {
-    const res = await fetch(`https://geocode.nlsc.gov.tw/hgeocode?address=${encodeURIComponent(addr)}&format=JSON&targetSR=4326`);
-    if (!res.ok) { console.warn('[NLSC] HTTP錯誤', res.status); return null; }
-    const data = await res.json();
-    const pt = data?.data?.result?.[0];
-    if (!pt) { console.warn('[NLSC] 查無結果', addr); return null; }
-    const lat = Number(pt.wy), lng = Number(pt.wx);
-    if (isTaiwanCoord(lat, lng)) return { lat, lng };
-  } catch (e) {
-    console.warn('[NLSC] 呼叫失敗（可能是CORS被擋或網路問題）：', e.message);
-  }
-  return null;
-}
-
-// 從地址中取出門牌號碼數字，用於驗證 geocoding 結果是否對應正確門牌
-function extractHouseNumber(addr) {
-  const m = (addr || '').match(/(\d+)\s*號/);
-  return m ? m[1] : null;
-}
-
-// 檢查 Nominatim 回傳結果的門牌號碼是否與查詢地址一致
-function houseNumberMatches(item, targetHouseNo) {
-  if (!targetHouseNo) return true;
-  const itemHouseNo = item?.address?.house_number;
-  if (!itemHouseNo) return false;
-  return String(itemHouseNo).replace(/\D/g, '') === targetHouseNo;
-}
-
-// Nominatim 正向查詢，回傳 { lat, lng, place_rank } 或 null
-async function geocodeNominatim(p, targetHouseNo) {
-  // 結構化查詢（優先）
-  if (p.city && p.street) {
-    try {
-      const qs = new URLSearchParams({
-        format: 'jsonv2', countrycodes: 'tw', limit: '5',
-        'accept-language': 'zh-TW', addressdetails: '1',
-        country: '台灣', city: p.city, street: p.street,
-      });
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs}`);
-      if (res.ok) {
-        const data = await res.json();
-        const candidates = (data || []).filter(item => isTaiwanCoord(Number(item.lat), Number(item.lon)));
-        const exact = candidates.find(item => houseNumberMatches(item, targetHouseNo));
-        const best = exact || candidates[0];
-        if (best) return { lat: Number(best.lat), lng: Number(best.lon), place_rank: Number(best.place_rank) || 0 };
-      }
-      await new Promise(r => setTimeout(r, 300));
-    } catch (e) { console.warn('[Nominatim結構化] 失敗：', e.message); }
-  }
-  // 模糊查詢（備援）
-  const variants = [];
-  if (p.city && p.district && p.street) variants.push(`${p.city}${p.district}${p.street}`);
-  variants.push(p.clean);
-  for (const q of variants) {
-    try {
-      const qs = new URLSearchParams({ format: 'jsonv2', countrycodes: 'tw', limit: '5', q, 'accept-language': 'zh-TW', addressdetails: '1' });
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs}`);
-      if (!res.ok) continue;
-      const data = await res.json();
-      const candidates = (data || []).filter(item => isTaiwanCoord(Number(item.lat), Number(item.lon)));
-      const exact = candidates.find(item => houseNumberMatches(item, targetHouseNo));
-      const best = exact || candidates[0];
-      if (best) return { lat: Number(best.lat), lng: Number(best.lon), place_rank: Number(best.place_rank) || 0 };
-    } catch(e) {}
-    await new Promise(r => setTimeout(r, 300));
-  }
-  return null;
-}
-
-// Photon 備援查詢（無 place_rank，視為模糊）
-async function geocodePhoton(p) {
-  const variants = [];
-  if (p.city && p.district && p.street) variants.push(`${p.city}${p.district}${p.street}`);
-  variants.push(p.clean);
-  for (const q of variants.slice(0, 2)) {
-    try {
-      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q + ' 台灣')}&limit=3&lang=zh&bbox=119.0,21.5,122.5,25.5`);
-      if (!res.ok) continue;
-      const data = await res.json();
-      for (const feat of (data.features || [])) {
-        const [lng, lat] = feat.geometry.coordinates;
-        if (isTaiwanCoord(Number(lat), Number(lng))) return { lat: Number(lat), lng: Number(lng), place_rank: 0 };
-      }
-    } catch(e) {}
-  }
-  return null;
-}
-
-// 三段式 geocoding，回傳 { lat, lng, confidence: 'exact'|'fuzzy'|'failed', source }
-async function geocodeTaiwanAddressWithConfidence(addr) {
-  const p = parseTaiwanAddress(addr);
-
-  // 本地已知地點（最高精確度）
-  const localPoint = localKnownTaiwanPoint(p.clean);
-  if (localPoint) return { ...localPoint, confidence: 'exact', source: 'local' };
-
-  const targetHouseNo = extractHouseNumber(p.clean);
-  const variants = [];
-  if (p.city && p.district && p.street) variants.push(`${p.city}${p.district}${p.street}`);
-  if (p.city && p.district) variants.push(`${p.city}${p.district}`);
-  variants.push(p.clean);
-
-  // ── 步驟 1：NLSC 查詢 ──
-  let nlscPoint = null;
-  for (const q of variants) {
-    nlscPoint = await geocodeTaiwanNLSC(q);
-    if (nlscPoint) break;
-  }
-
-  if (nlscPoint) {
-    // 用 Nominatim 正向查詢比對，若兩者距離 > 3 km 視為 NLSC fallback 到行政區中心
-    const nomPoint = await geocodeNominatim(p, targetHouseNo);
-    if (nomPoint) {
-      const gap = haversineKm(nlscPoint.lat, nlscPoint.lng, nomPoint.lat, nomPoint.lng);
-      console.log(`[Geocode] NLSC↔Nominatim 差距 ${gap.toFixed(2)} km，Nominatim place_rank=${nomPoint.place_rank}`);
-      if (gap <= 3) {
-        // 兩者吻合：NLSC 精確
-        return { ...nlscPoint, confidence: 'exact', source: 'nlsc' };
-      }
-      // 差距 > 3 km：NLSC 疑似 fallback，採用 Nominatim 結果並依 place_rank 決定信心度
-      const confidence = nomPoint.place_rank >= 30 ? 'exact' : 'fuzzy';
-      return { ...nomPoint, confidence, source: 'nominatim' };
-    }
-    // Nominatim 查不到，單獨信任 NLSC（無法驗證，標為 fuzzy）
-    return { ...nlscPoint, confidence: 'fuzzy', source: 'nlsc-unverified' };
-  }
-
-  // ── 步驟 2：Nominatim 查詢 ──
-  const nomPoint = await geocodeNominatim(p, targetHouseNo);
-  if (nomPoint) {
-    const confidence = nomPoint.place_rank >= 30 ? 'exact' : 'fuzzy';
-    return { ...nomPoint, confidence, source: 'nominatim' };
-  }
-
-  // ── 步驟 3：Photon 備援 ──
-  const photonPoint = await geocodePhoton(p);
-  if (photonPoint) return { ...photonPoint, confidence: 'fuzzy', source: 'photon' };
-
-  // 完全無法定位
-  return null;
-}
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180;
@@ -1497,56 +1328,9 @@ function openGoogleMapsDistance(addr) {
   window.open(url, '_blank');
 }
 
-// 產生警告/提示 UI 的 HTML（含 GPS 按鈕）
-function distWarningHtml(level, id, distLabel) {
-  // level: 'yellow' | 'orange' | 'red'
-  const configs = {
-    yellow: {
-      icon: '⚠️',
-      color: '#b45309',
-      bg: 'rgba(245,158,11,0.10)',
-      border: '#f59e0b',
-      msg: `以 OpenStreetMap 資料定位，請確認距離是否正確。`,
-      showGps: false,
-      showGoogleMaps: false,
-    },
-    orange: {
-      icon: '🟠',
-      color: '#c2410c',
-      bg: 'rgba(234,88,12,0.10)',
-      border: '#ea580c',
-      msg: `地址定位失敗，請手動查詢並填入距離`,
-      showGps: false,
-      showGoogleMaps: true,
-    },
-    red: {
-      icon: '🚨',
-      color: '#b91c1c',
-      bg: 'rgba(239,68,68,0.10)',
-      border: '#ef4444',
-      msg: `地址定位失敗，請手動查詢並填入距離`,
-      showGps: false,
-      showGoogleMaps: true,
-    },
-  };
-  const addrVal = document.getElementById(`${id}-address`)?.value?.trim() || '';
-  const c = configs[level];
-  const gpsBtn = c.showGps
-    ? `<button class="btn btn-secondary btn-sm" style="margin-top:8px;white-space:nowrap" onclick="useCurrentLocation('${escapeHtml(id)}')">📌 使用目前位置</button>`
-    : '';
-  const gmapsBtn = c.showGoogleMaps && addrVal
-    ? `<button class="btn btn-secondary btn-sm" style="margin-top:8px;white-space:nowrap" onclick="openGoogleMapsDistance(${jsArg(addrVal)})">🗺 用 Google Maps 查開車距離</button>`
-    : '';
-  return `
-    <div style="margin-top:6px;padding:8px 12px;border-radius:8px;border:1px solid ${c.border};background:${c.bg}">
-      <div style="font-size:12px;color:${c.color};line-height:1.5">
-        ${c.icon} <strong>系統提示：</strong>${distLabel ? `${distLabel}　` : ''}${c.msg}
-      </div>
-      ${gpsBtn}${gmapsBtn}
-    </div>`;
-}
-
-async function calcDistance(id) {
+// 計算距離：直接開啟 Google Maps 導航（學校→工作地址），距離由學生查看後手動填入下方欄位
+// （2026-06-20 改版：原三段式 geocoding 在外縣市/不常見地址常查詢失敗或耗時，故移除，統一改為手動查詢流程）
+function calcDistance(id) {
   let addr = document.getElementById(`${id}-address`)?.value?.trim();
   if (!addr) return toast('請先輸入工作地點地址', 'error');
   const resultEl = document.getElementById(`${id}-dist-result`);
@@ -1555,50 +1339,10 @@ async function calcDistance(id) {
     resultEl.innerHTML = `<div class="dist-calculating" style="color:var(--accent-red)">❌ ${escapeHtml(addressError)}</div>`;
     return toast(addressError, 'error');
   }
-  resultEl.innerHTML = '<div class="dist-calculating">🔍 正在查詢地址，請稍候...</div>';
-  try {
-    const geoResult = await geocodeTaiwanAddressWithConfidence(addr);
-    const manualInput = document.getElementById(`${id}-dist-manual`);
-
-    // ── 步驟 3 雙斷頭：完全無法定位 ──
-    if (!geoResult) {
-      resultEl.innerHTML = distWarningHtml('red', id, '');
-      if (manualInput) { manualInput.value = ''; manualInput.dataset.autoFilled = ''; }
-      return;
-    }
-
-    const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, geoResult.lat, geoResult.lng);
-    const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
-    const isSchool = distKm < 0.1;
-    const distLabel = isSchool ? '（本校地址）' : `📍 距台中高工 <strong>${finalKm} km</strong>（參考）`;
-
-    if (geoResult.confidence === 'exact') {
-      // ── 精確定位 ──
-      if (geoResult.source === 'nominatim') {
-        // OSM 精確門牌，黃色提示
-        resultEl.innerHTML =
-          `<div class="dist-result">${distLabel}</div>` +
-          distWarningHtml('yellow', id, '');
-      } else {
-        // NLSC 精確 或 local，無警告
-        resultEl.innerHTML = `<div class="dist-result">${distLabel}</div>`;
-      }
-    } else {
-      // ── 模糊定位（橘色）──
-      resultEl.innerHTML =
-        `<div class="dist-result" style="opacity:0.85">${distLabel}</div>` +
-        distWarningHtml('orange', id, '');
-    }
-
-    // 自動填入微調距離欄位
-    if (manualInput && (manualInput.value === '' || manualInput.dataset.autoFilled === '1')) {
-      manualInput.value = finalKm;
-      manualInput.dataset.autoFilled = '1';
-    }
-  } catch(e) {
-    console.error('[calcDistance]', e);
-    resultEl.innerHTML = distWarningHtml('red', id, '');
-  }
+  openGoogleMapsDistance(addr);
+  resultEl.innerHTML = `<div class="dist-result" style="color:var(--accent)">🗺️ 已開啟 Google Maps，請查看距離後手動填入下方欄位</div>`;
+  const manualInput = document.getElementById(`${id}-dist-manual`);
+  if (manualInput) { manualInput.dataset.autoFilled = ''; manualInput.focus(); }
 }
 
 function toggleNoPhoto(id) {

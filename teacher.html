@@ -3486,6 +3486,20 @@ function applyStatsCompanyFilter() {
   if (window.salary_stats_cache) renderSalaryStatsFromCache(window.salary_stats_cache);
 }
 
+// 台灣 22 縣市標準名稱，用於從地址中正確抓出縣市
+// （取代舊版「比到第一個縣/市字就切」的寫法：若地址前面夾雜地標/園區名稱如「新竹科學園區」，
+//  舊寫法會把地標名也算進縣市字串，這裡改成直接比對 22 個標準縣市全名，取最早出現的那個）
+const TW_CITIES = ['臺北市','新北市','桃園市','臺中市','臺南市','高雄市','新竹市','嘉義市','基隆市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
+function extractCityFromAddress(address) {
+  const addr = String(address || '').replace(/^\d{3,6}\s*/, '').replace(/台/g, '臺');
+  let best = null;
+  for (const city of TW_CITIES) {
+    const idx = addr.indexOf(city);
+    if (idx !== -1 && (best === null || idx < best.idx)) best = { idx, city };
+  }
+  return best ? best.city.replace(/臺/g, '台') : '';
+}
+
 async function exportAllStatsExcel() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('export-stats');
@@ -3529,8 +3543,7 @@ async function exportAllStatsExcel() {
     (j.entries || []).forEach(e => {
       const address = (e.address || '').trim();
       if (!address) return;
-      const rawAddr = address.replace(/^\d{3,6}\s*/, '');
-      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '').replace(/臺/g, '台');
+      const city = extractCityFromAddress(address);
       locationRows.push({
         公司: s.company || j.company || '',
         座號: j.seatNo || '',
@@ -3542,6 +3555,7 @@ async function exportAllStatsExcel() {
       });
     });
   });
+
 
   // ── 各公司平均工作距離統計 ──
   const companyDistMap = {};
@@ -3747,9 +3761,9 @@ function renderFilteredCity(journals) {
   journals.forEach(j => {
     if (!isCompanySelected(j.company, selectedCompanies)) return;
     (j.entries||[]).forEach(e => {
-      const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
-      if (!rawAddr) return;
-      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知').replace(/臺/g, '台');
+      const addr = (e.address||'').trim();
+      if (!addr) return;
+      const city = extractCityFromAddress(addr) || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
     });
   });
@@ -3760,7 +3774,11 @@ function renderFilteredCity(journals) {
   if (cityEl) {
     cityEl.innerHTML = sorted.length ? sorted.slice(0,10).map(([city,cnt]) => {
       const pct = total ? Math.round(cnt/total*100) : 0;
-      return `<div class="chart-bar-item"><div class="chart-bar-label">${escapeHtml(city)}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
+      // 外縣市（非台中市）用醒目顏色標出，方便老師一眼看出本月有沒有人填到外縣市
+      const isOutOfCounty = city !== '台中市' && city !== '未知';
+      const barColor = isOutOfCounty ? 'var(--accent-yellow)' : 'var(--accent)';
+      const cityLabel = isOutOfCounty ? `🟠 ${escapeHtml(city)}` : escapeHtml(city);
+      return `<div class="chart-bar-item"><div class="chart-bar-label">${cityLabel}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${barColor}"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
     }).join('') : '<div class="empty-state"><div class="icon">📍</div><p>無地點資料</p></div>';
   }
   const summaryEl = document.getElementById('city-filter-summary');
