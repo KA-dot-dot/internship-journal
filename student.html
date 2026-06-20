@@ -1150,20 +1150,74 @@ function checkEntryDateMismatch(id) {
 // ---- 工作摘要 ----
 const WORK_TYPES = ['保養維護','設備維修','冷氣安裝','冷凍設備安裝','管路配管','焊接作業','冷媒充填/回收','電路檢測','零件更換','消防設備檢查','倉儲管理','行政協助','現場清潔','其他'];
 const WORK_TYPE_EXAMPLES = {
-  '保養維護': '至○○公司進行冷氣主機例行保養，清洗濾網、檢查冷媒壓力，並填寫保養記錄表。',
-  '設備維修': '協助師傅排查○○大樓分離式冷氣異常，確認壓縮機電容故障後進行更換。',
-  '冷氣安裝': '至○○建案協助安裝分離式冷氣室內外機，完成配管及電線配置，並測試運轉正常。',
-  '冷凍設備安裝': '協助於○○超市安裝冷凍展示櫃，進行管路配接及冷媒灌充，完成試運轉。',
-  '管路配管': '在○○工廠協助進行冷媒銅管配管，使用彎管器製作彎管並以銲接接合。',
-  '焊接作業': '協助師傅進行冷媒銅管的硬銲作業，使用銀銲條完成接頭焊接並做氣密測試。',
-  '冷媒充填/回收': '使用冷媒回收機將舊設備冷媒回收至鋼瓶，再對新機組充填適量冷媒並確認壓力值。',
-  '電路檢測': '以三用電表量測室外機電路，確認電容容值及壓縮機線圈阻值均在正常範圍。',
-  '零件更換': '更換○○客戶冷氣室外機風扇馬達，拆除舊馬達後對照規格安裝新品並測試。',
-  '消防設備檢查': '至○○進行消防安檢，逐一確認滅火器壓力表及藥劑期限並填寫記錄表。',
-  '倉儲管理': '協助盤點冷凍零件庫存，清點各型號銅管接頭、濾心等耗材並更新電腦資料。',
-  '行政協助': '協助整理客戶保養合約資料，建立本月到期保養名單並製作排程表。',
-  '現場清潔': '工作完成後協助清潔施工現場，整理工具並確認無任何材料遺留於現場。',
+  '保養維護': [
+    '至○○公司進行冷氣主機例行保養，清洗濾網、檢查冷媒壓力，並填寫保養記錄表。',
+    '到○○大樓進行年度空調保養，清潔蒸發器盤管及排水管，並測試溫度感應器運作正常。',
+    '至○○住家進行分離式冷氣季節保養，拆洗濾網與外殼，並檢查冷媒管路有無結霜異常。'
+  ],
+  '設備維修': [
+    '協助師傅排查○○大樓分離式冷氣異常，確認壓縮機電容故障後進行更換。',
+    '至○○工廠處理中央空調無法啟動的問題，排查後發現為控制板保險絲燒毀，更換後恢復運轉。',
+    '協助師傅檢修○○店面窗型冷氣不冷的狀況，發現為冷媒外洩造成，初步處理後安排補冷媒。'
+  ],
+  '冷氣安裝': [
+    '至○○建案協助安裝分離式冷氣室內外機，完成配管及電線配置，並測試運轉正常。',
+    '協助於○○住宅新建案安裝多聯式空調室內機，完成管路抽真空作業並確認無洩漏。',
+    '至○○辦公室安裝吊隱式冷氣機，配合師傅施作風管與排水配置，最後試運轉確認出風正常。'
+  ],
+  '冷凍設備安裝': [
+    '協助於○○超市安裝冷凍展示櫃，進行管路配接及冷媒灌充，完成試運轉。',
+    '至○○餐廳協助安裝商用冷藏庫，進行隔間板組裝與壓縮機連接，並設定溫控器參數。',
+    '協助於○○工廠安裝急速冷凍機，配合師傅進行管路保溫施工並測試降溫速率。'
+  ],
+  '管路配管': [
+    '在○○工廠協助進行冷媒銅管配管，使用彎管器製作彎管並以銲接接合。',
+    '至○○大樓協助配置冷媒管路保溫工程，依圖面裁切保溫材並包覆固定於銅管外。',
+    '協助師傅在○○住家進行配管路徑規劃，沿牆角開孔配管並使用固定夾整線。'
+  ],
+  '焊接作業': [
+    '協助師傅進行冷媒銅管的硬銲作業，使用銀銲條完成接頭焊接並做氣密測試。',
+    '在○○工地協助進行冷媒管路氮氣保護銲接，避免管內氧化並完成接頭密合。',
+    '協助師傅修補○○設備銅管破損處，以銀/銅銲條補銲後進行站壓測漏確認無洩漏。'
+  ],
+  '冷媒充填/回收': [
+    '使用冷媒回收機將舊設備冷媒回收至鋼瓶，再對新機組充填適量冷媒並確認壓力值。',
+    '協助於○○大樓進行汰換工程，將舊機冷媒完整回收後依規定填寫回收紀錄表。',
+    '至○○客戶端為新安裝機組進行抽真空與冷媒灌充，依銘牌標示秤重充填並確認運轉壓力。'
+  ],
+  '電路檢測': [
+    '以三用電表量測室外機電路，確認電容容值及壓縮機線圈阻值均在正常範圍。',
+    '協助排查○○設備跳電原因，使用三用電表逐一檢測迴路，找出短路點並回報師傅處理。',
+    '至○○工廠檢測冷氣控制箱接線，確認各端子電壓正常，並標示老舊線路建議更換。'
+  ],
+  '零件更換': [
+    '更換○○客戶冷氣室外機風扇馬達，拆除舊馬達後對照規格安裝新品並測試。',
+    '協助更換○○大樓中央空調的過濾網與皮帶，確認規格相符後安裝並試運轉檢查噪音。',
+    '至○○住家更換故障的冷氣遙控接收板，拆裝面板後安裝新零件並測試訊號接收正常。'
+  ],
+  '消防設備檢查': [
+    '至○○進行消防安檢，逐一確認滅火器壓力表及藥劑期限並填寫記錄表。',
+    '協助於○○大樓檢查室內消防栓出水狀況，確認水壓正常並記錄檢查結果。',
+    '至○○工廠進行火警受信總機測試，逐區按壓探測器確認警報正常並回報異常區域。'
+  ],
+  '倉儲管理': [
+    '協助盤點冷凍零件庫存，清點各型號銅管接頭、濾心等耗材並更新電腦資料。',
+    '協助整理倉庫內冷媒鋼瓶，依品項分類擺放並標示存量，避免混用造成施工錯誤。',
+    '協助盤點本月領用的管材與耗材數量，核對出庫紀錄並回報主管確認庫存無誤。'
+  ],
+  '行政協助': [
+    '協助整理客戶保養合約資料，建立本月到期保養名單並製作排程表。',
+    '協助建立客戶報修紀錄表，將本週維修案件依日期與地區分類整理。',
+    '協助公司整理本月施工照片與工時紀錄，依案件編號歸檔以利後續核銷作業。'
+  ],
+  '現場清潔': [
+    '工作完成後協助清潔施工現場，整理工具並確認無任何材料遺留於現場。',
+    '安裝完成後協助回收包裝材料與廢棄管材，並將施工區域恢復原狀。',
+    '協助清潔室外機平台周邊環境，移除施工產生的金屬屑與膠帶殘留。'
+  ],
 };
+// 每筆工作摘要（依 id）目前輪播到第幾句範例，彼此獨立
+let entryExampleIndex = {};
 
 let entryCount = 0;
 function addWorkEntry() {
@@ -1206,7 +1260,7 @@ function addWorkEntry() {
       </div>
     </div>
     <div class="form-group">
-      <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span></label>
+      <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span><button type="button" id="${id}-example-cycle" class="btn btn-secondary btn-sm" style="display:none;margin-left:6px;padding:1px 7px;font-size:11px;vertical-align:middle" onclick="cycleWorkTypeExample('${id}')" title="換一句範例寫法">🔄</button></label>
       <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
     </div>
     <div class="form-group">
@@ -1242,13 +1296,36 @@ function addWorkEntry() {
 
 function showWorkTypeExample(id) {
   const type = document.getElementById(`${id}-type`).value;
-  const text = document.getElementById(`${id}-example-text`);
   const otherWrap = document.getElementById(`${id}-other-wrap`);
   if (otherWrap) otherWrap.style.display = (type === '其他') ? 'block' : 'none';
+  // 切換工作類型時，範例輪播重置回第①句
+  entryExampleIndex[id] = 0;
+  renderWorkTypeExample(id);
+}
+
+function renderWorkTypeExample(id) {
+  const type = document.getElementById(`${id}-type`)?.value;
+  const text = document.getElementById(`${id}-example-text`);
+  const cycleBtn = document.getElementById(`${id}-example-cycle`);
+  const examples = (type && type !== '其他') ? WORK_TYPE_EXAMPLES[type] : null;
   if (text) {
-    if (type && type !== '其他' && WORK_TYPE_EXAMPLES[type]) text.textContent = '（例：' + WORK_TYPE_EXAMPLES[type] + '）';
-    else text.textContent = '';
+    if (examples && examples.length) {
+      const idx = entryExampleIndex[id] || 0;
+      text.textContent = '（例：' + examples[idx] + '）';
+    } else {
+      text.textContent = '';
+    }
   }
+  if (cycleBtn) cycleBtn.style.display = (examples && examples.length > 1) ? 'inline-block' : 'none';
+}
+
+function cycleWorkTypeExample(id) {
+  const type = document.getElementById(`${id}-type`)?.value;
+  const examples = (type && type !== '其他') ? WORK_TYPE_EXAMPLES[type] : null;
+  if (!examples || !examples.length) return;
+  const cur = entryExampleIndex[id] || 0;
+  entryExampleIndex[id] = (cur + 1) % examples.length;
+  renderWorkTypeExample(id);
 }
 
 function removeEntry(id) { document.getElementById(id)?.remove(); }
@@ -1497,6 +1574,7 @@ async function saveJournal() {
   let addressError = '';
   let photoError = '';
   let contentError = '';
+  let typeError = '';
   let entryIndex = 0;
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
     entryIndex += 1;
@@ -1526,9 +1604,14 @@ async function saveJournal() {
     if (address && (distance === null || isNaN(distance)) && !distanceError) distanceError = true;
     const typeEl = document.getElementById(`${id}-type`);
     let workType = typeEl ? typeEl.value : '';
+    // 工作類型必選
+    if (!workType && !typeError) {
+      typeError = `第 ${entryIndex} 筆工作摘要尚未選擇工作類型`;
+    }
     if (workType === '其他') { const oi = document.getElementById(`${id}-other-input`)?.value?.trim(); if (oi) workType = `其他（${oi}）`; }
     entries.push({ date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
   });
+  if (typeError) return toast(typeError, 'error');
   if (contentError) return toast(contentError, 'error');
   if (addressError) return toast(addressError, 'error');
   if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
