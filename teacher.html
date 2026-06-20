@@ -437,9 +437,9 @@ tr:last-child td { border-bottom: none; }
 .submit-table td.col-name { position: sticky; left: 55px; z-index: 2; width: 100px; min-width: 100px; max-width: 100px; background: var(--bg2); color: var(--text); font-weight: 600; text-align: center; padding-left: 8px; padding-right: 8px; }
 .submit-table tr:hover td { background: var(--bg3); }
 .submit-table tr:hover td.col-seat, .submit-table tr:hover td.col-name { background: var(--bg3); }
-.submit-cell-done { color: var(--accent-green); font-weight: 700; font-size: 12px; }
-.submit-cell-miss { background: rgba(239,68,68,0.07); color: var(--accent-red); font-weight: 700; font-size: 12px; }
-.submit-cell-late { background: rgba(245,158,11,0.10); color: var(--accent-yellow); font-weight: 700; font-size: 12px; }
+.submit-cell-done { background: rgba(34,197,94,0.10); color: var(--accent-green); font-weight: 800; font-size: 13px; }
+.submit-cell-miss { background: rgba(239,68,68,0.16); color: var(--accent-red); font-weight: 800; font-size: 13px; }
+.submit-cell-late { background: rgba(245,158,11,0.18); color: var(--accent-yellow); font-weight: 800; font-size: 13px; }
 .submit-cell-na { color: var(--text3); }
 .submit-sem-row td { background: rgba(79,142,247,0.10); border-bottom: 1px solid var(--border); padding: 0; }
 .submit-sem-row td.submit-sem-sticky { position: sticky; left: 0; z-index: 2; width: 155px; min-width: 155px; max-width: 155px; border-left: 3px solid var(--accent); background: #eaf2ff; text-align: center; }
@@ -3777,7 +3777,7 @@ function renderFilteredCity(journals) {
       // 外縣市（非台中市）用醒目顏色標出，方便老師一眼看出本月有沒有人填到外縣市
       const isOutOfCounty = city !== '台中市' && city !== '未知';
       const barColor = isOutOfCounty ? 'var(--accent-yellow)' : 'var(--accent)';
-      const cityLabel = isOutOfCounty ? `🟠 ${escapeHtml(city)}` : escapeHtml(city);
+      const cityLabel = isOutOfCounty ? `🟠 ${escapeHtml(city)}` : (city === '台中市' ? `🔵 ${escapeHtml(city)}` : escapeHtml(city));
       return `<div class="chart-bar-item"><div class="chart-bar-label">${cityLabel}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${barColor}"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
     }).join('') : '<div class="empty-state"><div class="icon">📍</div><p>無地點資料</p></div>';
   }
