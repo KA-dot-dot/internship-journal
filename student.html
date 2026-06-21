@@ -296,7 +296,7 @@ tr:last-child td { border-bottom: none; }
 
 <div id="loading-overlay" class="hidden">
   <div class="spinner"></div>
-  <span style="font-size:13px;color:var(--text2)">載入中...</span>
+  <span id="loading-text" style="font-size:13px;color:var(--text2)">載入中...</span>
 </div>
 
 <div id="toast"></div>
@@ -687,8 +687,9 @@ function toast(msg, type = 'info') {
   toastTimer = setTimeout(() => { el.className = ''; }, 3500);
 }
 
-function showLoading() { document.getElementById('loading-overlay').classList.remove('hidden'); }
-function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
+function showLoading() { setLoadingText('載入中...'); document.getElementById('loading-overlay').classList.remove('hidden'); }
+function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); setLoadingText('載入中...'); }
+function setLoadingText(msg) { const el = document.getElementById('loading-text'); if (el) el.textContent = msg; }
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
@@ -745,6 +746,7 @@ function showTeacherStudentSetupHint(message) {
 
 // ============ 登入後共用：驗證並進入系統 ============
 async function handleLoginUser(user) {
+  setLoadingText('驗證帳號中...');
   const email = user.email || '';
 
   // 1. 驗證學校網域
@@ -778,6 +780,7 @@ async function handleLoginUser(user) {
   const seatNo = binding.seatNo;
 
   // 3. 取得學生資料（新格式：{activeSemester}_{seatNo}；fallback 舊格式：{seatNo}）
+  setLoadingText('讀取學生資料...');
   const activeSem = getCurrentSemester();
   let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem}_${seatNo}`)), 10000, '登入逾時，請確認網路後再試');
   if (!stuSnap.exists()) {
@@ -816,6 +819,7 @@ async function handleLoginUser(user) {
   } catch(e) { console.warn('補寫 uid 失敗', e); }
 
   _loginHandling = false;
+  setLoadingText('登入成功'); // 註：enterApp() 第一行即同步呼叫 hideLoading()，此文字幾乎不會被肉眼看到，純粹是邏輯完整性
   enterApp();
 }
 
@@ -851,7 +855,7 @@ async function googleStudentLogin() {
       return;
     }
     console.error('Google 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
+    toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
   }
 }
 
@@ -2452,6 +2456,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (currentUser) return; // redirect 路徑已登入成功
         }
         showLoading();
+        setLoadingText('驗證帳號中...');
         const email = user.email || '';
         if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
         const { doc, getDoc } = firebase_funcs;
@@ -2471,6 +2476,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           const binding = bindSnap.data();
           const activeSem2 = getCurrentSemester();
+          setLoadingText('讀取學生資料...');
           let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
           if (!stuSnap.exists()) {
             // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
@@ -2490,8 +2496,9 @@ document.addEventListener('DOMContentLoaded', () => {
           currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
           // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
           try { const { updateDoc } = firebase_funcs; await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid }); } catch(e) { console.warn('補寫 uid 失敗', e); }
+          setLoadingText('登入成功');
           enterApp();
-        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試'), 'error'); }
+        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error'); }
       }
     });
   });

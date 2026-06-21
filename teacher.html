@@ -621,7 +621,7 @@ tr:last-child td { border-bottom: none; }
 
 <div id="loading-overlay" class="hidden">
   <div class="spinner"></div>
-  <span style="font-size:13px;color:var(--text2)">載入中...</span>
+  <span id="loading-text" style="font-size:13px;color:var(--text2)">載入中...</span>
 </div>
 
 <div id="toast"></div>
@@ -1936,8 +1936,9 @@ function toast(msg, type = 'info') {
 }
 
 // ============ Loading ============
-function showLoading() { document.getElementById('loading-overlay').classList.remove('hidden'); }
-function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
+function showLoading() { setLoadingText('載入中...'); document.getElementById('loading-overlay').classList.remove('hidden'); }
+function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); setLoadingText('載入中...'); }
+function setLoadingText(msg) { const el = document.getElementById('loading-text'); if (el) el.textContent = msg; }
 
 function withTimeout(promise, ms, message) {
   let timer;
@@ -1997,6 +1998,7 @@ async function startTeacherRedirectLogin() {
 }
 
 async function handleTeacherLoginUser(user) {
+  setLoadingText('驗證帳號中...');
   const { auth } = window._auth;
   const email = normalizeEmail(user.email);
 
@@ -2011,6 +2013,7 @@ async function handleTeacherLoginUser(user) {
   let isAdmin = false;
   let adminDocData = null;
 
+  setLoadingText('確認教師權限...');
   const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
   if (byUid.exists()) {
     isAdmin = true;
@@ -2042,6 +2045,7 @@ async function handleTeacherLoginUser(user) {
   } catch (syncErr) {
     console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
   }
+  setLoadingText('登入成功'); // 註：enterApp() 第一行即同步呼叫 hideLoading()，此文字幾乎不會被肉眼看到，純粹是邏輯完整性
   enterApp();
 }
 
@@ -2072,7 +2076,7 @@ async function googleTeacherLogin() {
       return;
     }
     console.error('Google 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
+    toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
   } finally {
     hideLoading();
   }
@@ -5467,10 +5471,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = normalizeEmail(user.email);
         if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
         showLoading();
+        setLoadingText('驗證帳號中...');
         try {
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
           let adminDocData = null;
+          setLoadingText('確認教師權限...');
           const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
           if (byUid.exists()) {
             isAdmin = true;
@@ -5490,6 +5496,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (syncErr) {
               console.warn('自動同步老師 UID 權限文件失敗，保留既有登入', syncErr);
             }
+            setLoadingText('登入成功');
             enterApp();
           } else {
             hideLoading();
@@ -5497,7 +5504,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(e) {
           console.warn('自動恢復登入失敗，請手動登入', e);
           hideLoading();
-          toast('登入失敗：' + (e.message || '請重試'), 'error');
+          toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
         }
       }
     });
