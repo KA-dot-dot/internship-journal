@@ -1086,7 +1086,17 @@ async function checkMonthDeadline(skipFill = false) {
       addWorkEntry();
       const id = `entry-${entryCount}`;
       document.getElementById(`${id}-date`).value = toDateVal(e.date || '');
-      const typeEl = document.getElementById(`${id}-type`); if (typeEl) typeEl.value = e.type || '';
+      const typeEl = document.getElementById(`${id}-type`);
+      if (typeEl) {
+        if (e.type && e.type.startsWith('其他（') && e.type.endsWith('）')) {
+          typeEl.value = '其他';
+          const otherInputEl = document.getElementById(`${id}-other-input`);
+          if (otherInputEl) otherInputEl.value = e.type.slice(3, -1);
+          showWorkTypeExample(id);
+        } else {
+          typeEl.value = e.type || '';
+        }
+      }
       document.getElementById(`${id}-address`).value = e.address || '';
       document.getElementById(`${id}-content`).value = e.content || '';
       if (e.distance != null) { const m = document.getElementById(`${id}-dist-manual`); if (m) m.value = e.distance; }
@@ -1927,7 +1937,16 @@ async function editJournal(seatNo, sem, month) {
     const id = `entry-${entryCount}`;
     document.getElementById(`${id}-date`).value = toDateVal(e.date || '');
     const typeEl = document.getElementById(`${id}-type`);
-    if (typeEl) typeEl.value = e.type || '';
+    if (typeEl) {
+      if (e.type && e.type.startsWith('其他（') && e.type.endsWith('）')) {
+        typeEl.value = '其他';
+        const otherInputEl = document.getElementById(`${id}-other-input`);
+        if (otherInputEl) otherInputEl.value = e.type.slice(3, -1);
+        showWorkTypeExample(id);
+      } else {
+        typeEl.value = e.type || '';
+      }
+    }
     document.getElementById(`${id}-address`).value = e.address || '';
     document.getElementById(`${id}-content`).value = e.content || '';
     if (e.distance != null) {
