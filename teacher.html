@@ -4219,11 +4219,21 @@ function updateTeacherBatchBar() {
 function getTeacherJournalMonthRangeLabel(journals) {
   if (!journals.length) return '';
   const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
+  // 學期+月份換算為西元年/月（與 student.html 的 getJournalMonthRangeLabel 邏輯一致）
+  // 第1學期：7~12月為當年，1月為隔年；第2學期：2~6月皆為隔年
+  const toCEYearMonth = (j) => {
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    const month = j.month || 0;
+    let year = (roc || 0) + 1911;
+    if (half === 1 && month === 1) year += 1;
+    if (half === 2) year += 1;
+    return { year, month };
+  };
+  const first = toCEYearMonth(sorted[0]);
+  const last = toCEYearMonth(sorted[sorted.length - 1]);
   const n = journals.length;
-  if (first.month === last.month && first.semester === last.semester) return `${first.month}月，共${n}筆`;
-  return `${first.month}月 ～ ${last.month}月，共${n}筆`;
+  if (first.year === last.year && first.month === last.month) return `${first.year}/${first.month}，共${n}筆`;
+  return `${first.year}/${first.month}~${last.year}/${last.month}，共${n}筆`;
 }
 
 function confirmTeacherBatchDelete() {
