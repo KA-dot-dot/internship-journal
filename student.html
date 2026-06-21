@@ -1594,9 +1594,16 @@ async function saveJournal() {
     entryIndex += 1;
     const id = div.id;
     const noPhoto = document.getElementById(`${id}-nophoto`)?.checked;
-    const photos = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap img`)).map(img => img.dataset.base64);
+    const photoWraps = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`));
+    // 照片仍在上傳中時，img.dataset.base64 尚未寫入（見 handlePhotoUpload），此時不可讓使用者儲存，
+    // 否則會把 undefined 存進 entries.photos，Firestore setDoc() 會直接擲出例外導致整份月記存檔失敗
+    const uploadingCount = photoWraps.filter(w => w.querySelector('.photo-uploading')).length;
+    const photos = noPhoto ? [] : photoWraps.map(w => w.querySelector('img')?.dataset.base64).filter(Boolean);
+    if (!noPhoto && uploadingCount > 0 && !photoError) {
+      photoError = `第 ${entryIndex} 筆工作摘要有照片尚在上傳中，請稍候片刻再按儲存`;
+    }
     // 工作照片驗證：未勾「不便拍照」且沒有上傳照片 → 阻止儲存
-    if (!noPhoto && photos.length === 0 && !photoError) {
+    if (!noPhoto && photos.length === 0 && uploadingCount === 0 && !photoError) {
       photoError = `第 ${entryIndex} 筆工作摘要尚未上傳工作照片，請上傳照片或勾選「📵 不便拍照」`;
     }
     const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
@@ -1801,11 +1808,21 @@ function updateHistoryBatchBar() {
 function getJournalMonthRangeLabel(journals) {
   if (!journals.length) return '';
   const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
+  // 學期+月份換算為西元年/月（與 journalMonthInRange/pdfJournalYear 的學期定義一致：
+  // 第1學期 7~12月當年、1月隔年；第2學期 2~6月皆隔年）
+  const toCEYearMonth = (j) => {
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    const month = j.month || 0;
+    let year = (roc || 0) + 1911;
+    if (half === 1 && month === 1) year += 1;
+    if (half === 2) year += 1;
+    return { year, month };
+  };
+  const first = toCEYearMonth(sorted[0]);
+  const last = toCEYearMonth(sorted[sorted.length - 1]);
   const n = journals.length;
-  if (first.month === last.month && first.semester === last.semester) return `${first.month}月，共${n}筆`;
-  return `${first.month}月 ～ ${last.month}月，共${n}筆`;
+  if (first.year === last.year && first.month === last.month) return `${first.year}/${first.month}，共${n}筆`;
+  return `${first.year}/${first.month}~${last.year}/${last.month}，共${n}筆`;
 }
 
 function confirmBatchDeleteHistory() {

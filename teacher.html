@@ -1898,8 +1898,8 @@ async function deleteSelectedSemesterData() {
     loadDeadlinesTable();
   } catch(e) {
     toast('刪除學期失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function loadRosterStudentsForSemesters(semesters, journals = []) {
@@ -2273,8 +2273,8 @@ async function bindStudent() {
     loadBindingList();
   } catch(e) {
     toast('綁定失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function loadBindingList() {
@@ -2695,8 +2695,8 @@ async function loadStudentsTable() {
     await updateStudentTermStatus();
   } catch(e) {
     toast('載入學生名單失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function bindStudentInline(seatNo, name) {
@@ -2832,8 +2832,8 @@ async function saveStudent() {
     loadExportStudents();
   } catch(e) {
     toast('儲存失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
@@ -2859,8 +2859,8 @@ async function deleteStudent(seatNo, name) {
     loadExportStudents();
   } catch(e) {
     toast('刪除學生失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 function openImportModal() {
@@ -2944,8 +2944,8 @@ async function importStudents() {
     else toast('匯入失敗，請確認格式', 'error');
   } catch(e) {
     toast('匯入失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function batchImportPhotos() {
@@ -5084,8 +5084,8 @@ async function saveTeacherComment() {
     loadTeacherJournals();
   } catch(e) {
     toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 // ============================================================
@@ -5123,8 +5123,8 @@ async function executeBatchReview() {
     loadTeacherJournals();
   } catch(e) {
     toast('❌ 批次標記失敗：' + (e.message || '請重試'), 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 // ============================================================
