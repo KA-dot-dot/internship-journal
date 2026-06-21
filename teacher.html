@@ -5086,7 +5086,8 @@ async function saveTeacherComment() {
   try {
     await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
-      teacherCommentUnread: true
+      // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
+      teacherCommentUnread: comment.length > 0
     });
     hideLoading();
     closeModal('comment-modal');
