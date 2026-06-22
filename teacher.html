@@ -2838,16 +2838,28 @@ async function saveStudent() {
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
   if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將會刪除該學生所有學期的月記資料，此操作無法復原。`)) return;
-  const { collectionGroup, getDocs, deleteDoc } = firebase_funcs;
+  const { collectionGroup, getDocs, deleteDoc, doc } = firebase_funcs;
   showLoading();
   try {
     const active = await getActiveRosterSemester();
-    const next = await updateSelectedTermSnapshot(roster => roster.filter(s => s.seatNo !== seatNo));
+    // 取得名冊中該座號的綁定信箱，用於月記雙重比對（防止座號重複分配時誤刪不同人的月記）
+    const roster = await getRosterForSelectedTerm();
+    const targetEmail = roster.find(s => s.seatNo === seatNo)?.email || '';
+    const next = await updateSelectedTermSnapshot(r => r.filter(s => s.seatNo !== seatNo));
     const journalSnap = await getDocs(collectionGroup(db, 'journals'));
-    // 刪除該座號所有學期的月記（不限 semester）
-    const allJournalDocs = userJournalDocs(journalSnap).filter(d => d.data().seatNo === seatNo);
+    // 用 seatNo + ownerEmail 雙重比對，避免座號重複分配時誤刪不同人的月記。
+    // 若名冊中無信箱（學生從未綁定），則視為 0 筆，不做寬鬆比對，避免留下任何誤刪漏洞。
+    const allJournalDocs = targetEmail
+      ? userJournalDocs(journalSnap).filter(d => d.data().seatNo === seatNo && d.data().ownerEmail === targetEmail)
+      : [];
     await Promise.all(allJournalDocs.map(d => deleteDoc(d.ref)));
-    if (semester === active) await syncActiveRootFromRoster(semester, next);
+    if (semester === active) {
+      await syncActiveRootFromRoster(semester, next);
+    } else {
+      // 非 active 學期刪學生時，syncActiveRootFromRoster 不會執行，
+      // 需手動清除對應的 /students/ 根文件，否則孤兒文件會被統計頁誤抓
+      await deleteDoc(doc(db, 'students', `${semester}_${seatNo}`)).catch(() => {});
+    }
     // 重置公司清單快取，讓統計頁重新載入（確保刪除後公司消失）
     const cbList = document.getElementById('company-checkbox-list');
     if (cbList) cbList.innerHTML = '<div class="company-filter-hint" style="margin:8px">查詢後顯示公司清單</div>';
