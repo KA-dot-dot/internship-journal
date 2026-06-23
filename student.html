@@ -1940,6 +1940,15 @@ async function editJournal(seatNo, sem, month) {
   const snap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`));
   if (!snap.exists()) { hideLoading(); return toast('月記不存在', 'error'); }
   const j = snap.data();
+  // 預先更新 _currentJournalCache，確保 saveJournal() 保留本筆月記的原始 submittedAt
+  // 不更新時，快取若殘留其他月份的資料（或為 null），saveJournal 會把 submittedAt 重設為當下時間
+  window._currentJournalCache = {
+    exists: true,
+    submittedAt: j.submittedAt,
+    updatedAt: j.updatedAt,
+    teacherReviewed: j.teacherReviewed,
+    teacherComment: j.teacherComment
+  };
   // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
   if (j.teacherCommentUnread) {
     updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), { teacherCommentUnread: false }).catch(() => {});
