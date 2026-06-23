@@ -1145,7 +1145,7 @@ tr:last-child td { border-bottom: none; }
               <button class="btn btn-secondary btn-sm" onclick="queryJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
             </div>
             <div id="t-journals-search-row" style="display:flex;flex:1;min-width:0;gap:10px;align-items:center">
-              <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名" style="flex:1;min-width:0;box-sizing:border-box" oninput="loadTeacherJournals()">
+              <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名／公司" style="flex:1;min-width:0;box-sizing:border-box" oninput="loadTeacherJournals()">
               <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
             </div>
           </div>
@@ -2442,7 +2442,7 @@ async function copyMissingList() {
       const raw = snap.data().closeDate || '';   // 格式 YYYY-MM-DD
       if (raw) {
         const parts = raw.split('-');             // ['2026','06','30']
-        deadlineStr = `${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '6/30'
+        deadlineStr = `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '2026/6/30'
       }
     }
   } catch(e) {
@@ -4151,7 +4151,7 @@ async function fetchJournalsFromServer() {
 function filterAndSortJournals(journals, startStr, endStr, search) {
   let result = [...journals];
   if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
-  if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
+  if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search) || (j.company||'').toLowerCase().includes(search));
   result.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
   return result;
 }
