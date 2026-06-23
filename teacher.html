@@ -4971,7 +4971,7 @@ function pdfJournalBlock(j, idx) {
   if (j.teacherReviewed || j.teacherComment) {
     content.push({
       table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語　已審閱', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
         { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
       ] }]] },
       layout: {
