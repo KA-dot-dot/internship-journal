@@ -521,6 +521,7 @@ tr:last-child td { border-bottom: none; }
 .entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
 .comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+.badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
 /* ===== 老師端批次刪除 ===== */
 #t-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
@@ -4674,7 +4675,9 @@ function renderJournalCard(j, isTeacher) {
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
   const isReviewed = !!(j.teacherReviewed);
-  const reviewedBadge = isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '';
+  const reviewedBadge = hasComment
+    ? `<span class="badge-comment">● 有留言</span>`
+    : (isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '');
   const commentBtn = isTeacher ? (
     hasComment
       ? `<button class="btn-circ gray-circ" title="編輯評語" onclick="openCommentModal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`

@@ -1768,10 +1768,7 @@ function renderJournalCardSelectable(j) {
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
     ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <strong style="font-size:12px;color:#22c55e">💬 老師評語</strong>
-        <span style="font-size:11px;background:rgba(34,197,94,0.2);color:#22c55e;border-radius:10px;padding:2px 8px">✅ 已審閱</span>
-      </div>
+      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
       ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
     </div>` : ''}
   </div>`;
@@ -2120,10 +2117,7 @@ function renderJournalCard(j, isTeacher) {
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
     ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <strong style="font-size:12px;color:#22c55e">💬 老師評語</strong>
-        <span style="font-size:11px;background:rgba(34,197,94,0.2);color:#22c55e;border-radius:10px;padding:2px 8px">✅ 已審閱</span>
-      </div>
+      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
       ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
     </div>` : ''}
   </div>`;
@@ -2356,7 +2350,7 @@ function pdfJournalBlock(j, idx) {
   if (j.teacherReviewed || j.teacherComment) {
     content.push({
       table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語　已審閱', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
         { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
       ] }]] },
       layout: {
