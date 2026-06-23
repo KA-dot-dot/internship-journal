@@ -4167,16 +4167,18 @@ async function loadTeacherJournals(forceRefresh) {
   if (!forceRefresh) {
     const cached = loadJournalsFromCache();
     if (cached) {
-      renderJournalListUI(filterAndSortJournals(cached.data, startStr, endStr, search));
+      const cachedFiltered = filterAndSortJournals(cached.data, startStr, endStr, search);
+      renderJournalListUI(cachedFiltered);
       setCacheIndicator('loading', null);
       // 背景靜默更新
       fetchJournalsFromServer().then(fresh => {
         saveJournalsToCache(fresh);
-        renderJournalListUI(filterAndSortJournals(fresh, startStr, endStr, search));
-        setCacheIndicator('fresh', Date.now());
+        const freshFiltered = filterAndSortJournals(fresh, startStr, endStr, search);
+        renderJournalListUI(freshFiltered);
+        setCacheIndicator('fresh', Date.now(), freshFiltered.length);
       }).catch(e => {
         console.warn('背景更新失敗：', e.message);
-        setCacheIndicator('fresh', cached.ts); // 顯示舊快取時間
+        setCacheIndicator('fresh', cached.ts, cachedFiltered.length); // 顯示舊快取時間
       });
       return;
     }
@@ -4188,8 +4190,9 @@ async function loadTeacherJournals(forceRefresh) {
   try {
     const journals = await fetchJournalsFromServer();
     saveJournalsToCache(journals);
-    renderJournalListUI(filterAndSortJournals(journals, startStr, endStr, search));
-    setCacheIndicator('fresh', Date.now());
+    const filtered = filterAndSortJournals(journals, startStr, endStr, search);
+    renderJournalListUI(filtered);
+    setCacheIndicator('fresh', Date.now(), filtered.length);
   } catch(e) {
     toast('載入失敗：' + e.message, 'error');
     setCacheIndicator('', null);
@@ -4593,7 +4596,7 @@ function loadJournalsFromCache() {
   } catch(e) { return null; }
 }
 
-function setCacheIndicator(state, ts) {
+function setCacheIndicator(state, ts, count) {
   const el = document.getElementById('t-cache-indicator');
   if (!el) return;
   if (state === 'loading') {
@@ -4601,7 +4604,8 @@ function setCacheIndicator(state, ts) {
   } else if (state === 'fresh') {
     const d = new Date(ts);
     const hhmm = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-    el.innerHTML = `📦 快取資料（${hhmm}）・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">強制重新整理</button>`;
+    const countTxt = (typeof count === 'number') ? `<span style="font-weight:600;color:var(--text)">共 ${count} 份月記</span>・` : '';
+    el.innerHTML = `${countTxt}📦 快取資料（${hhmm}）・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">強制重新整理</button>`;
   } else {
     el.innerHTML = '';
   }
