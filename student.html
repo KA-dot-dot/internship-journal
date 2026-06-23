@@ -583,6 +583,9 @@ let writeDeadlineDocs = [];
 let db, firebase_funcs;
 // Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行 handleLoginUser
 let _loginHandling = false;
+// editJournal() 呼叫 showPage('s-write') 前會設此旗標為 true，
+// 讓 showPage 內觸發的 initWriteForm() 跳過一次，避免非同步重新讀取/填表蓋掉剛載入的編輯內容
+let _skipWriteInit = false;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
@@ -938,6 +941,10 @@ function showPage(pageId) {
     's-write': initWriteForm,
     's-history': () => { initStatsDateSelects(); loadStudentHistory(); },
   };
+  if (pageId === 's-write' && _skipWriteInit) {
+    _skipWriteInit = false;
+    return;
+  }
   if (loaders[pageId]) loaders[pageId]();
 }
 
@@ -995,7 +1002,7 @@ function initWriteMonths() {
   if (!mSel.value && mSel.options.length) mSel.selectedIndex = 0;
 }
 
-async function initWriteForm() {
+async function initWriteForm(skipDeadlineCheck = false) {
   if (!currentUser) return;
   const { collection, getDocs } = firebase_funcs;
   const snap = await getDocs(collection(db, 'deadlines'));
@@ -1025,8 +1032,10 @@ async function initWriteForm() {
   initWriteMonths();
   document.getElementById('write-company').value = currentUser.company || '';
   // checkMonthDeadline 會自動載入或清空該月份資料
-  checkMonthDeadline();
+  // editJournal() 會傳入 true 跳過此呼叫，避免背景非同步重新讀取目前真實學期/月份的資料，蓋掉剛載入的編輯內容
+  if (!skipDeadlineCheck) checkMonthDeadline();
 }
+
 
 async function checkMonthDeadline(skipFill = false) {
   if (!currentUser) return;
@@ -1935,7 +1944,7 @@ async function editJournal(seatNo, sem, month) {
   if (j.teacherCommentUnread) {
     updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), { teacherCommentUnread: false }).catch(() => {});
   }
-  await initWriteForm();
+  await initWriteForm(true);
   document.getElementById('write-semester').value = sem;
   initWriteMonths();
   document.getElementById('write-month').value = month;
@@ -1982,6 +1991,7 @@ async function editJournal(seatNo, sem, month) {
       });
     }
   });
+  _skipWriteInit = true;
   showPage('s-write');
   // skipFill=true：只更新截止日狀態與 saveBtn，不覆蓋 editJournal 剛填入的表單值
   checkMonthDeadline(true);
