@@ -4684,9 +4684,10 @@ function renderJournalCard(j, isTeacher) {
   const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${escapeHtml(j.seatNo)}" data-sem="${escapeHtml(j.semester)}" data-month="${safeMonth}" data-uid="${escapeHtml(j.ownerUid||'')}" data-name="${escapeHtml(j.studentName||'')}" onchange="updateTeacherBatchBar()"></div>` : '';
   return `<div class="${isTeacher ? 't-journal-card-selectable journal-card' : 'journal-card'}" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
     ${cbHtml}
+    ${reviewedBadge ? `<div style="margin-bottom:8px">${reviewedBadge}</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div>${isTeacher ? `<span style="color:var(--text2);font-size:12px">${escapeHtml(j.seatNo)} ${escapeHtml(j.studentName || '-')}</span><br>` : ''}<span style="font-size:15px;font-weight:700">${escapeHtml(j.month)}月份月記</span></div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reviewedBadge}<span class="badge badge-blue">${escapeHtml(semLabel)}</span>${commentBtn}${deleteBtn}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-blue">${escapeHtml(semLabel)}</span>${commentBtn}${deleteBtn}</div>
     </div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
