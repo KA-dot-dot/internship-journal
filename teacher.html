@@ -4667,7 +4667,7 @@ function renderJournalCard(j, isTeacher) {
   const hasComment = !!(j.teacherComment);
   const isReviewed = !!(j.teacherReviewed);
   const reviewedBadge = hasComment
-    ? `<span class="badge-comment">● 有留言</span>`
+    ? `<span class="badge-comment">● 有新評語</span>`
     : (isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '');
   const commentBtn = isTeacher ? (
     hasComment
