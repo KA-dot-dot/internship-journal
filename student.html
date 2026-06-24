@@ -186,7 +186,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .journal-reviewed-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; align-items: stretch; }
   .stat-value { font-size: 22px; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
@@ -203,7 +203,6 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 .stat-card-clickable { cursor: pointer; user-select: none; }
-.stat-card-arrow { font-size: 10px; color: var(--text2); }
 .stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
 .stat-card-detail.hidden { display: none; }
 .stat-detail-row { display: flex; align-items: center; gap: 6px; }
@@ -303,12 +302,10 @@ tr:last-child td { border-bottom: none; }
 .write-progress-float-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .write-progress-float-count { font-size: 13px; font-weight: 800; white-space: nowrap; color: #fff; }
 .write-progress-float-label { font-size: 12px; color: rgba(255,255,255,0.84); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.write-progress-float-arrow { font-size: 12px; color: rgba(255,255,255,0.7); flex-shrink: 0; }
 .write-progress-float-body { display: grid; gap: 6px; }
 .write-progress-float.compact { border-radius: 999px; }
 .write-progress-float.compact .write-progress-float-inner { padding: 8px 12px; }
 .write-progress-float.compact .write-progress-float-label,
-.write-progress-float.compact .write-progress-float-arrow,
 .write-progress-float.compact .write-progress-float-body { display: none; }
 .write-progress-float.expanded .write-progress-float-body { display: grid; }
 @media (max-width: 768px) {
@@ -324,8 +321,7 @@ body.light-mode .write-progress-float {
   border-color: rgba(30, 41, 59, 0.12);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
 }
-body.light-mode .write-progress-float-count,
-body.light-mode .write-progress-float-arrow { color: var(--text); }
+body.light-mode .write-progress-float-count { color: var(--text); }
 body.light-mode .write-progress-float-label { color: var(--text2); }
 
 @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
@@ -492,17 +488,17 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             <div id="s-this-month-status" style="margin-top:8px">-</div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
-            <div class="stat-label">已繳交（點擊查看） <span class="stat-card-arrow" id="stat-arrow-submitted">▾</span></div>
+            <div class="stat-label">已繳交（點擊查看）</div>
             <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
-            <div class="stat-label">老師已審閱／有新評語（點擊查看） <span class="stat-card-arrow" id="stat-arrow-teacher">▾</span></div>
+            <div class="stat-label">已審閱／有新評語（點擊查看）</div>
             <div id="s-teacher-status-summary" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
-            <div class="stat-label">已逾期（點擊查看） <span class="stat-card-arrow" id="stat-arrow-overdue">▾</span></div>
+            <div class="stat-label">已逾期（點擊查看）</div>
             <div class="stat-value" style="color:var(--accent-red)" id="s-overdue-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-overdue"></div>
           </div>
@@ -555,7 +551,6 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
               <div class="write-progress-float-head">
                 <span id="write-progress-float-count" class="write-progress-float-count">0/4</span>
                 <span id="write-progress-float-label" class="write-progress-float-label">尚缺：基本資料、工作摘要、工作照片、心得</span>
-                <span id="write-progress-float-arrow" class="write-progress-float-arrow">▴</span>
               </div>
               <div id="write-progress-float-body" class="write-progress-float-body hidden"></div>
             </div>
@@ -1106,11 +1101,9 @@ function semMonthToLabel(semester, month) {
 
 function toggleStatDetail(key) {
   const detail = document.getElementById(`stat-detail-${key}`);
-  const arrow = document.getElementById(`stat-arrow-${key}`);
   if (!detail) return;
   const willShow = detail.classList.contains('hidden');
   detail.classList.toggle('hidden', !willShow);
-  if (arrow) arrow.textContent = willShow ? '▴' : '▾';
 }
 
 function renderSubmittedMonthsDetail(journals) {
@@ -1162,8 +1155,6 @@ async function loadStudentDashboard() {
     `${y}學年第${t}學期 ／ ${currentUser.name} 同學${currentUser.company ? '・' + currentUser.company : ''}`;
   ['submitted', 'teacher', 'overdue'].forEach(key => {
     document.getElementById(`stat-detail-${key}`)?.classList.add('hidden');
-    const arrow = document.getElementById(`stat-arrow-${key}`);
-    if (arrow) arrow.textContent = '▾';
   });
   try {
     const snap = await getMyJournalDocs();
@@ -2351,7 +2342,6 @@ function syncWriteProgressFloat(forceExpanded = false) {
   const countEl = document.getElementById('write-progress-float-count');
   const labelEl = document.getElementById('write-progress-float-label');
   const bodyEl = document.getElementById('write-progress-float-body');
-  const arrowEl = document.getElementById('write-progress-float-arrow');
   const showFloat = isWritePageActive() && !isWriteProgressBoxVisible();
   if (countEl) countEl.textContent = `${state.done}/${state.total}`;
   if (labelEl) {
@@ -2363,7 +2353,6 @@ function syncWriteProgressFloat(forceExpanded = false) {
     floatEl.classList.add('hidden');
     floatEl.classList.add('compact');
     floatEl.classList.remove('expanded');
-    if (arrowEl) arrowEl.textContent = '▴';
     clearTimeout(_writeProgressFloatTimer);
     _writeProgressFloatTimer = null;
     return;
@@ -2372,7 +2361,6 @@ function syncWriteProgressFloat(forceExpanded = false) {
   if (forceExpanded) _writeProgressFloatExpanded = true;
   floatEl.classList.toggle('expanded', _writeProgressFloatExpanded);
   floatEl.classList.toggle('compact', !_writeProgressFloatExpanded);
-  if (arrowEl) arrowEl.textContent = _writeProgressFloatExpanded ? '▾' : '▴';
 }
 
 function queueWriteProgressFloatCollapse() {
@@ -2409,9 +2397,19 @@ function handleWriteProgressFloatScroll() {
 }
 
 function toggleWriteProgressFloat() {
-  _writeProgressFloatExpanded = !_writeProgressFloatExpanded;
-  syncWriteProgressFloat(_writeProgressFloatExpanded);
-  if (_writeProgressFloatExpanded) queueWriteProgressFloatCollapse();
+  // 點擊浮動丸子 → 捲回靜態進度框並展開明細，浮動框本身縮回（進入視野後 scroll handler 自動隱藏）
+  const box = document.getElementById('write-progress-box');
+  if (box) {
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const details = document.getElementById('write-progress-details');
+    const btn = document.getElementById('write-progress-toggle');
+    if (details && details.classList.contains('hidden')) {
+      details.classList.remove('hidden');
+      if (btn) btn.textContent = '收合';
+    }
+  }
+  _writeProgressFloatExpanded = false;
+  syncWriteProgressFloat(false);
 }
 
 function bindWriteProgressFloat() {
