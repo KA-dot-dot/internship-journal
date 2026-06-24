@@ -3321,7 +3321,7 @@ async function loadSubmitStats() {
     <tbody>${tbody}</tbody>
   </table></div>`;
   document.getElementById('submit-stats-content').innerHTML = tableHtml;
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('繳交統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 function getStatsDateRange(prefix) {
@@ -3723,7 +3723,7 @@ async function exportAllStatsExcel() {
   toast('✅ 已下載 Excel（9 張工作表，含薪資摘要、異常提醒與各公司平均距離）', 'success');
   } catch(e) {
     console.error('匯出 Excel 失敗', e);
-    toast('匯出失敗：' + (e.message || '請確認網路或重試'), 'error');
+    toast('Excel 匯出失敗：' + (e.message || '請確認網路或重試') + '。可重新整理頁面後再試', 'error');
   } finally {
     hideLoading();
   }
@@ -3766,7 +3766,7 @@ async function loadLocationStats() {
   // 把 journals 存到全域供篩選用
   window.journals_cache = journals;
   renderFilteredCity(journals);
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('地點統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 function renderFilteredCity(journals) {
@@ -4120,7 +4120,7 @@ async function loadSalaryStats() {
   populateCompanyFilter(companies);
   window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap };
   renderSalaryStatsFromCache(window.salary_stats_cache);
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('薪資統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 // ---- 月記總覽 ----
@@ -4195,7 +4195,7 @@ async function loadTeacherJournals(forceRefresh) {
     renderJournalListUI(filtered);
     setCacheIndicator('fresh', Date.now(), filtered.length);
   } catch(e) {
-    toast('載入失敗：' + e.message, 'error');
+    toast('月記清單載入失敗：' + e.message + '，請確認網路後重新整理，或點上方「強制重新整理」', 'error');
     setCacheIndicator('', null);
   } finally {
     hideLoading();
@@ -4388,7 +4388,7 @@ async function exportSemesterPDF() {
     console.error('匯出全部月記失敗', e);
     const errMsg = e.message || '請確認網路或權限設定';
     if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + escapeHtml(errMsg) + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
-    toast('匯出失敗：' + errMsg, 'error');
+    toast('PDF 匯出失敗：' + errMsg + '，請確認網路後重試，或重新整理頁面', 'error');
   } finally {
     hideLoading();
   }
@@ -4421,7 +4421,7 @@ async function exportStudentPDF() {
     console.error('匯出單一學生月記失敗', e);
     const errMsg = e.message || '請確認網路或權限設定';
     if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + escapeHtml(errMsg) + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
-    toast('匯出失敗：' + errMsg, 'error');
+    toast('PDF 匯出失敗：' + errMsg + '，請確認網路後重試，或重新整理頁面', 'error');
   } finally {
     hideLoading();
   }
@@ -5053,7 +5053,7 @@ async function printJournalsPDF(journals, title, win) {
       win.document.write(`<html><head><meta charset="UTF-8"><title>PDF 產生失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">PDF 產生失敗</p><p style="font-size:14px;color:#555;">${escapeHtml(msg)}</p></body></html>`);
       win.document.close();
     }
-    toast('PDF 產生失敗：' + msg, 'error');
+    toast('PDF 產生失敗：' + msg + '，請確認網路後重試', 'error');
   }
 }
 
