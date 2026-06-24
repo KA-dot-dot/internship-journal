@@ -1281,7 +1281,7 @@ function renderStudentWorkTypeChart(journals) {
   const legendHtml = entries.map(([label, count], i) =>
     `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${COLORS[i%COLORS.length]}"></span><span style="font-size:11px;color:var(--text)">${escapeHtml(label)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`
   ).join('');
-  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:center">
     <div style="position:relative;flex-shrink:0">
       <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-pie-svg">${pathsSvg}</svg>
       <div id="s-pie-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
@@ -1373,7 +1373,7 @@ function renderStudentCityChart(journals) {
     const isLocal = city === TAICHUNG;
     return `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${colorMap[city]}"></span><span style="font-size:11px;color:${isLocal ? 'var(--accent)' : 'var(--accent-yellow)'};font-weight:${isLocal ? '600' : '400'}">${escapeHtml(city)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`;
   }).join('');
-  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:center">
     <div style="position:relative;flex-shrink:0">
       <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-city-svg">${pathsSvg}</svg>
       <div id="s-city-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
