@@ -230,6 +230,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .s-chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:16px; box-shadow:var(--shadow); }
 .s-chart-title { font-size:15px; font-weight:700; margin-bottom:14px; color:var(--text); }
 .s-chart-empty { text-align:center; padding:24px 0; color:var(--text2); font-size:13px; }
+@media (max-width: 600px) {
+  #s-city-chart > div, #s-work-type-chart > div { flex-direction:column !important; align-items:center !important; }
+  .s-pie-legend { flex:none !important; align-self:flex-start; }
+}
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -1286,9 +1290,8 @@ function renderStudentWorkTypeChart(journals) {
       <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-pie-svg">${pathsSvg}</svg>
       <div id="s-pie-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:110px;padding-top:2px">${legendHtml}</div>
+    <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
   </div>`;
-  const tipEl = container.querySelector('#s-pie-tip');
   container.querySelectorAll('.s-pie-slice').forEach(path => {
     path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
     path.addEventListener('mousemove', function(e) {
@@ -1378,7 +1381,7 @@ function renderStudentCityChart(journals) {
       <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-city-svg">${pathsSvg}</svg>
       <div id="s-city-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:110px;padding-top:2px">${legendHtml}</div>
+    <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
   </div>`;
   const tipEl = container.querySelector('#s-city-tip');
   container.querySelectorAll('.s-city-slice').forEach(path => {
