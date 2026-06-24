@@ -2091,7 +2091,7 @@ function initWriteDraftAutoSave() {
 function getWriteProgressState() {
   const entries = Array.from(document.querySelectorAll('#work-entries-container > div'));
   const hasBasic = !!(document.getElementById('write-semester')?.value && document.getElementById('write-month')?.value && document.getElementById('write-company')?.value.trim());
-  const hasWork = entries.some(div => {
+  const hasWork = entries.length > 0 && entries.every(div => {
     const id = div.id;
     const type = document.getElementById(`${id}-type`)?.value || '';
     const other = document.getElementById(`${id}-other-input`)?.value.trim() || '';
@@ -2109,7 +2109,7 @@ function getWriteProgressState() {
   const hasReflection = (document.getElementById('write-reflection')?.value.trim().length || 0) >= 20;
   const items = [
     { label: '基本資料', done: hasBasic, hint: '學期、月份與公司已確認' },
-    { label: '工作摘要', done: hasWork, hint: '至少一筆摘要需含類型、地址、距離與 10 字以上內容' },
+    { label: '工作摘要', done: hasWork, hint: '每一筆工作摘要都要完整填寫：工作類型（含「其他」需註明項目）、工作地址、距離與 10 字以上內容' },
     { label: '工作照片', done: hasPhotos, hint: '每筆摘要需上傳照片或勾選不便拍照' },
     { label: '心得', done: hasReflection, hint: '至少 20 字' }
   ];
