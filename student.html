@@ -142,10 +142,11 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   100% { opacity: 0; }
 }
 .photo-upload-success {
-  position: absolute; inset: 0; background: rgba(22,163,74,0.82);
+  position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 6px; font-size: 12px; font-weight: 700; color: #fff;
-  letter-spacing: 0.5px; pointer-events: none;
+  border-radius: 6px; font-size: 12px; font-weight: 700;
+  color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  pointer-events: none;
   animation: photoSuccessFadeOut 1.2s ease forwards;
 }
 #login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, rgba(79,142,247,0.08) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(124,58,237,0.08) 0%, transparent 60%), var(--bg); padding: 20px; }
