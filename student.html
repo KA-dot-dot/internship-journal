@@ -272,6 +272,52 @@ tr:last-child td { border-bottom: none; }
 .write-progress-item.done { color: var(--accent-green); }
 .write-progress-item.todo { color: var(--accent-yellow); }
 .write-draft-note { font-size: 11px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
+.write-progress-float {
+  position: fixed;
+  right: 14px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 220;
+  min-width: 0;
+  max-width: min(360px, calc(100vw - 28px));
+  background: rgba(26, 30, 38, 0.94);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, width 0.22s ease, max-width 0.22s ease;
+}
+.write-progress-float.hidden { opacity: 0; transform: translateY(10px) scale(0.96); pointer-events: none; }
+.write-progress-float-inner { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.write-progress-float-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.write-progress-float-count { font-size: 13px; font-weight: 800; white-space: nowrap; color: #fff; }
+.write-progress-float-label { font-size: 12px; color: rgba(255,255,255,0.84); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.write-progress-float-arrow { font-size: 12px; color: rgba(255,255,255,0.7); flex-shrink: 0; }
+.write-progress-float-body { display: grid; gap: 6px; }
+.write-progress-float.compact { border-radius: 999px; }
+.write-progress-float.compact .write-progress-float-inner { padding: 8px 12px; }
+.write-progress-float.compact .write-progress-float-label,
+.write-progress-float.compact .write-progress-float-arrow,
+.write-progress-float.compact .write-progress-float-body { display: none; }
+.write-progress-float.expanded .write-progress-float-body { display: grid; }
+@media (max-width: 768px) {
+  .write-progress-float {
+    right: 12px;
+    bottom: calc(92px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 24px);
+  }
+}
+body.light-mode .write-progress-float {
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  border-color: rgba(30, 41, 59, 0.12);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+}
+body.light-mode .write-progress-float-count,
+body.light-mode .write-progress-float-arrow { color: var(--text); }
+body.light-mode .write-progress-float-label { color: var(--text2); }
 
 @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
 .fade-in { animation: fadeIn 0.3s ease; }
@@ -479,6 +525,16 @@ tr:last-child td { border-bottom: none; }
             </div>
             <div id="write-progress-details" class="write-progress-details hidden"></div>
           </div>
+          <div id="write-progress-float" class="write-progress-float hidden compact" role="button" tabindex="0" onclick="toggleWriteProgressFloat()" aria-label="完成度提示">
+            <div class="write-progress-float-inner">
+              <div class="write-progress-float-head">
+                <span id="write-progress-float-count" class="write-progress-float-count">0/4</span>
+                <span id="write-progress-float-label" class="write-progress-float-label">尚缺：基本資料、工作摘要、工作照片、心得</span>
+                <span id="write-progress-float-arrow" class="write-progress-float-arrow">▴</span>
+              </div>
+              <div id="write-progress-float-body" class="write-progress-float-body hidden"></div>
+            </div>
+          </div>
           <div class="form-group">
             <label>本月實習公司</label>
             <input type="text" id="write-company" placeholder="公司名稱" readonly style="background:var(--bg);color:var(--text2)">
@@ -639,6 +695,11 @@ let _skipWriteInit = false;
 let _writeDraftHydrating = false;
 let _writeDraftSaveTimer = null;
 let _writeDraftAutoSaveBound = false;
+let _writeProgressFloatTimer = null;
+let _writeProgressFloatRaf = 0;
+let _writeProgressFloatBound = false;
+let _writeProgressFloatExpanded = false;
+let _writeProgressTyping = false;
 
 const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
 const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
@@ -972,6 +1033,7 @@ function enterApp() {
   document.getElementById('write-company').value = currentUser.company || '';
   initWriteMonths();
   initWriteDraftAutoSave();
+  bindWriteProgressFloat();
   updateWriteProgress();
   showPage('s-dashboard');
 }
@@ -2064,6 +2126,7 @@ function updateWriteProgress() {
   detailsEl.innerHTML = state.items.map(i =>
     `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${escapeHtml(i.hint)}</span></div>`
   ).join('') + '<div class="write-draft-note">文字內容會暫存在此裝置；新選照片不會存入本機草稿，也不會在正式儲存前上傳雲端。</div>';
+  syncWriteProgressFloat(false);
 }
 
 function toggleWriteProgressDetails() {
@@ -2072,6 +2135,122 @@ function toggleWriteProgressDetails() {
   if (!details) return;
   const hidden = details.classList.toggle('hidden');
   if (btn) btn.textContent = hidden ? '展開' : '收合';
+}
+
+function isWritePageActive() {
+  const page = document.getElementById('page-s-write');
+  return !!(page && !page.classList.contains('hidden'));
+}
+
+function isWriteProgressBoxVisible() {
+  const page = document.getElementById('page-s-write');
+  const box = document.getElementById('write-progress-box');
+  if (!page || page.classList.contains('hidden') || !box) return false;
+  if (_writeProgressTyping) return true;
+  const rect = box.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  return rect.bottom > 8 && rect.top < vh - 8;
+}
+
+function renderWriteProgressFloatBody(state) {
+  return state.items.map(i =>
+    `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${escapeHtml(i.hint)}</span></div>`
+  ).join('');
+}
+
+function syncWriteProgressFloat(forceExpanded = false) {
+  const floatEl = document.getElementById('write-progress-float');
+  if (!floatEl) return;
+  const state = getWriteProgressState();
+  const countEl = document.getElementById('write-progress-float-count');
+  const labelEl = document.getElementById('write-progress-float-label');
+  const bodyEl = document.getElementById('write-progress-float-body');
+  const arrowEl = document.getElementById('write-progress-float-arrow');
+  const showFloat = isWritePageActive() && !isWriteProgressBoxVisible();
+  if (countEl) countEl.textContent = `${state.done}/${state.total}`;
+  if (labelEl) {
+    const missing = state.items.filter(i => !i.done).map(i => i.label);
+    labelEl.textContent = missing.length ? `尚缺：${missing.join('、')}` : '可儲存';
+  }
+  if (bodyEl) bodyEl.innerHTML = renderWriteProgressFloatBody(state);
+  if (!showFloat) {
+    floatEl.classList.add('hidden');
+    floatEl.classList.add('compact');
+    floatEl.classList.remove('expanded');
+    if (arrowEl) arrowEl.textContent = '▴';
+    clearTimeout(_writeProgressFloatTimer);
+    _writeProgressFloatTimer = null;
+    return;
+  }
+  floatEl.classList.remove('hidden');
+  if (forceExpanded) _writeProgressFloatExpanded = true;
+  floatEl.classList.toggle('expanded', _writeProgressFloatExpanded);
+  floatEl.classList.toggle('compact', !_writeProgressFloatExpanded);
+  if (arrowEl) arrowEl.textContent = _writeProgressFloatExpanded ? '▾' : '▴';
+}
+
+function queueWriteProgressFloatCollapse() {
+  clearTimeout(_writeProgressFloatTimer);
+  _writeProgressFloatTimer = setTimeout(() => {
+    _writeProgressFloatExpanded = false;
+    syncWriteProgressFloat(false);
+  }, 5000);
+}
+
+function queueWriteProgressFloatSync(forceExpanded = false) {
+  if (forceExpanded) _writeProgressFloatExpanded = true;
+  clearTimeout(_writeProgressFloatTimer);
+  if (_writeProgressFloatRaf) return;
+  _writeProgressFloatRaf = requestAnimationFrame(() => {
+    _writeProgressFloatRaf = 0;
+    syncWriteProgressFloat(forceExpanded);
+    if (forceExpanded) queueWriteProgressFloatCollapse();
+  });
+}
+
+function handleWriteProgressFloatScroll() {
+  if (!isWritePageActive()) return;
+  if (_writeProgressTyping) {
+    clearTimeout(_writeProgressFloatTimer);
+    syncWriteProgressFloat(false);
+    return;
+  }
+  if (isWriteProgressBoxVisible()) {
+    syncWriteProgressFloat(false);
+    return;
+  }
+  queueWriteProgressFloatSync(true);
+}
+
+function toggleWriteProgressFloat() {
+  _writeProgressFloatExpanded = !_writeProgressFloatExpanded;
+  syncWriteProgressFloat(_writeProgressFloatExpanded);
+  if (_writeProgressFloatExpanded) queueWriteProgressFloatCollapse();
+}
+
+function bindWriteProgressFloat() {
+  if (_writeProgressFloatBound) return;
+  window.addEventListener('scroll', handleWriteProgressFloatScroll, { passive: true });
+  window.addEventListener('resize', handleWriteProgressFloatScroll);
+  const writePage = document.getElementById('page-s-write');
+  if (writePage) {
+    writePage.addEventListener('focusin', (e) => {
+      _writeProgressTyping = !!e.target?.closest('input, textarea, select, [contenteditable="true"]');
+      if (_writeProgressTyping) {
+        clearTimeout(_writeProgressFloatTimer);
+        syncWriteProgressFloat(false);
+      }
+    });
+    writePage.addEventListener('focusout', () => {
+      setTimeout(() => {
+        const active = document.activeElement;
+        _writeProgressTyping = !!(active && writePage.contains(active) && active.matches?.('input, textarea, select, [contenteditable="true"]'));
+        if (_writeProgressTyping) return;
+        handleWriteProgressFloatScroll();
+      }, 50);
+    });
+  }
+  _writeProgressFloatBound = true;
 }
 
 function handlePhotoUpload(event, id) {
