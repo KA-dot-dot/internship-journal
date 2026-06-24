@@ -1254,7 +1254,11 @@ function renderStudentSalaryLineChart(journals) {
     if (i % step !== 0 && i !== n-1) return;
     const x=xPos(i).toFixed(1), yBt=(MT+plotH).toFixed(1);
     sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`);
-    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--text2)">${escapeHtml(p.label)}</text>`);
+    // 第一個／最後一個刻度文字改用 start/end 對齊（而非置中），避免文字超出 viewBox 左右邊界。
+    // 寬螢幕時 SVG 因高度被限制住，左右會留白，置中文字超出 viewBox 範圍仍落在留白裡所以看得到；
+    // 窄螢幕（手機）時 SVG 改成寬度撐滿、無留白，超出 viewBox 範圍的文字會直接被裁掉不顯示。
+    const anchor = (i === n-1) ? 'end' : (i === 0 ? 'start' : 'middle');
+    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="${anchor}" font-size="10" fill="var(--text2)">${escapeHtml(p.label)}</text>`);
   });
   sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
   sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
