@@ -2035,8 +2035,12 @@ function syncEntryState(id) {
   }
   // 邊框顏色 class
   div.classList.toggle('entry-has-issues', !done);
-  // 自動收合邏輯：完成才收合；但若使用者剛手動展開過（有 entry-user-expanded），不強制收合
-  if (done && !div.classList.contains('entry-user-expanded')) {
+  // 自動收合邏輯：完成才收合；但下列情況不強制收合：
+  // 1. 使用者剛手動展開過（有 entry-user-expanded）
+  // 2. 游標目前在此 entry 的任何輸入欄位內（避免打到字數達標瞬間畫面收起）
+  const activeInEntry = div.contains(document.activeElement) &&
+    document.activeElement.matches('input, textarea, select');
+  if (done && !div.classList.contains('entry-user-expanded') && !activeInEntry) {
     div.classList.add('entry-done');
   } else if (!done) {
     div.classList.remove('entry-done');
