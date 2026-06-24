@@ -432,16 +432,16 @@ tr:last-child td { border-bottom: none; }
           </div>
         </div>
         <div class="s-chart-card">
-          <div class="s-chart-title">🥧 各工作類型累計次數</div>
-          <div id="s-work-type-chart"><div class="s-chart-empty">載入中...</div></div>
+          <div class="s-chart-title">📈 每月薪資趨勢</div>
+          <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
         </div>
         <div class="s-chart-card">
           <div class="s-chart-title">🗺️ 工作縣市分布</div>
           <div id="s-city-chart"><div class="s-chart-empty">載入中...</div></div>
         </div>
         <div class="s-chart-card" style="margin-bottom:0">
-          <div class="s-chart-title">📈 每月薪資趨勢</div>
-          <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
+          <div class="s-chart-title">🥧 各工作類型累計次數</div>
+          <div id="s-work-type-chart"><div class="s-chart-empty">載入中...</div></div>
         </div>
       </div>
 
@@ -1000,9 +1000,9 @@ async function loadStudentDashboard() {
     document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
       '<span class="badge badge-green">✅ 本月已繳</span>' :
       '<span class="badge badge-red">❌ 本月未繳</span>';
-    renderStudentWorkTypeChart(journals);
-    renderStudentCityChart(journals);
     renderStudentSalaryLineChart(journals);
+    renderStudentCityChart(journals);
+    renderStudentWorkTypeChart(journals);
   } catch (e) {
     console.error('載入首頁月記失敗', e);
     document.getElementById('s-submitted-count').textContent = '-';
@@ -1254,7 +1254,7 @@ function renderStudentSalaryLineChart(journals) {
     if (i % step !== 0 && i !== n-1) return;
     const x=xPos(i).toFixed(1), yBt=(MT+plotH).toFixed(1);
     sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`);
-    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--text2)">${escapeHtml(p.label.slice(2))}</text>`);
+    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--text2)">${escapeHtml(p.label)}</text>`);
   });
   sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
   sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);

@@ -5247,7 +5247,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     months.forEach((m, i) => {
       const x = xPos(i).toFixed(1), yBt = (MT + plotH).toFixed(1);
       sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="#2a3047" stroke-width="1"/>`);
-      sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m.slice(2)}</text>`);
+      sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m}</text>`);
     });
     sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
     sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
