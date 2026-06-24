@@ -313,6 +313,24 @@ tr:last-child td { border-bottom: none; }
 .write-progress-subitem:hover { text-decoration: underline; }
 .entry-item.entry-issue-flash { outline: 2px solid var(--accent-red); outline-offset: 2px; transition: outline-color 0.3s; }
 .write-draft-note { font-size: 11px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
+.write-draft-banner { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; margin-bottom:14px; border:1px solid rgba(79,142,247,0.28); border-radius:var(--radius-sm); background:rgba(79,142,247,0.08); }
+.write-draft-banner.hidden { display:none; }
+.write-draft-banner-text { min-width:0; }
+.write-draft-banner-title { font-size:14px; font-weight:700; color:var(--text); line-height:1.4; }
+.write-draft-banner-sub { font-size:12px; color:var(--text2); line-height:1.4; margin-top:3px; }
+.write-draft-banner-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.entry-item { transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease; }
+.entry-item.entry-collapsed .entry-body { display:none; }
+.entry-item.entry-collapsed { background:var(--bg2); border-color:var(--border); box-shadow:none; }
+.entry-item.entry-complete { border-left-color: var(--accent-green); }
+.entry-item.entry-complete .entry-status { color: var(--accent-green); }
+.entry-item.entry-incomplete .entry-status { color: var(--accent-yellow); }
+.entry-status { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; line-height:1.5; margin:6px 0 10px; color:var(--text2); }
+.entry-status strong { color:inherit; }
+.entry-status-summary { min-width:0; }
+.entry-status-toggle { border:none; background:transparent; color:var(--text2); font-size:12px; cursor:pointer; flex-shrink:0; padding:0; }
+.entry-status-toggle.hidden { display:none; }
+.entry-status-toggle:hover { color:var(--text); text-decoration:underline; }
 .write-progress-float {
   position: fixed;
   right: 14px;
@@ -574,6 +592,16 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             </div>
           </div>
           <div id="write-deadline-status" style="font-size:13px;margin-bottom:14px"></div>
+          <div id="write-draft-banner" class="write-draft-banner hidden">
+            <div class="write-draft-banner-text">
+              <div class="write-draft-banner-title">偵測到上次未送出的草稿</div>
+              <div id="write-draft-banner-sub" class="write-draft-banner-sub">這台裝置有上次未送出的內容，可直接接續。</div>
+            </div>
+            <div class="write-draft-banner-actions">
+              <button type="button" class="btn btn-primary btn-sm" onclick="applyWriteDraftIfAvailable()">接續草稿</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="discardCurrentWriteDraft()">放棄草稿</button>
+            </div>
+          </div>
           <div id="write-progress-box" class="write-progress-box">
             <div class="write-progress-summary" onclick="toggleWriteProgressDetails()">
               <div id="write-progress-summary" class="write-progress-main">完成度 0/4　尚缺：基本資料、工作摘要、工作照片、心得</div>
@@ -1735,7 +1763,7 @@ async function checkMonthDeadline(skipFill = false) {
     container.innerHTML = ''; entryCount = 0;
     addWorkEntry();
   }
-  applyWriteDraftIfAvailable();
+  refreshWriteDraftBanner();
 }
 
 // ---- 工作摘要日期輔助 ----
@@ -1901,6 +1929,34 @@ function addWorkEntry() {
     </div>
   `;
   document.getElementById('work-entries-container').appendChild(div);
+
+  const body = document.createElement('div');
+  body.className = 'entry-body';
+  body.id = id + '-body';
+  while (div.firstChild) body.appendChild(div.firstChild);
+
+  const header = document.createElement('div');
+  header.className = 'entry-header';
+  header.style.display = 'flex';
+  header.style.alignItems = 'flex-start';
+  header.style.justifyContent = 'space-between';
+  header.style.gap = '10px';
+  header.style.marginBottom = '8px';
+  header.innerHTML = [
+    '<div style="min-width:0">',
+    '  <strong style="font-size:13px">???? #' + entryCount + '</strong>',
+    '  <div class="entry-status">',
+    '    <span class="entry-status-summary">???????????</span>',
+    '    <button type="button" class="entry-status-toggle hidden" onclick="toggleWorkEntryCollapse('${id}')">??</button>',
+    '  </div>',
+    '</div>',
+    '<button type="button" class="btn btn-danger btn-sm" onclick="removeEntry('${id}')">??</button>'
+  ].join('');
+
+  div.appendChild(header);
+  div.appendChild(body);
+  const photoArea = document.getElementById(id + '-photo-area');
+  if (photoArea) photoArea.tabIndex = -1;
 
   // 自動引導日期到所選月份
   const sel = getSelectedCEYearMonth();
@@ -2195,8 +2251,9 @@ function saveWriteDraftNow() {
     if (writeDraftHasContent(draft)) localStorage.setItem(key, JSON.stringify(draft));
     else localStorage.removeItem(key);
   } catch (e) {
-    console.warn('本機草稿儲存失敗', e);
+    console.warn('??????', e);
   }
+  refreshWriteDraftBanner();
 }
 
 function scheduleWriteDraftSave() {
@@ -2209,6 +2266,48 @@ function clearCurrentWriteDraft() {
   const key = getWriteDraftKey();
   if (!key) return;
   try { localStorage.removeItem(key); } catch(e) {}
+  refreshWriteDraftBanner();
+}
+
+function discardCurrentWriteDraft() {
+  clearCurrentWriteDraft();
+  hideWriteDraftBanner();
+  toast('?????', 'info');
+}
+
+function hideWriteDraftBanner() {
+  document.getElementById('write-draft-banner')?.classList.add('hidden');
+}
+
+function showWriteDraftBanner(draft) {
+  const banner = document.getElementById('write-draft-banner');
+  if (!banner) return;
+  const sub = document.getElementById('write-draft-banner-sub');
+  if (sub) {
+    const savedAt = draft?.savedAt ? new Date(draft.savedAt) : null;
+    const timeText = savedAt && !isNaN(savedAt.getTime())
+      ? savedAt.toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '';
+    sub.textContent = timeText
+      ? '????????????????? ' + timeText + '?'
+      : '?????????????????????';
+  }
+  banner.classList.remove('hidden');
+}
+
+function refreshWriteDraftBanner() {
+  const key = getWriteDraftKey();
+  if (!key) {
+    hideWriteDraftBanner();
+    return;
+  }
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e) {}
+  if (!writeDraftHasContent(draft)) {
+    hideWriteDraftBanner();
+    return;
+  }
+  showWriteDraftBanner(draft);
 }
 
 function renderDraftPhoto(url, photoGrid) {
@@ -2223,10 +2322,10 @@ function renderDraftPhoto(url, photoGrid) {
 
 function applyWriteDraftIfAvailable() {
   const key = getWriteDraftKey();
-  if (!key) { updateWriteProgress(); return; }
+  if (!key) { hideWriteDraftBanner(); updateWriteProgress(); return; }
   let draft = null;
   try { draft = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e) {}
-  if (!writeDraftHasContent(draft)) { updateWriteProgress(); return; }
+  if (!writeDraftHasContent(draft)) { hideWriteDraftBanner(); updateWriteProgress(); return; }
   _writeDraftHydrating = true;
   try {
     document.getElementById('write-salary').value = draft.salary || '';
@@ -2236,32 +2335,33 @@ function applyWriteDraftIfAvailable() {
     container.innerHTML = ''; entryCount = 0;
     (draft.entries || []).forEach(e => {
       addWorkEntry();
-      const id = `entry-${entryCount}`;
-      document.getElementById(`${id}-date`).value = e.date || '';
-      const typeEl = document.getElementById(`${id}-type`);
+      const id = 'entry-' + entryCount;
+      document.getElementById(id + '-date').value = e.date || '';
+      const typeEl = document.getElementById(id + '-type');
       if (typeEl) typeEl.value = e.type || '';
-      if (e.type === '其他') {
-        const otherInputEl = document.getElementById(`${id}-other-input`);
+      if (e.type === '???') {
+        const otherInputEl = document.getElementById(id + '-other-input');
         if (otherInputEl) otherInputEl.value = e.other || '';
       }
       showWorkTypeExample(id);
-      document.getElementById(`${id}-address`).value = e.address || '';
-      document.getElementById(`${id}-content`).value = e.content || '';
-      const distEl = document.getElementById(`${id}-dist-manual`);
+      document.getElementById(id + '-address').value = e.address || '';
+      document.getElementById(id + '-content').value = e.content || '';
+      const distEl = document.getElementById(id + '-dist-manual');
       if (distEl) distEl.value = e.distance || '';
       if (e.noPhoto) {
-        document.getElementById(`${id}-nophoto`).checked = true;
+        document.getElementById(id + '-nophoto').checked = true;
         toggleNoPhoto(id);
       }
-      const photoGrid = document.getElementById(`${id}-photos`);
+      const photoGrid = document.getElementById(id + '-photos');
       (e.photos || []).forEach(url => renderDraftPhoto(url, photoGrid));
     });
     if (!(draft.entries || []).length) addWorkEntry();
     const timeText = draft.savedAt ? new Date(draft.savedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '';
-    toast(`已恢復此裝置的本機草稿${timeText ? '（' + timeText + '）' : ''}`, 'info');
+    toast('?????' + (timeText ? '?' + timeText + '?' : ''), 'info');
   } finally {
     _writeDraftHydrating = false;
     updateWriteProgress();
+    hideWriteDraftBanner();
   }
 }
 
@@ -2271,7 +2371,11 @@ function initWriteDraftAutoSave() {
   if (!page) return;
   const handler = (e) => {
     updateWriteProgress();
-    if (['write-semester', 'write-month', 'salary-photo-file'].includes(e.target?.id)) return;
+    if (['write-semester', 'write-month'].includes(e.target?.id)) {
+      refreshWriteDraftBanner();
+      return;
+    }
+    if (['salary-photo-file'].includes(e.target?.id)) return;
     if (e.target?.type === 'file') return;
     scheduleWriteDraftSave();
   };
@@ -2281,96 +2385,150 @@ function initWriteDraftAutoSave() {
   _writeDraftAutoSaveBound = true;
 }
 
-// 工作摘要的 4 個檢查項目，順序固定供逐筆/逐欄位判斷與顯示共用
+// ----
 const WORK_FIELD_CHECKS = [
-  { key: 'type', label: '類型', test: e => !!e.type && (e.type !== '其他' || !!e.other) },
-  { key: 'address', label: '地址', test: e => !!e.address },
-  { key: 'distance', label: '距離', test: e => !!e.distance },
-  { key: 'content', label: '內容10字+', test: e => e.content.length >= 10 }
+  { key: 'type', label: '??', test: e => !!e.type && (e.type !== '???' || !!e.other) },
+  { key: 'address', label: '??', test: e => !!e.address },
+  { key: 'distance', label: '??', test: e => !!e.distance },
+  { key: 'content', label: '??10?+', test: e => e.content.length >= 10 }
 ];
+
+function getWorkEntryIssueTargetId(entryId, fieldKey) {
+  const map = {
+    type: entryId + '-type',
+    other: entryId + '-other-input',
+    address: entryId + '-address',
+    distance: entryId + '-dist-manual',
+    content: entryId + '-content',
+    photos: entryId + '-photo-area'
+  };
+  return map[fieldKey] || '';
+}
+
+function focusWriteIssue(issue) {
+  if (!issue) return;
+  const entryId = issue.entryId || issue.id || '';
+  const fieldKey = issue.fieldKey || '';
+  const entry = entryId ? document.getElementById(entryId) : null;
+  const targetId = issue.targetId || getWorkEntryIssueTargetId(entryId, fieldKey);
+  if (entry && entry.classList.contains('entry-collapsed')) {
+    entry.dataset.entryExpanded = '1';
+    syncWorkEntryCardStates();
+  }
+  setTimeout(() => {
+    const target = targetId ? document.getElementById(targetId) : entry;
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (typeof target.focus === 'function') {
+      try { target.focus({ preventScroll: true }); } catch(e) { target.focus(); }
+    }
+    target.classList.add('entry-issue-flash');
+    setTimeout(() => target.classList.remove('entry-issue-flash'), 1500);
+  }, 80);
+}
 
 function getWriteProgressState() {
   const entries = Array.from(document.querySelectorAll('#work-entries-container > div'));
   const hasBasic = !!(document.getElementById('write-semester')?.value && document.getElementById('write-month')?.value && document.getElementById('write-company')?.value.trim());
-
-  // 逐筆檢查工作摘要：fieldStatus 紀錄「所有筆是否都通過該欄位」（供精簡提示的紅/綠字使用）；
-  // entryIssues 紀錄「哪一則缺什麼」（供動態提示定位到具體那一則使用）
   const fieldStatus = { type: true, address: true, distance: true, content: true };
   const entryIssues = [];
   entries.forEach(div => {
     const id = div.id;
     const e = {
-      type: document.getElementById(`${id}-type`)?.value || '',
-      other: document.getElementById(`${id}-other-input`)?.value.trim() || '',
-      content: document.getElementById(`${id}-content`)?.value.trim() || '',
-      address: document.getElementById(`${id}-address`)?.value.trim() || '',
-      distance: document.getElementById(`${id}-dist-manual`)?.value.trim() || ''
+      type: document.getElementById(id + '-type')?.value || '',
+      other: document.getElementById(id + '-other-input')?.value.trim() || '',
+      content: document.getElementById(id + '-content')?.value.trim() || '',
+      address: document.getElementById(id + '-address')?.value.trim() || '',
+      distance: document.getElementById(id + '-dist-manual')?.value.trim() || ''
     };
     const missing = WORK_FIELD_CHECKS.filter(fc => !fc.test(e));
     missing.forEach(fc => { fieldStatus[fc.key] = false; });
     if (missing.length) {
-      // 直接讀畫面上顯示的「工作摘要 #N」標題文字，確保跟學生實際看到的標題一致（即使中途刪除過某則造成編號跳號）
-      const entryLabel = div.querySelector('strong')?.textContent?.trim() || '工作摘要';
-      entryIssues.push({ id, label: entryLabel, missing: missing.map(fc => fc.label) });
+      const entryLabel = div.querySelector('strong')?.textContent?.trim() || '????';
+      entryIssues.push({ id, label: entryLabel, missing: missing.map(fc => fc.label), missingKeys: missing.map(fc => fc.key) });
     }
   });
   const hasWork = entries.length > 0 && entryIssues.length === 0;
-
   const hasPhotos = entries.length > 0 && entries.every(div => {
     const id = div.id;
-    const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
-    const photoCount = document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`).length;
+    const noPhoto = !!document.getElementById(id + '-nophoto')?.checked;
+    const photoCount = document.querySelectorAll('#' + id + '-photos .photo-thumb-wrap').length;
     return noPhoto || photoCount > 0;
   });
   const hasReflection = (document.getElementById('write-reflection')?.value.trim().length || 0) >= 20;
   const items = [
-    { label: '基本資料', done: hasBasic, hint: '學期、月份已確認' },
-    {
-      label: '工作摘要', done: hasWork, hint: '類型／地址／距離／內容10字+',
-      // 沒有任何一則工作摘要時，fieldStatus 沒有意義（沒東西可檢查），不要顯示成全部綠字
-      fieldStatus: entries.length ? fieldStatus : null,
-      entryIssues
-    },
-    { label: '工作照片', done: hasPhotos, hint: '需上傳照片或勾選不便拍照' },
-    { label: '心得', done: hasReflection, hint: '20字+' }
+    { label: '????', done: hasBasic, hint: '???????????' },
+    { label: '????', done: hasWork, hint: '???????????10?+', fieldStatus: entries.length ? fieldStatus : null, entryIssues },
+    { label: '????', done: hasPhotos, hint: '???????????????' },
+    { label: '??', done: hasReflection, hint: '20???' }
   ];
   return { items, done: items.filter(i => i.done).length, total: items.length };
 }
 
-
-// 工作摘要的提示行：fieldStatus 存在時，逐個欄位染色（缺哪個就紅字）；否則維持原始固定文字
 function renderWorkSummaryHintHtml(item) {
   if (!item.fieldStatus) return escapeHtml(item.hint);
   return WORK_FIELD_CHECKS.map(fc => {
     const ok = item.fieldStatus[fc.key];
-    return `<span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'}">${escapeHtml(fc.label)}</span>`;
-  }).join('<span style="color:var(--text2)">／</span>');
+    return '<span style="color:' + (ok ? 'var(--accent-green)' : 'var(--accent-red)') + '">' + escapeHtml(fc.label) + '</span>';
+  }).join('<span style="color:var(--text2)">?</span>');
 }
 
-// 單行版本（標籤＋提示），給浮動視窗用，不含逐則明細，避免跟完成度提示框重複顯示同樣資訊
 function renderProgressItemLine(i) {
   const hintHtml = i.entryIssues ? renderWorkSummaryHintHtml(i) : escapeHtml(i.hint);
-  return `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${hintHtml}</span></div>`;
+  return '<div class="write-progress-item ' + (i.done ? 'done' : 'todo') + '"><span>' + (i.done ? '?' : '!') + '</span><span>' + escapeHtml(i.label) + '?' + hintHtml + '</span></div>';
 }
 
-// 完整版本：在單行版本下方補上「哪一則缺什麼」，可點擊捲動到該則。只用在完成度提示框（write-progress-details），
-// 浮動視窗（write-progress-float）刻意不重複顯示這段，兩處只在其中一處看到逐則明細，避免資訊過多
 function renderProgressItemFull(i) {
   let html = renderProgressItemLine(i);
   if (i.entryIssues && i.entryIssues.length) {
-    html += i.entryIssues.map(ei =>
-      `<div class="write-progress-subitem" onclick="scrollToEntryIssue('${ei.id}')">↳ ${escapeHtml(ei.label)} 缺：${escapeHtml(ei.missing.join('、'))}</div>`
-    ).join('');
+    html += i.entryIssues.map(ei => '<div class="write-progress-subitem" onclick="scrollToEntryIssue(\'' + ei.id + '\')">' + escapeHtml(ei.label) + '??' + escapeHtml(ei.missing.join('?')) + '</div>').join('');
   }
   return html;
 }
 
+function syncWorkEntryCardStates(state = null) {
+  const currentState = state || getWriteProgressState();
+  const workItem = currentState.items.find(item => Array.isArray(item.entryIssues));
+  const issueMap = new Map((workItem?.entryIssues || []).map(issue => [issue.id, issue]));
+  Array.from(document.querySelectorAll('#work-entries-container > .entry-item')).forEach(div => {
+    const issue = issueMap.get(div.id);
+    const missing = issue?.missing || [];
+    const complete = missing.length === 0;
+    if (!complete) delete div.dataset.entryExpanded;
+    const expanded = complete ? div.dataset.entryExpanded === '1' : true;
+    div.classList.toggle('entry-complete', complete);
+    div.classList.toggle('entry-incomplete', !complete);
+    div.classList.toggle('entry-collapsed', complete && !expanded);
+    const summary = div.querySelector('.entry-status-summary');
+    if (summary) summary.textContent = complete ? '???????' : '???' + missing.join('?');
+    const toggleBtn = div.querySelector('.entry-status-toggle');
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('hidden', !complete);
+      toggleBtn.textContent = expanded ? '??' : '??';
+      toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  });
+}
+
+function toggleWorkEntryCollapse(id) {
+  const entry = document.getElementById(id);
+  if (!entry || entry.classList.contains('entry-incomplete')) return;
+  if (entry.dataset.entryExpanded === '1') delete entry.dataset.entryExpanded;
+  else entry.dataset.entryExpanded = '1';
+  syncWorkEntryCardStates();
+}
+
 function scrollToEntryIssue(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  el.classList.add('entry-issue-flash');
-  setTimeout(() => el.classList.remove('entry-issue-flash'), 1500);
+  const state = getWriteProgressState();
+  const workItem = state.items.find(item => Array.isArray(item.entryIssues));
+  const issue = (workItem?.entryIssues || []).find(item => item.id === id);
+  if (!issue) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const targetKey = issue.missingKeys?.[0] || '';
+  focusWriteIssue({ entryId: id, fieldKey: targetKey, targetId: getWorkEntryIssueTargetId(id, targetKey) });
 }
 
 function updateWriteProgress() {
@@ -2379,8 +2537,9 @@ function updateWriteProgress() {
   if (!summaryEl || !detailsEl) return;
   const state = getWriteProgressState();
   const missing = state.items.filter(i => !i.done).map(i => i.label);
-  summaryEl.innerHTML = `完成度 <strong>${state.done}/${state.total}</strong>${missing.length ? '　尚缺：' + escapeHtml(missing.join('、')) : '　可儲存'}`;
-  detailsEl.innerHTML = state.items.map(renderProgressItemFull).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
+  summaryEl.innerHTML = '??? <strong>' + state.done + '/' + state.total + '</strong>' + (missing.length ? '????' + escapeHtml(missing.join('?')) : '????');
+  detailsEl.innerHTML = state.items.map(renderProgressItemFull).join('') + '<div class="write-draft-note">????????????????????</div>';
+  syncWorkEntryCardStates(state);
   syncWriteProgressFloat(false);
 }
 
@@ -2389,7 +2548,7 @@ function toggleWriteProgressDetails() {
   const btn = document.getElementById('write-progress-toggle');
   if (!details) return;
   const hidden = details.classList.toggle('hidden');
-  if (btn) btn.textContent = hidden ? '展開' : '收合';
+  if (btn) btn.textContent = hidden ? '??' : '??';
 }
 
 function isWritePageActive() {
@@ -2419,10 +2578,10 @@ function syncWriteProgressFloat(forceExpanded = false) {
   const labelEl = document.getElementById('write-progress-float-label');
   const bodyEl = document.getElementById('write-progress-float-body');
   const showFloat = isWritePageActive() && !isWriteProgressBoxVisible();
-  if (countEl) countEl.textContent = `${state.done}/${state.total}`;
+  if (countEl) countEl.textContent = state.done + '/' + state.total;
   if (labelEl) {
     const missing = state.items.filter(i => !i.done).map(i => i.label);
-    labelEl.textContent = missing.length ? `尚缺：${missing.join('、')}` : '可儲存';
+    labelEl.textContent = missing.length ? '???' + missing.join('?') : '???';
   }
   if (bodyEl) bodyEl.innerHTML = renderWriteProgressFloatBody(state);
   if (!showFloat) {
@@ -2473,7 +2632,6 @@ function handleWriteProgressFloatScroll() {
 }
 
 function toggleWriteProgressFloat() {
-  // 點擊浮動丸子 → 捲回靜態進度框並展開明細，浮動框本身縮回（進入視野後 scroll handler 自動隱藏）
   const box = document.getElementById('write-progress-box');
   if (box) {
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2481,7 +2639,7 @@ function toggleWriteProgressFloat() {
     const btn = document.getElementById('write-progress-toggle');
     if (details && details.classList.contains('hidden')) {
       details.classList.remove('hidden');
-      if (btn) btn.textContent = '收合';
+      if (btn) btn.textContent = '??';
     }
   }
   _writeProgressFloatExpanded = false;
@@ -2513,484 +2671,149 @@ function bindWriteProgressFloat() {
   _writeProgressFloatBound = true;
 }
 
-function handlePhotoUpload(event, id) {
-  const files = Array.from(event.target.files);
-  const container = document.getElementById(`${id}-photos`);
-  files.forEach(file => {
-    // 壓縮中佔位符：在 FileReader 讀取 + canvas 壓縮期間顯示 spinner
-    const placeholder = document.createElement('div');
-    placeholder.className = 'photo-compress-placeholder';
-    placeholder.innerHTML = '<div class="photo-compress-spinner"></div><div class="photo-compress-label">處理中...</div>';
-    container.appendChild(placeholder);
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const img = new Image();
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        const maxW = 800, maxH = 600;
-        let w = img.width, h = img.height;
-        if (w > maxW) { h = h * maxW / w; w = maxW; }
-        if (h > maxH) { w = w * maxH / h; h = maxH; }
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        const previewSrc = canvas.toDataURL('image/jpeg', 0.75);
-        const wrap = document.createElement('div');
-        wrap.className = 'photo-thumb-wrap';
-        wrap.innerHTML = `<img src="${previewSrc}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button><div class="photo-pending-upload" style="position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,0.58);color:#fff;border-radius:6px;padding:2px 5px;font-size:10px">儲存時上傳</div>`;
-        wrap.style.position = 'relative';
-        // 移除佔位符，插入縮圖
-        placeholder.replaceWith(wrap);
-        const imgEl = wrap.querySelector('img');
-        imgEl.dataset.pendingUpload = '1';
-        imgEl.dataset.localDataUrl = previewSrc;
-        imgEl.dataset.base64 = '';
-        updateWriteProgress();
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-  event.target.value = '';
-}
-
-function handleSalaryPhoto(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const img = new Image();
-    img.onload = async () => {
-      const canvas = document.createElement('canvas');
-      const maxW = 800, maxH = 600;
-      let w = img.width, h = img.height;
-      if (w > maxW) { h = h * maxW / w; w = maxW; }
-      if (h > maxH) { w = w * maxH / h; h = maxH; }
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      // 薪資單直接存 base64，不上傳外部服務，由 Firestore Rules 保護隱私
-      const base64 = canvas.toDataURL('image/jpeg', 0.75);
-      // ★ 硬性阻擋：Firestore 文件上限 1MB（1,048,576 bytes）
-      // base64 字串全為 ASCII，存入 Firestore 時 1 char = 1 byte
-      // 700,000 chars ≈ 700KB（base64 欄位本身） + ~100KB（其他欄位）= ~800KB，安全低於 1MB
-      // 注意：× 0.75 是解碼後的圖片大小，不是 Firestore 文件大小，兩者不同
-      if (base64.length > 700000) {
-        toast('薪資單照片太大（壓縮後仍超過限制），請重拍或選解析度較低的圖片', 'error');
-        event.target.value = '';
-        return;
-      }
-      const preview = document.getElementById('salary-photo-preview');
-      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${base64}" data-base64="${base64}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><span style="display:block;font-size:10px;color:var(--accent-green);margin-top:4px">🔒 僅老師可查看</span></div>`;
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
+// ----
 async function saveJournal() {
-  const sem = document.getElementById('write-semester').value;
-  const month = parseInt(document.getElementById('write-month').value);
-  const { doc, getDoc, setDoc } = firebase_funcs;
-  try {
-    const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
-    if (deadlineSnap.exists()) {
-      const deadline = deadlineSnap.data();
-      const now = new Date();
-      const open = new Date(deadline.openDate + 'T00:00:00+08:00');
-      if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
-    }
-  } catch(e) {
-    // 截止日查詢失敗不擋儲存，僅 console 記錄
-    console.warn('截止日期查詢失敗，略過檢查', e);
-  }
-  const reflection = document.getElementById('write-reflection').value.trim();
-  if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
-  const salary = parseInt(document.getElementById('write-salary').value) || null;
-  if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
-  // 薪資未填軟性提示（不強制，可繼續儲存）
-  if (salary === null) {
-    const goAhead = window.confirm('⚠️ 本月薪資尚未填寫。\n\n若這個月尚未發薪，可以先儲存其他內容，發薪後再編輯补填。\n\n確定要不填薪資直接儲存嗎？');
-    if (!goAhead) return;
-  }
-  const mentor = document.getElementById('write-mentor').value.trim();
-  const salaryPhotoEl = document.getElementById('salary-photo-preview').querySelector('img');
+  if (!currentUser) return toast('????', 'error');
+  const sem = document.getElementById('write-semester')?.value || '';
+  const month = parseInt(document.getElementById('write-month')?.value || '0', 10);
+  if (!sem || !month) return toast('?????????', 'error');
+
+  const saveBtn = document.getElementById('save-journal-btn');
+  const salary = document.getElementById('write-salary')?.value?.trim() || '';
+  const mentor = document.getElementById('write-mentor')?.value?.trim() || '';
+  const reflection = document.getElementById('write-reflection')?.value?.trim() || '';
+  const salaryPhotoEl = document.getElementById('salary-photo-preview')?.querySelector('img');
   const salaryPhoto = salaryPhotoEl ? salaryPhotoEl.dataset.base64 : '';
   const entries = [];
+  let firstMissingIssue = null;
   let distanceError = false;
   let addressError = '';
   let photoError = '';
   let contentError = '';
   let typeError = '';
   let entryIndex = 0;
+
   document.querySelectorAll('#work-entries-container > div').forEach(div => {
     entryIndex += 1;
     const id = div.id;
-    const noPhoto = document.getElementById(`${id}-nophoto`)?.checked;
-    const photoWraps = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`));
-    const photoImgs = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos img`));
-    // 照片仍在上傳中時，img.dataset.base64 尚未寫入（見 handlePhotoUpload），此時不可讓使用者儲存，
-    // 否則會把 undefined 存進 entries.photos，Firestore setDoc() 會直接擲出例外導致整份月記存檔失敗
+    const photoImgs = Array.from(document.querySelectorAll('#' + id + '-photos img'));
+    const photoWraps = Array.from(document.querySelectorAll('#' + id + '-photos .photo-thumb-wrap'));
+    const noPhoto = !!document.getElementById(id + '-nophoto')?.checked;
     const uploadingCount = photoWraps.filter(w => w.querySelector('.photo-uploading')).length;
     const photos = noPhoto ? [] : photoImgs.map(img => img?.dataset.base64).filter(Boolean);
-    if (!noPhoto && uploadingCount > 0 && !photoError) {
-      photoError = `第 ${entryIndex} 筆工作摘要有照片尚在上傳中，請稍候片刻再按儲存`;
-    }
-    // 工作照片驗證：未勾「不便拍照」且沒有上傳照片 → 阻止儲存
-    if (!noPhoto && photoImgs.length === 0 && uploadingCount === 0 && !photoError) {
-      photoError = `第 ${entryIndex} 筆工作摘要尚未上傳工作照片，請上傳照片或勾選「📵 不便拍照」`;
-    }
-    const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
-    const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
+    const address = document.getElementById(id + '-address')?.value?.trim() || '';
+    const manualDistVal = document.getElementById(id + '-dist-manual')?.value?.trim();
     const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
-    const content = document.getElementById(`${id}-content`)?.value?.trim() || '';
-    // 工作內容描述至少 10 字
-    if (content.length < 10 && !contentError) {
-      contentError = `第 ${entryIndex} 筆工作摘要的「工作內容描述」至少需要 10 個字（目前 ${content.length} 字）`;
-    }
-    // 地址必填
-    if (!address && !addressError) {
-      addressError = `第 ${entryIndex} 筆工作摘要尚未填寫工作地點地址`;
-    }
-    // 地址格式驗證（原有功能保留）
-    const msg = address ? validateCompleteTaiwanAddress(address) : '';
-    if (msg && !addressError) addressError = `第 ${entryIndex} 筆工作地址：${msg}`;
-    // 距離必填（地址填了才能算距離，兩者都要有）
-    if (address && (distance === null || isNaN(distance)) && !distanceError) distanceError = true;
-    const typeEl = document.getElementById(`${id}-type`);
+    const content = document.getElementById(id + '-content')?.value?.trim() || '';
+    const typeEl = document.getElementById(id + '-type');
     let workType = typeEl ? typeEl.value : '';
-    // 工作類型必選
+    const otherInputVal = document.getElementById(id + '-other-input')?.value?.trim() || '';
+
+    if (!noPhoto && uploadingCount > 0 && !photoError) {
+      photoError = '? ' + entryIndex + ' ???????????????????????';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-photo-area' };
+    }
+    if (!noPhoto && photos.length === 0 && uploadingCount === 0 && !photoError) {
+      photoError = '? ' + entryIndex + ' ????????????????????????????';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-photo-area' };
+    }
+    if (content.length < 10 && !contentError) {
+      contentError = '? ' + entryIndex + ' ?????????????????? 10 ????? ' + content.length + ' ??';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-content' };
+    }
+    if (!address && !addressError) {
+      addressError = '? ' + entryIndex + ' ???????????????';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-address' };
+    }
+    const msg = address ? validateCompleteTaiwanAddress(address) : '';
+    if (msg && !addressError) {
+      addressError = '? ' + entryIndex + ' ??????' + msg;
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-address' };
+    }
+    if (address && (distance === null || isNaN(distance)) && !distanceError) {
+      distanceError = true;
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-dist-manual' };
+    }
     if (!workType && !typeError) {
-      typeError = `第 ${entryIndex} 筆工作摘要尚未選擇工作類型`;
+      typeError = '? ' + entryIndex + ' ?????????????';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-type' };
     }
-    const otherInputVal = document.getElementById(`${id}-other-input`)?.value?.trim() || '';
-    // 選「其他」時，補充說明欄位必填
-    if (workType === '其他' && !otherInputVal && !typeError) {
-      typeError = `第 ${entryIndex} 筆工作摘要選擇「其他」類型時，請填寫補充說明`;
+    if (workType === '???' && !otherInputVal && !typeError) {
+      typeError = '? ' + entryIndex + ' ??????????????????????';
+      if (!firstMissingIssue) firstMissingIssue = { entryId: id, targetId: id + '-other-input' };
     }
-    if (workType === '其他' && otherInputVal) workType = `其他（${otherInputVal}）`;
-    entries.push({ _id: id, date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
+    if (workType === '???' && otherInputVal) workType = '????' + otherInputVal + '?';
+
+    entries.push({ _id: id, date: document.getElementById(id + '-date')?.value || '', type: workType, content, address, distance, noPhoto: noPhoto || false, photos });
   });
+
   const writeIssues = [typeError, contentError, addressError, distanceError ? 'distance' : '', photoError].filter(Boolean);
   if (writeIssues.length) {
-    document.getElementById('write-progress-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     updateWriteProgress();
-    return toast('請先完成上方完成度提示中的項目，再按儲存', 'error');
+    focusWriteIssue(firstMissingIssue);
+    return toast('????????????????????', 'error');
   }
-  const saveBtn = document.getElementById('save-journal-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
+
+  if (!month || month < 1 || month > 12) {
+    return toast('??????????????????', 'error');
+  }
+
+  const cached = window._currentJournalCache;
+  if (cached?.exists) {
+    const ok = window.confirm('????????????????');
+    if (!ok) return;
+  }
+
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '???...'; }
   showLoading();
   try {
     await uploadPendingWorkPhotos(sem);
     entries.forEach(e => {
-      e.photos = e.noPhoto ? [] : Array.from(document.querySelectorAll(`#${e._id}-photos img`))
+      e.photos = e.noPhoto ? [] : Array.from(document.querySelectorAll('#' + e._id + '-photos img'))
         .map(img => img?.dataset.base64)
         .filter(Boolean);
     });
-  } catch(e) {
-    hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
-    return toast('⚠️ ' + (e.message || '工作照片上傳失敗，請稍後再試'), 'error');
-  }
-  const data = {
-    seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
-    studentName: currentUser.name, company: currentUser.company || '',
-    city: currentUser.city || '', semester: sem, month,
-    salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
-    reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
-    submittedAt: (window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt)
-      ? window._currentJournalCache.submittedAt   // 保留第一次繳交時間
-      : localISOStr(),                             // 第一次才記錄當下時間
-    updatedAt: localISOStr(),                      // 每次儲存都更新
-    ownerUid: currentUser.uid || '',
-    ownerEmail: currentUser.email || '',
-    storagePath: 'user',
-    // 學生重新儲存時清除老師評語，讓老師重新審閱
-    teacherComment: null,
-    teacherReviewed: false,
-    reviewedAt: null,
-    teacherCommentUnread: false
-  };
-  if (JSON.stringify(data).length > 900000) {
-    hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
-    return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
-  }
-  // 防呆：月份必須為 1–12 的有效整數，避免 month=0 或 NaN 被寫入 Firestore
-  if (!month || month < 1 || month > 12) {
-    hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
-    return toast('月份選擇無效，請重新選擇月份後再儲存', 'error');
-  }
-  if (saveBtn) saveBtn.textContent = '⏳ 儲存中...';
-  try {
-    const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
-    // 優先使用 checkMonthDeadline 預先快取的查詢結果，避免重複 Firestore 讀取造成延遲
-    const cached = window._currentJournalCache;
-    if (cached?.exists) {
-      const submittedDate = (cached.submittedAt || '').slice(0, 10) || '未知日期';
-      const wasReviewed = !!(cached.teacherReviewed || cached.teacherComment);
-      const reviewWarning = wasReviewed
-        ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
-        : '';
-      hideLoading();
-      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
-      if (!confirmed) {
-        toast('已取消，原本月記保留', 'info');
-        return;
-      }
-      showLoading();
+
+    const { doc, setDoc } = firebase_funcs;
+    const journalRef = doc(db, 'users', currentUser.uid, 'journals', currentUser.seatNo + '-' + sem + '-' + month);
+    const data = {
+      seatNo: currentUser.seatNo,
+      studentId: currentUser.studentId || '',
+      studentName: currentUser.name,
+      company: currentUser.company || '',
+      city: currentUser.city || '',
+      semester: sem,
+      month,
+      salary: salary || null,
+      mentor: mentor || '',
+      salaryPhoto: salaryPhoto || '',
+      reflection,
+      entries: entries.map(e => ({ date: e.date || '', type: e.type || '', content: e.content || '', address: e.address || '', distance: e.distance ?? null, noPhoto: e.noPhoto || false, photos: e.photos || [] })),
+      submittedAt: (cached?.exists && cached?.submittedAt) ? cached.submittedAt : localISOStr(),
+      updatedAt: localISOStr(),
+      ownerUid: currentUser.uid || '',
+      ownerEmail: currentUser.email || '',
+      storagePath: 'user',
+      teacherComment: null,
+      teacherReviewed: false,
+      reviewedAt: null,
+      teacherCommentUnread: false
+    };
+    if (JSON.stringify(data).length > 900000) {
+      return toast('?????????????????', 'error');
     }
-    // 快取無效時（直接跳到填寫頁等邊界情況）仍正常儲存，不擋
-    await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
-    window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
+    await setDoc(journalRef, data, { merge: true });
+    window._currentJournalCache = null;
     clearCurrentWriteDraft();
-    toast('月記已成功儲存！', 'success');
+    toast('????????', 'success');
     showPage('s-dashboard');
-  } catch(e) {
-    toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
-  } finally {
-    hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
-  }
-}
-
-async function loadStudentHistory() {
-  if (!currentUser) return;
-  const startVal = document.getElementById('s-history-date-start')?.value || '';
-  const endVal = document.getElementById('s-history-date-end')?.value || '';
-  const typeFilter = document.getElementById('s-history-type-filter')?.value || '';
-  const startStr = startVal.replace(/-/g,'');
-  const endStr = endVal.replace(/-/g,'');
-  showLoading();
-  try {
-    const snap = await getMyJournalDocs();
-    let journals = snap.docs.map(d => d.data());
-    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-    // 工作類型篩選：月記裡任一工作摘要符合即納入；「其他（XXX）」歸類為「其他」
-    if (typeFilter) {
-      journals = journals.filter(j => (j.entries || []).some(e => {
-        if (!e.type) return false;
-        const normalised = (e.type.startsWith('其他（') && e.type.endsWith('）')) ? '其他' : e.type;
-        return normalised === typeFilter;
-      }));
-    }
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-    window._studentHistoryJournals = journals;
-    const toolbar = document.getElementById('s-batch-toolbar');
-    if (toolbar) toolbar.style.display = 'none';
-    const allCb = document.getElementById('s-select-all-cb');
-    if (allCb) allCb.checked = false;
-    document.getElementById('s-history-list').innerHTML = journals.length
-      ? journals.map(j => renderJournalCardSelectable(j)).join('')
-      : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
-    updateHistoryBatchBar();
   } catch (e) {
-    console.error('載入歷史月記失敗', e);
-    document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
-    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+    toast('?????' + (e.message || '?????'), 'error');
   } finally {
     hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '?? ????'; }
   }
 }
-
-// 有 checkbox 的歷史月記卡（僅歷史頁使用）
-function renderJournalCardSelectable(j) {
-  const safeMonth = safeNumber(j.month);
-  const isAbnormalMonth = !safeMonth || safeMonth < 1 || safeMonth > 12;
-  const key = `${j.seatNo || ''}-${j.semester || ''}-${safeMonth}`;
-  const cbHtml = `<div class="journal-cb-wrap"><input type="checkbox" class="journal-select-cb" data-key="${escapeHtml(key)}" data-seat="${escapeHtml(j.seatNo || '')}" data-sem="${escapeHtml(j.semester || '')}" data-month="${safeMonth}" onchange="updateHistoryBatchBar()"></div>`;
-  const entryHtml = (j.entries || []).map(e => `
-    <div class="entry-item">
-      <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
-      <div class="entry-content">${escapeHtml(e.content || '')}</div>
-      ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
-      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => `<img src="${escapeHtml(resolveImgSrc(p))}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
-    </div>`).join('');
-  const salaryNum = Number(j.salary);
-  const salaryHtml = Number.isFinite(salaryNum) ? `<span style="color:var(--accent-green);font-weight:600">💰 $${salaryNum.toLocaleString()} 元</span>` : '';
-  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
-  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
-  // 月份異常（0、NaN）：禁用編輯按鈕，只允許刪除，防止誤觸覆蓋正常月記
-  const editBtn = isAbnormalMonth
-    ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
-    : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  return `<div class="journal-card journal-card-selectable"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
-    ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
-    ${cbHtml}
-    ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
-    <div class="journal-card-header">
-      <div class="journal-card-toprow" style="${((j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed) ? 'padding-right:92px' : ''}">
-        <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
-        <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml((j.semester||'').replace('-1','第1學期').replace('-2','第2學期'))}</span>
-        <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
-      </div>
-    </div>
-    <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
-      <span>公司：${escapeHtml(j.company||'-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}
-    </div>
-    ${salaryPhotoHtml}
-    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
-      <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
-    </div>
-    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
-      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
-    </div>` : ''}
-  </div>`;
-}
-
-function toggleSelectAllHistory() {
-  const checked = document.getElementById('s-select-all-cb')?.checked;
-  document.querySelectorAll('#s-history-list .journal-select-cb').forEach(cb => { cb.checked = checked; });
-  updateHistoryBatchBar();
-}
-
-function updateHistoryBatchBar() {
-  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
-  const allCbs = document.querySelectorAll('#s-history-list .journal-select-cb');
-  const allCb = document.getElementById('s-select-all-cb');
-  if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
-  const floatBtn = document.getElementById('s-batch-float');
-  const countEl = document.getElementById('s-batch-count');
-  const toolbar = document.getElementById('s-batch-toolbar');
-  if (!floatBtn) return;
-  if (cbs.length === 0) {
-    floatBtn.style.display = 'none';
-    if (toolbar) toolbar.style.display = 'none';
-    if (countEl) countEl.textContent = '已選 0 筆';
-    return;
-  }
-  if (toolbar) toolbar.style.display = 'flex';
-  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
-  const label = getJournalMonthRangeLabel(journals);
-  if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
-  const floatLabel = document.getElementById('s-batch-float-label');
-  if (floatLabel) floatLabel.textContent = `刪除選取（${label}）`;
-  floatBtn.style.display = 'flex';
-}
-
-function getJournalMonthRangeLabel(journals) {
-  if (!journals.length) return '';
-  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  // 學期+月份換算為西元年/月（與 journalMonthInRange/pdfJournalYear 的學期定義一致：
-  // 第1學期 7~12月當年、1月隔年；第2學期 2~6月皆隔年）
-  const toCEYearMonth = (j) => {
-    const [roc, half] = String(j.semester || '').split('-').map(Number);
-    const month = j.month || 0;
-    let year = (roc || 0) + 1911;
-    if (half === 1 && month === 1) year += 1;
-    if (half === 2) year += 1;
-    return { year, month };
-  };
-  const first = toCEYearMonth(sorted[0]);
-  const last = toCEYearMonth(sorted[sorted.length - 1]);
-  const n = journals.length;
-  if (first.year === last.year && first.month === last.month) return `${first.year}/${first.month}，共${n}筆`;
-  return `${first.year}/${first.month}~${last.year}/${last.month}，共${n}筆`;
-}
-
-function confirmBatchDeleteHistory() {
-  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
-  if (!cbs.length) return;
-  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
-  const label = getJournalMonthRangeLabel(journals);
-  document.getElementById('batch-delete-history-info').innerHTML =
-    `📆 範圍：<strong>${label}</strong><br>🗑️ 將刪除 <strong>${journals.length} 筆</strong>月記`;
-  const btn = document.getElementById('batch-delete-history-confirm-btn');
-  btn.onclick = () => executeBatchDeleteHistory(journals);
-  openModal('batch-delete-history-modal');
-}
-
-async function executeBatchDeleteHistory(journals) {
-  const { doc, deleteDoc } = firebase_funcs;
-  let success = 0, fail = 0;
-  showLoading();
-  for (const j of journals) {
-    if (String(j.seatNo) !== String(currentUser?.seatNo)) { fail++; continue; }
-    try {
-      await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${j.seatNo}-${j.semester}-${j.month}`));
-      success++;
-    } catch(e) { fail++; console.error('批次刪除失敗', e); }
-  }
-  hideLoading();
-  closeModal('batch-delete-history-modal');
-  document.getElementById('s-batch-float').style.display = 'none';
-  toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
-  loadStudentHistory();
-  loadStudentDashboard();
-}
-
-function checkBrowserForExport() {
-  const ua = navigator.userAgent;
-  const isIOS = /iPhone|iPad|iPod/.test(ua);
-  const isChrome = /CriOS/.test(ua);
-  const hint = document.getElementById('safari-hint');
-  if (hint) hint.style.display = (isIOS && isChrome) ? '' : 'none';
-  return !(isIOS && isChrome);
-}
-
-async function exportMyPDF() {
-  if (!currentUser) return toast('請先登入', 'error');
-  if (!checkBrowserForExport()) return;
-  const startVal = document.getElementById('s-export-date-start')?.value || '';
-  const endVal = document.getElementById('s-export-date-end')?.value || '';
-  const startStr = startVal.replace(/-/g,'');
-  const endStr = endVal.replace(/-/g,'');
-  // 日期都空白時提示（不擋，仍可繼續匯出全部）
-  if (!startVal && !endVal) {
-    const ok = window.confirm('未選擇日期範圍，將匯出全部月記。\n確定繼續嗎？');
-    if (!ok) return;
-  }
-  // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
-  if (win) {
-    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 30 秒內沒有完成，系統會自動顯示錯誤原因。</p></body></html>');
-  }
-  showLoading();
-  try {
-    const snap = await getMyJournalDocs(30000);
-    let journals = snap.docs.map(d => d.data());
-    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-    if (!journals.length) {
-      if (win && !win.closed) {
-        win.document.open();
-        win.document.write('<html><head><meta charset="UTF-8"><title>沒有資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">目前沒有可下載的月記資料</p><p style="font-size:14px;color:#777;">請返回原頁面確認日期範圍或先填寫月記。</p></body></html>');
-        win.document.close();
-      }
-      return toast('無月記資料可下載', 'error');
-    }
-    await printJournalsPDF(journals, `${currentUser.name}實習月記`, win);
-  } catch (e) {
-    console.error('匯出 PDF 失敗', e);
-    const errMsg = (e.message || '請確認網路連線後再試');
-    const safeErrMsg = escapeHtml(errMsg);
-    if (win && !win.closed) {
-      win.document.open();
-      win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + safeErrMsg + '</p><p style="font-size:14px;color:#777;">請關閉此頁，回到原頁面重新操作。</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉此頁</button></body></html>');
-      win.document.close();
-    } else {
-      // 視窗被封鎖或已關閉，改用 overlay 顯示錯誤
-      let overlay = document.getElementById('print-overlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'print-overlay';
-        overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;';
-        document.body.appendChild(overlay);
-      }
-      overlay.innerHTML = '<div style="background:#b91c1c;color:#fff;padding:14px 16px;font-size:14px;line-height:1.7;text-align:center;">月記資料載入失敗<br><span style="font-size:12px;">' + safeErrMsg + '</span><br><button onclick="document.getElementById(\'print-overlay\').style.display=\'none\'" style="margin-top:8px;padding:6px 18px;background:#fff;color:#b91c1c;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">✕ 關閉</button></div>';
-      overlay.style.display = 'block';
-    }
-    toast('匯出失敗：' + errMsg, 'error');
-  } finally {
-    hideLoading();
-  }
-}
-
-// ---- 編輯月記 ----
 async function editJournal(seatNo, sem, month) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
   // 防呆：月份異常（0 或 NaN）代表這是測試/異常資料，拒絕編輯，提示刪除
