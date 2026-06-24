@@ -1,0 +1,3641 @@
+
+
+<!DOCTYPE html>
+<html lang="zh-TW" style="height:100%;background:#ffffff;">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>產學班實習月記系統｜學生端</title>
+
+<!-- pdfmake for deterministic PDF export -->
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/pdfmake.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/vfs_fonts.js"></script>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
+    authDomain: "project-4256549712592005708.firebaseapp.com",
+    projectId: "project-4256549712592005708",
+    storageBucket: "project-4256549712592005708.firebasestorage.app",
+    messagingSenderId: "501835005211",
+    appId: "1:501835005211:web:4a415978a06b860d4727be"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = initializeFirestore(app, { localCache: { kind: 'memory' } });
+  const auth = getAuth(app);
+  const provider = new GoogleAuthProvider();
+  // Auth token 存入 localStorage，PWA 重新開啟時不需重新向 Google 驗證，縮短登入等待時間
+  setPersistence(auth, browserLocalPersistence).catch(e => console.warn('[Auth] setPersistence 失敗', e));
+
+  window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
+  window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider, setPersistence, browserLocalPersistence };
+</script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Space+Mono:wght@400;700&display=swap');
+:root {
+  --bg: #0f1117;
+  --bg2: #181c27;
+  --bg3: #1e2435;
+  --border: #2a3047;
+  --accent: #4f8ef7;
+  --accent2: #7c3aed;
+  --accent-green: #22c55e;
+  --accent-yellow: #f59e0b;
+  --accent-red: #ef4444;
+  --text: #e8eaf0;
+  --text2: #8892aa;
+  --text3: #4a5568;
+  --card: #161a28;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --radius: 14px;
+  --radius-sm: 8px;
+  --font-main: 'Noto Sans TC', sans-serif;
+}
+body.light-mode {
+  --bg: #f0f2f7; --bg2: #ffffff; --bg3: #e8ecf4; --border: #d0d7e8;
+  --accent: #2563eb; --accent2: #7c3aed; --accent-green: #16a34a;
+  --accent-yellow: #d97706; --accent-red: #dc2626; --text: #1a1d2e;
+  --text2: #5a6380; --text3: #9aa3bb; --card: #ffffff;
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { height: 100%; min-height: 100%; background: #ffffff; }
+body { font-family: var(--font-main); background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
+.hidden { display: none !important; }
+button { cursor: pointer; font-family: var(--font-main); }
+input, textarea, select { font-family: var(--font-main); }
+
+.btn { padding: 10px 22px; border-radius: var(--radius-sm); border: none; font-size: 14px; font-weight: 500; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: #3a7ae0; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(79,142,247,0.4); }
+.btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--border); }
+.btn-danger { background: var(--accent-red); color: #fff; }
+.btn-danger:hover { background: #dc2626; }
+.btn-purple { background: var(--accent2); color: #fff; }
+.btn-purple:hover { background: #6d28d9; }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+.btn-circ { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border:none; border-radius:50%; cursor:pointer; transition:background .15s; flex-shrink:0; padding:0; }
+.btn-circ svg { width:15px; height:15px; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.btn-circ.blue-circ { background:rgba(79,142,247,.15); }
+.btn-circ.blue-circ svg { stroke:var(--accent); }
+.btn-circ.blue-circ:hover { background:rgba(79,142,247,.28); }
+.btn-circ.gray-circ { background:var(--bg3); border:1px solid var(--border); }
+.btn-circ.gray-circ svg { stroke:var(--text2); }
+.btn-circ.gray-circ:hover { background:var(--border); }
+.btn-circ.red-circ { background:rgba(239,68,68,.15); }
+.btn-circ.red-circ svg { stroke:var(--accent-red); }
+.btn-circ.red-circ:hover { background:rgba(239,68,68,.28); }
+.btn-lg { padding: 14px 32px; font-size: 16px; }
+
+input[type="text"], input[type="date"], input[type="number"], select, textarea {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; width: 100%; max-width: 100%; box-sizing: border-box; -webkit-appearance: none; appearance: none; outline: none; transition: border-color 0.2s; display: block;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 90px; }
+label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block; font-weight: 500; }
+.form-group { margin-bottom: 16px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+.badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-green { background: rgba(34,197,94,0.15); color: var(--accent-green); }
+.badge-red { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+.badge-yellow { background: rgba(245,158,11,0.15); color: var(--accent-yellow); }
+.badge-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
+
+#toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg3); border: 1px solid var(--border); padding: 14px 20px; border-radius: var(--radius-sm); font-size: 14px; z-index: 9999; transform: translateY(80px); opacity: 0; transition: all 0.3s; max-width: 320px; box-shadow: var(--shadow); }
+#toast.show { transform: translateY(0); opacity: 1; }
+#toast.success { border-left: 4px solid var(--accent-green); }
+#toast.error { border-left: 4px solid var(--accent-red); }
+#toast.info { border-left: 4px solid var(--accent); }
+
+#loading-overlay { position: fixed; inset: 0; background: rgba(15,17,23,0.85); display: flex; align-items: center; justify-content: center; z-index: 9998; flex-direction: column; gap: 14px; }
+.spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- 照片上傳狀態 ---- */
+/* 壓縮中佔位符（handlePhotoUpload 讀檔期間顯示） */
+.photo-compress-placeholder {
+  width: 90px; height: 72px; background: var(--bg3); border: 1px dashed var(--border);
+  border-radius: 6px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 4px; flex-shrink: 0;
+}
+.photo-compress-spinner {
+  width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+.photo-compress-label { font-size: 10px; color: var(--text2); }
+/* 上傳成功「✓ 已上傳」文字 overlay */
+@keyframes photoSuccessFadeOut {
+  0%   { opacity: 1; }
+  60%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.photo-upload-success {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-size: 12px; font-weight: 700;
+  color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  pointer-events: none;
+  animation: photoSuccessFadeOut 1.2s ease forwards;
+}
+#login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, rgba(79,142,247,0.08) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(124,58,237,0.08) 0%, transparent 60%), var(--bg); padding: 20px; }
+.login-container { width: 100%; max-width: 420px; }
+.login-header { text-align: center; margin-bottom: 32px; }
+.login-logo { width: 64px; height: 64px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 16px; box-shadow: none; }
+.login-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.login-header p { color: var(--text2); font-size: 14px; }
+
+.google-login-btn { width: 100%; padding: 14px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); color: var(--text); font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 12px; cursor: pointer; transition: all 0.2s; }
+.google-login-btn:hover { border-color: var(--accent); background: var(--bg3); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(79,142,247,0.2); }
+.google-icon { width: 22px; height: 22px; }
+
+/* ===== 主應用 ===== */
+#app { display: none; min-height: 100vh; min-height: 100dvh; background: var(--bg); }
+.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; padding-top: env(safe-area-inset-top); min-height: calc(60px + env(safe-area-inset-top)); height: auto; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header-left { display: flex; align-items: center; gap: 14px; }
+.header-logo { width: 36px; height: 36px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.header-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.header-logout-icon { display: none; }
+.header-subtitle { font-size: 11px; color: var(--text2); }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.user-info { text-align: right; }
+.user-name { font-size: 13px; font-weight: 600; }
+.user-role { font-size: 11px; color: var(--text2); }
+.header-divider { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+.app-body { display: flex; min-height: calc(100vh - 60px); }
+
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
+.nav-item:hover { background: var(--bg3); color: var(--text); }
+.nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
+.nav-item .icon { font-size: 16px; min-width: 20px; }
+.nav-section { font-size: 10px; color: var(--text3); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 10px 12px 4px; }
+
+.main-content { flex: 1; padding: 28px; overflow-y: auto; max-width: 1200px; }
+
+@media (max-width: 768px) {
+  .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
+  .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
+  input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; }
+  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 48px; }
+  .mobile-nav-item .icon { font-size: 22px; }
+  .mobile-nav-item.active { color: var(--accent); }
+  body { padding-bottom: 0; }
+  .form-row { flex-direction: column; }
+  .form-row .form-group { width: 100%; }
+  .top-header { padding: 0 14px; padding-top: env(safe-area-inset-top); }
+  .header-title { font-size: 13px; white-space: nowrap; }
+  .header-left { flex-shrink: 0; }
+  .header-right { flex-shrink: 1; min-width: 0; }
+  .header-logout-text { display: none; }
+  .header-logout-icon { display: flex; }
+  .header-subtitle { display: none; }
+  .user-name { font-size: 12px; }
+  .header-right { gap: 10px; }
+  .user-info { display: flex; align-items: baseline; gap: 4px; text-align: right; white-space: nowrap; }
+  .user-role { display: none; }
+  .journal-card-toprow { flex-wrap: wrap !important; padding-right: 0 !important; }
+  .journal-unread-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
+  .journal-reviewed-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
+  .page-title { font-size: 17px; }
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, auto); gap: 10px; margin-bottom: 16px; align-items: stretch; }
+  .stat-card { height: 100%; min-height: 96px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
+  .stat-card .stat-label { font-size: 11px; line-height: 1.3; margin-bottom: 6px; }
+  .stat-value { font-size: 22px; }
+  .stat-card-detail { max-height: 160px; overflow-y: auto; }
+  .card { padding: 14px; }
+  .btn-lg { min-height: 48px; font-size: 15px; }
+  .entry-item { padding: 10px; }
+  .photo-thumb { width: 70px; height: 56px; }
+}
+@media (min-width: 769px) { .mobile-nav { display: none !important; } }
+
+.page-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.page-subtitle { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+.stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+.stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
+.stat-card-clickable { cursor: pointer; user-select: none; }
+.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
+.stat-card-detail.hidden { display: none; }
+.stat-detail-row { display: flex; align-items: center; gap: 8px; }
+.stat-detail-row .journal-unread-badge,
+.stat-detail-row .journal-reviewed-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
+.stat-detail-empty { color: var(--text2); font-size: 12px; }
+
+/* 歷史月記：三欄篩選格（起始日｜結束日｜工作類型）RWD；日期區間與工作類型為兩組獨立篩選條件，日期兩欄相鄰，工作類型獨立放最後 */
+.s-history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; align-items:end; }
+.s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
+.s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
+.s-history-filter-grid > .filter-type  { grid-column:1/-1; grid-row:2; }
+.s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:3; }
+@media (min-width:600px) {
+  .s-history-filter-grid { grid-template-columns:1fr 1fr 1fr; }
+  .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
+  .s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
+  .s-history-filter-grid > .filter-type  { grid-column:3; grid-row:1; }
+  .s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:2; }
+}
+/* 圖表卡片 */
+.s-chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:16px; box-shadow:var(--shadow); }
+.s-chart-title { font-size:15px; font-weight:700; margin-bottom:14px; color:var(--text); }
+.s-chart-empty { text-align:center; padding:24px 0; color:var(--text2); font-size:13px; }
+@media (max-width: 600px) {
+  #s-city-chart > div svg, #s-work-type-chart > div svg { width:120px !important; height:120px !important; }
+}
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: var(--bg3); color: var(--text2); padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:hover td { background: rgba(255,255,255,0.02); }
+tr:last-child td { border-bottom: none; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 20px; backdrop-filter: blur(4px); }
+.modal { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.modal-header { padding: 20px 24px 0; display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.modal-title { font-size: 17px; font-weight: 700; }
+.modal-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+.modal-close:hover { background: var(--accent-red); color: #fff; border-color: var(--accent-red); }
+.modal-body { padding: 0 24px 24px; }
+
+.journal-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 14px; transition: border-color 0.2s; position: relative; }
+.journal-card:hover { border-color: var(--accent); }
+.journal-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.journal-card-toprow { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.journal-card-actions { flex-shrink: 0; display: flex; gap: 8px; }
+.journal-unread-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
+.journal-reviewed-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
+.journal-month { font-size: 15px; font-weight: 700; }
+.journal-meta { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+.journal-entries { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.entry-item { background: var(--bg3); border-radius: var(--radius-sm); padding: 12px; border-left: 3px solid var(--accent); overflow-wrap: break-word; word-break: break-all; }
+.entry-date { font-size: 11px; color: var(--text2); margin-bottom: 4px; font-family: 'Space Mono', monospace; }
+.entry-content { font-size: 13px; line-height: 1.6; overflow-wrap: break-word; word-break: break-all; }
+.entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
+
+.dist-result { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 13px; color: var(--accent-green); margin-top: 6px; }
+.dist-calculating { color: var(--accent-yellow); font-size: 12px; margin-top: 6px; }
+
+.photo-upload-area { border: 2px dashed var(--border); border-radius: var(--radius-sm); padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.photo-upload-area:hover, .photo-upload-area.dragover { border-color: var(--accent); background: rgba(79,142,247,0.04); }
+.photo-preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.photo-thumb-wrap { position: relative; }
+.photo-thumb { width: 90px; height: 70px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+.photo-remove { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-red); color: #fff; border: none; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.write-progress-box { border: 1px solid var(--border); background: var(--bg3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 14px; }
+.write-progress-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; user-select: none; }
+.write-progress-main { min-width: 0; flex: 1; font-size: 13px; color: var(--text); line-height: 1.5; }
+.write-progress-main strong { color: var(--accent); }
+.write-progress-toggle { border: none; background: transparent; color: var(--text2); font-size: 12px; padding: 2px 0; cursor: pointer; flex-shrink: 0; }
+.write-progress-details { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12px; color: var(--text2); }
+.write-progress-details.hidden { display: none; }
+.write-progress-item { display: flex; align-items: center; gap: 6px; }
+.write-progress-item.done { color: var(--accent-green); }
+.write-progress-item.todo { color: var(--accent-yellow); }
+.write-progress-subitem { font-size: 11px; color: var(--accent-red); margin-left: 18px; cursor: pointer; }
+.write-progress-subitem:hover { text-decoration: underline; }
+.entry-item.entry-issue-flash { outline: 2px solid var(--accent-red); outline-offset: 2px; transition: outline-color 0.3s; }
+.write-draft-note { font-size: 11px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
+.write-progress-float {
+  position: fixed;
+  right: 14px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 220;
+  min-width: 0;
+  max-width: min(360px, calc(100vw - 28px));
+  background: rgba(26, 30, 38, 0.94);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, width 0.22s ease, max-width 0.22s ease;
+}
+.write-progress-float.hidden { opacity: 0; transform: translateY(10px) scale(0.96); pointer-events: none; }
+.write-progress-float-inner { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.write-progress-float-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.write-progress-float-count { font-size: 13px; font-weight: 800; white-space: nowrap; color: #fff; }
+.write-progress-float-label { font-size: 12px; color: rgba(255,255,255,0.84); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.write-progress-float-body { display: grid; gap: 6px; }
+.write-progress-float.compact { border-radius: 999px; }
+.write-progress-float.compact .write-progress-float-inner { padding: 8px 12px; }
+.write-progress-float.compact .write-progress-float-label,
+.write-progress-float.compact .write-progress-float-body { display: none; }
+.write-progress-float.expanded .write-progress-float-body { display: grid; }
+@media (max-width: 768px) {
+  .write-progress-float {
+    right: 12px;
+    bottom: calc(92px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 24px);
+  }
+}
+body.light-mode .write-progress-float {
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  border-color: rgba(30, 41, 59, 0.12);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+}
+body.light-mode .write-progress-float-count { color: var(--text); }
+body.light-mode .write-progress-float-label { color: var(--text2); }
+
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+.fade-in { animation: fadeIn 0.3s ease; }
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--text2); }
+.empty-state .icon { font-size: 48px; margin-bottom: 14px; }
+.empty-state p { font-size: 14px; }
+
+/* ===== LINE 警告 ===== */
+#line-warning { display:none; background:var(--bg3); border:0.5px solid var(--border); border-radius:14px; padding:18px 16px; margin-bottom:18px; text-align:center; }
+.line-warn-title { font-size:15px; font-weight:500; color:var(--text); margin-bottom:14px; }
+.line-warn-steps { display:flex; align-items:center; justify-content:center; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.line-warn-step { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.line-warn-icon { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px; }
+.line-warn-icon.bad { background:rgba(239,68,68,0.15); border:1.5px solid rgba(239,68,68,0.4); }
+.line-warn-icon.good { background:rgba(34,197,94,0.15); border:1.5px solid rgba(34,197,94,0.4); }
+.line-warn-icon.arrow { background:transparent; border:none; font-size:18px; color:var(--text2); width:28px; }
+.line-warn-label { font-size:10px; color:var(--text2); text-align:center; max-width:56px; line-height:1.3; }
+.line-warn-instruction { font-size:13px; color:var(--text); background:rgba(245,158,11,0.1); border-radius:8px; padding:10px 12px; line-height:1.8; }
+.line-warn-symbol { font-size:17px; font-weight:700; color:#f59e0b; background:rgba(245,158,11,0.15); border-radius:6px; padding:1px 7px; }
+
+/* ===== 批次選取工具列 ===== */
+#s-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
+#s-batch-toolbar label { display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; user-select:none; }
+#s-batch-count { font-size:13px; color:var(--text2); flex:1; }
+.journal-cb-wrap { position:absolute; top:14px; left:14px; z-index:2; }
+.journal-cb-wrap input[type=checkbox] { width:18px; height:18px; cursor:pointer; accent-color:var(--accent-red); }
+.journal-card-selectable { padding-left:42px !important; position:relative; }
+
+/* 浮動刪除列 */
+#s-batch-float { display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--accent-red); color:#fff; border-radius:30px; padding:12px 22px; font-size:14px; font-weight:600; box-shadow:0 6px 24px rgba(239,68,68,0.5); z-index:200; align-items:center; gap:10px; white-space:nowrap; cursor:pointer; border:none; font-family:var(--font-main); }
+#s-batch-float:hover { background:#dc2626; transform:translateX(-50%) translateY(-2px); }
+@media (min-width:769px) { #s-batch-float { bottom:24px; } }
+</style>
+  <!-- PWA ▼ -->
+  <link rel="manifest" href="manifest-student.json">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="實習月記">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').catch(function () {});
+      });
+    }
+  </script>
+  <!-- PWA ▲ -->
+</head>
+<body>
+
+<div id="loading-overlay" class="hidden">
+  <div class="spinner"></div>
+  <span id="loading-text" style="font-size:13px;color:var(--text2)">載入中...</span>
+</div>
+
+<div id="toast"></div>
+
+<!-- ==================== 登入頁 ==================== -->
+<div id="login-page">
+  <div class="login-container">
+    <!-- LINE 內建瀏覽器警告（偵測到才顯示） -->
+    <div id="line-warning">
+      <div class="line-warn-title">⚠️ 你在LINE瀏覽器開啟，無法登入</div>
+      <div class="line-warn-steps">
+        <div class="line-warn-step">
+          <div class="line-warn-icon bad">💬</div>
+          <div class="line-warn-label">LINE 內建瀏覽器</div>
+        </div>
+        <div class="line-warn-icon arrow">→</div>
+        <div class="line-warn-step">
+          <div class="line-warn-icon" style="background:var(--bg);border:1.5px solid var(--border);font-size:20px;font-weight:500;color:var(--text)" id="line-warn-symbol-icon"></div>
+          <div class="line-warn-label">點 •••<br>選單</div>
+        </div>
+        <div class="line-warn-icon arrow">→</div>
+        <div class="line-warn-step">
+          <div class="line-warn-icon good">🌐</div>
+          <div class="line-warn-label">在瀏覽器中開啟</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="login-header">
+      <div class="login-logo"><img src="icon-192.png" style="width:48px;height:48px;border-radius:12px;display:block;"></div>
+      <h1>產學班實習月記系統</h1>
+      <p>台中高工｜學生端</p>
+    </div>
+
+    <div class="card fade-in" id="login-card">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:20px;text-align:center">
+        請使用學校 Google 帳號登入
+      </p>
+      <button class="google-login-btn" onclick="googleStudentLogin()">
+        <svg class="google-icon" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        使用 Google 帳號登入
+      </button>
+      <p style="text-align:center;font-size:12px;color:var(--text2);margin-top:10px">iPhone 用 Safari・Android 用 Chrome 開啟</p>
+      <!-- 登入失敗靜態說明：由 JS 寫入，預設隱藏 -->
+      <div id="login-error-hint" class="hidden" style="margin-top:16px;padding:12px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);font-size:12px;line-height:1.7;color:var(--accent-red)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 主應用 ==================== -->
+<div id="app" style="display:none">
+  <!-- Header -->
+  <div class="top-header">
+    <div class="header-left">
+      <div class="header-logo"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px;display:block;"></div>
+      <div>
+        <div class="header-title">實習月記</div>
+        <div class="header-subtitle">台中高工</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="user-info">
+        <div class="user-name" id="header-user-name">-</div>
+        <div class="user-role" id="header-user-role">👨‍🎓 學生</div>
+      </div>
+      <div class="header-divider"></div>
+      <button id="theme-toggle-btn" class="btn btn-secondary btn-sm" onclick="toggleTheme()" title="切換深色/淺色模式" style="font-size:16px;padding:6px 10px">🌙</button>
+      <button class="btn btn-secondary btn-sm" onclick="logout()" title="登出" style="border-color:var(--text2);color:var(--text);font-weight:600"><span class="header-logout-text">登出</span><span class="header-logout-icon" style="display:flex;align-items:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span></button>
+    </div>
+  </div>
+
+  <div class="app-body">
+    <!-- 學生 Sidebar -->
+    <div class="sidebar" id="student-sidebar">
+      <div class="nav-section">我的月記</div>
+      <button class="nav-item active" onclick="showPage('s-dashboard')" data-page="s-dashboard">
+        <span class="icon">🏠</span> 首頁
+      </button>
+      <button class="nav-item" onclick="showPage('s-stats')" data-page="s-stats">
+        <span class="icon">📊</span> 統計
+      </button>
+      <button class="nav-item" onclick="showPage('s-write')" data-page="s-write">
+        <span class="icon">✏️</span> 填寫本月月記
+      </button>
+      <button class="nav-item" onclick="showPage('s-history')" data-page="s-history">
+        <span class="icon">📚</span> 歷史月記
+      </button>
+      <button class="nav-item" onclick="showPage('s-export')" data-page="s-export">
+        <span class="icon">⬇️</span> 下載我的資料
+      </button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+
+      <!-- ========== 學生：首頁 ========== -->
+      <div id="page-s-dashboard" class="hidden fade-in">
+        <div class="page-title">🏠 我的實習月記</div>
+        <div class="page-subtitle" id="s-dashboard-subtitle">載入中...</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">本月繳交狀態</div>
+            <div id="s-this-month-status" style="margin-top:8px">-</div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
+            <div class="stat-label">已繳交（點擊查看）</div>
+            <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
+            <div class="stat-label">審閱紀錄（點擊查看）</div>
+            <div class="stat-value" style="color:var(--text)" id="s-teacher-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
+            <div class="stat-label">已逾期（點擊查看）</div>
+            <div class="stat-value" style="color:var(--accent-red)" id="s-overdue-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-overdue"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== 學生：統計 ========== -->
+      <div id="page-s-stats" class="hidden fade-in">
+        <div class="page-title">📊 統計</div>
+        <div class="page-subtitle">薪資、工作地點與工作類型統計圖表</div>
+        <div class="s-chart-card">
+          <div class="s-chart-title">📈 每月薪資趨勢</div>
+          <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
+        <div class="s-chart-card">
+          <div class="s-chart-title">🗺️ 工作縣市分布</div>
+          <div id="s-city-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
+        <div class="s-chart-card" style="margin-bottom:0">
+          <div class="s-chart-title">🥧 各工作類型累計次數</div>
+          <div id="s-work-type-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- ========== 學生：填寫月記 ========== -->
+      <div id="page-s-write" class="hidden fade-in">
+        <div class="page-title">✏️ 填寫月記</div>
+        <div class="page-subtitle" id="s-write-subtitle">填寫本月實習月記</div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="form-row">
+            <div class="form-group">
+              <label>學期</label>
+              <select id="write-semester" onchange="initWriteMonths(); checkMonthDeadline()"></select>
+            </div>
+            <div class="form-group">
+              <label>月份</label>
+              <select id="write-month" onchange="checkMonthDeadline()"></select>
+            </div>
+          </div>
+          <div id="write-deadline-status" style="font-size:13px;margin-bottom:14px"></div>
+          <div id="write-progress-box" class="write-progress-box">
+            <div class="write-progress-summary" onclick="toggleWriteProgressDetails()">
+              <div id="write-progress-summary" class="write-progress-main">完成度 0/4　尚缺：基本資料、工作摘要、工作照片、心得</div>
+              <button id="write-progress-toggle" type="button" class="write-progress-toggle">展開</button>
+            </div>
+            <div id="write-progress-details" class="write-progress-details hidden"></div>
+          </div>
+          <div id="write-progress-float" class="write-progress-float hidden compact" role="button" tabindex="0" onclick="toggleWriteProgressFloat()" aria-label="完成度提示">
+            <div class="write-progress-float-inner">
+              <div class="write-progress-float-head">
+                <span id="write-progress-float-count" class="write-progress-float-count">0/4</span>
+                <span id="write-progress-float-label" class="write-progress-float-label">尚缺：基本資料、工作摘要、工作照片、心得</span>
+              </div>
+              <div id="write-progress-float-body" class="write-progress-float-body hidden"></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>本月實習公司</label>
+            <input type="text" id="write-company" placeholder="公司名稱" readonly style="background:var(--bg);color:var(--text2)">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>本月薪資（元）</label>
+              <input type="number" id="write-salary" placeholder="例：15000" min="0" max="200000" step="100">
+            </div>
+            <div class="form-group">
+              <label>主要輔導師傅／學長姐</label>
+              <input type="text" id="write-mentor" placeholder="例：王師傅、陳學長">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>薪資單照片（選填）</label>
+            <div class="photo-upload-area" onclick="document.getElementById('salary-photo-file').click()" style="padding:12px">
+              <div style="font-size:18px;margin-bottom:4px">🧾</div>
+              <div style="font-size:12px;color:var(--text2)">點擊上傳薪資單照片</div>
+            </div>
+            <input type="file" id="salary-photo-file" accept="image/*" style="display:none" onchange="handleSalaryPhoto(event)">
+            <div id="salary-photo-preview" style="margin-top:8px"></div>
+          </div>
+          <div class="form-group">
+            <label>本月心得（必填）</label>
+            <textarea id="write-reflection" rows="5" placeholder="請填寫本月實習的整體心得與反思，至少20字..."></textarea>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div style="font-size:15px;font-weight:700">📝 工作摘要（可新增多則）</div>
+            <button class="btn btn-secondary btn-sm" onclick="addWorkEntry()">➕ 新增一則</button>
+          </div>
+          <div id="work-entries-container"></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button id="save-journal-btn" class="btn btn-primary btn-lg" onclick="saveJournal()">💾 儲存月記</button>
+          <button class="btn btn-secondary" onclick="showPage('s-dashboard')">取消</button>
+        </div>
+      </div>
+
+      <!-- ========== 學生：歷史月記 ========== -->
+      <div id="page-s-history" class="hidden fade-in">
+        <div class="page-title">📚 歷史月記</div>
+        <div class="page-subtitle">查看我所有的實習月記</div>
+        <div class="s-history-filter-grid">
+          <div class="filter-start">
+            <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">起始日期</label>
+            <input type="date" id="s-history-date-start" style="width:100%">
+          </div>
+          <div class="filter-type">
+            <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">工作類型</label>
+            <select id="s-history-type-filter" style="width:100%">
+              <option value="">全部類型</option>
+            </select>
+          </div>
+          <div class="filter-end">
+            <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">結束日期</label>
+            <input type="date" id="s-history-date-end" style="width:100%">
+          </div>
+          <button class="btn btn-primary btn-sm filter-btn" onclick="loadStudentHistory()" style="justify-content:center">🔍 查詢</button>
+        </div>
+        <!-- 批次選取工具列 -->
+        <div id="s-batch-toolbar">
+          <label>
+            <input type="checkbox" id="s-select-all-cb" onchange="toggleSelectAllHistory()" style="width:16px;height:16px;accent-color:var(--accent-red)">
+            <span style="font-weight:600">全選</span>
+          </label>
+          <span id="s-batch-count" style="font-size:13px;color:var(--text2)">已選 0 筆</span>
+        </div>
+        <div id="s-history-list"></div>
+      </div>
+
+      <!-- ========== 學生：下載 ========== -->
+      <div id="page-s-export" class="hidden fade-in">
+        <div class="page-title">⬇️ 下載我的資料</div>
+        <div class="page-subtitle">列印或另存月記資料為 PDF</div>
+        <div class="card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">📄 匯出我的月記</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">您只能下載自己的月記資料</p>
+          <div class="form-group"><label>起始日期（留空匯出全部）</label><div style="width:100%"><input type="date" id="s-export-date-start" style="width:100%;display:block;box-sizing:border-box"></div></div>
+          <div class="form-group"><label>結束日期</label><div style="width:100%"><input type="date" id="s-export-date-end" style="width:100%;display:block;box-sizing:border-box"></div></div>
+          <div id="safari-hint" style="display:none;background:rgba(245,158,11,0.12);border:1.5px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--text);line-height:1.8;">
+            ⚠️ <b>Chrome 不支援此功能</b><br>
+            請用 <b>Safari</b> 開啟此頁面再下載：<br>
+            點底部 <b>分享（□↑）</b> → <b>在 Safari 中開啟</b>
+          </div>
+          <button class="btn btn-purple btn-lg" onclick="exportMyPDF()">📥 列印/另存PDF</button>
+        </div>
+      </div>
+
+    </div><!-- end main-content -->
+  </div><!-- end app-body -->
+
+  <!-- 手機底部導航 -->
+  <div class="mobile-nav" id="student-mobile-nav">
+    <button class="mobile-nav-item active" onclick="showPage('s-dashboard')"><span class="icon">🏠</span>首頁</button>
+    <button class="mobile-nav-item" onclick="showPage('s-stats')"><span class="icon">📊</span>統計</button>
+    <button class="mobile-nav-item" onclick="showPage('s-write')"><span class="icon">✏️</span>填寫</button>
+    <button class="mobile-nav-item" onclick="showPage('s-history')"><span class="icon">📚</span>歷史</button>
+    <button class="mobile-nav-item" onclick="showPage('s-export')"><span class="icon">⬇️</span>下載</button>
+  </div>
+</div>
+
+<!-- ==================== Modals ==================== -->
+<div class="modal-overlay hidden" id="photo-modal" onclick="closeModal('photo-modal')">
+  <img id="photo-modal-img" style="max-width:90vw;max-height:90vh;border-radius:10px">
+</div>
+
+<!-- 浮動批次刪除按鈕 -->
+<button id="s-batch-float" onclick="confirmBatchDeleteHistory()">🗑️ <span id="s-batch-float-label">刪除選取</span></button>
+
+<!-- 批次刪除確認 Modal -->
+<div class="modal-overlay hidden" id="batch-delete-history-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title">🗑️ 確認批次刪除</div>
+      <button class="modal-close" onclick="closeModal('batch-delete-history-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="batch-delete-history-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.9"></div>
+      <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('batch-delete-history-modal')">取消</button>
+      <button class="btn btn-danger" id="batch-delete-history-confirm-btn">確認刪除</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="delete-journal-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <div class="modal-title">🗑️ 確認刪除月記</div>
+      <button class="modal-close" onclick="closeModal('delete-journal-modal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="delete-journal-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.8"></div>
+      <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="closeModal('delete-journal-modal')">取消</button>
+      <button class="btn" id="delete-journal-confirm-btn" style="background:var(--accent-red);color:#fff">確認刪除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== JavaScript ==================== -->
+<script>
+// ============ 全域狀態 ============
+let currentUser = null; // { role:'student', uid, seatNo, name, email, studentId, company, gender }
+let writeDeadlineDocs = [];
+let db, firebase_funcs;
+// Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行 handleLoginUser
+let _loginHandling = false;
+// editJournal() 呼叫 showPage('s-write') 前會設此旗標為 true，
+// 讓 showPage 內觸發的 initWriteForm() 跳過一次，避免非同步重新讀取/填表蓋掉剛載入的編輯內容
+let _skipWriteInit = false;
+let _writeDraftHydrating = false;
+let _writeDraftSaveTimer = null;
+let _writeDraftAutoSaveBound = false;
+let _writeProgressFloatTimer = null;
+let _writeProgressFloatRaf = 0;
+let _writeProgressFloatBound = false;
+let _writeProgressFloatExpanded = false;
+let _writeProgressTyping = false;
+
+const SCHOOL_DOMAIN = 'tcivs.tc.edu.tw';
+const CLOUDINARY_CLOUD_NAME = 'dthv3z2q8';
+const CLOUDINARY_UPLOAD_PRESET = 'nhnw3vi7'; // Unsigned preset
+
+// ============ 深色/淺色切換 ============
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-mode');
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+(function() {
+  if (localStorage.getItem('theme') !== 'dark') {
+    document.body.classList.add('light-mode');
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('theme-toggle-btn');
+      if (btn) btn.textContent = '☀️';
+    });
+  }
+})();
+
+function waitForFirebase(cb) {
+  if (window._firebase) { db = window._firebase.db; firebase_funcs = window._firebase; cb(); }
+  else setTimeout(() => waitForFirebase(cb), 100);
+}
+function waitForFirebaseAsync() {
+  return new Promise(resolve => waitForFirebase(resolve));
+}
+
+function isStoragePartitionedEnv() {
+  // LINE 內建瀏覽器：UA 一定含 "Line/"。
+  // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
+  // 仍會被 LINE 透過 seapp.com 代理，造成 origin 不一致。
+  if (/Line\//i.test(navigator.userAgent)) return true;
+  // seapp.com hostname：LINE 代理網域（也涵蓋未必含 "Line/" UA 的邊角情況）
+  if (/seapp\.com/i.test(location.hostname)) return true;
+  // sessionStorage 完全無法使用（私密模式等）
+  try {
+    const key = '_ssptest_' + Date.now();
+    sessionStorage.setItem(key, '1');
+    const readable = sessionStorage.getItem(key) === '1';
+    sessionStorage.removeItem(key);
+    if (!readable) return true;
+  } catch (e) {
+    return true;
+  }
+  return false;
+}
+
+async function startStudentRedirectLogin() {
+  const { auth, provider, signInWithRedirect } = window._auth;
+  sessionStorage.setItem('studentRedirectLoginPending', '1');
+  await signInWithRedirect(auth, provider);
+}
+
+// ============ 學期工具 ============
+function getSemesters(years = 5) {
+  const now = new Date();
+  const twYear = now.getFullYear() - 1911;
+  const sems = [];
+  for (let y = twYear; y >= twYear - years; y--) {
+    sems.push({ key: `${y}-2`, label: `${y}學年第2學期` });
+    sems.push({ key: `${y}-1`, label: `${y}學年第1學期` });
+  }
+  return sems;
+}
+
+function getCurrentSemester() {
+  const now = new Date();
+  const twYear = now.getFullYear() - 1911;
+  const month = now.getMonth() + 1;
+  if (month >= 7) return `${twYear}-1`;
+  if (month === 1) return `${twYear - 1}-1`;
+  return `${twYear - 1}-2`;
+}
+
+function getCurrentSemMonth() {
+  const now = new Date();
+  return { semester: getCurrentSemester(), month: now.getMonth() + 1 };
+}
+
+function getSemesterMonths(semKey) {
+  const half = parseInt(semKey.split('-')[1]);
+  return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
+}
+
+function populateSemesterSelects(selectId) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const sems = getSemesters();
+  el.innerHTML = sems.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  const cur = getCurrentSemester();
+  if (sems.find(s => s.key === cur)) el.value = cur;
+}
+
+// ============ Toast ============
+let toastTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+// 登入失敗靜態說明：把訊息寫入 login card 下方固定區塊，比 toast 更持久
+function showLoginError(mainMsg, hintMsg) {
+  // toast 仍顯示，讓使用者立即知道出錯
+  toast(mainMsg, 'error');
+  const el = document.getElementById('login-error-hint');
+  if (!el) return;
+  // hintMsg 可為純文字或含 <br> 的 HTML，統一用 innerHTML（呼叫端不含使用者輸入，安全）
+  el.innerHTML = `<strong>${mainMsg}</strong>${hintMsg ? '<br>' + hintMsg : ''}`;
+  el.classList.remove('hidden');
+}
+function clearLoginError() {
+  const el = document.getElementById('login-error-hint');
+  if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+}
+
+function showLoading() { setLoadingText('載入中...'); document.getElementById('loading-overlay').classList.remove('hidden'); }
+function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); setLoadingText('載入中...'); }
+function setLoadingText(msg) { const el = document.getElementById('loading-text'); if (el) el.textContent = msg; }
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function getMyJournalDocs(timeoutMs = 25000) {
+  if (!currentUser) throw new Error('尚未登入');
+  const { collection, getDocs, getDocsFromServer, query } = firebase_funcs;
+  const journalsQuery = query(collection(db, 'users', currentUser.uid, 'journals'));
+  // 先嘗試一般讀取（有快取加速），再 fallback 到強制伺服器讀取
+  try {
+    return await withTimeout(
+      getDocs(journalsQuery),
+      timeoutMs,
+      '讀取月記資料逾時，請確認網路後再試'
+    );
+  } catch (e) {
+    console.warn('一般讀取失敗，改用強制伺服器讀取', e);
+    return await withTimeout(
+      getDocsFromServer(journalsQuery),
+      timeoutMs,
+      '讀取月記資料逾時，請確認網路後再試'
+    );
+  }
+}
+
+// ============ Google 學生登入 ============
+async function isTeacherAccount(user) {
+  const email = user?.email || '';
+  if (!email.endsWith('@' + SCHOOL_DOMAIN)) return false;
+  const { doc, getDoc } = firebase_funcs;
+  const emailKey = email.replace(/[@.]/g, '_');
+  try {
+    const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
+    if (byUid.exists()) return true;
+    const byEmail = await withTimeout(getDoc(doc(db, 'admins', emailKey)), 10000, '登入逾時，請確認網路後再試');
+    return byEmail.exists();
+  } catch(e) {
+    console.warn('判斷老師帳號失敗', e);
+    return false;
+  }
+}
+
+function showTeacherStudentSetupHint(message) {
+  hideLoading();
+  toast(message || '👨‍🏫 您是老師帳號。請先在老師端「學生管理」中，找到您要測試的座號列，輸入您的 email 並點「綁定」，再重新開啟此頁面', 'error');
+}
+
+// ============ 登入後共用：驗證並進入系統 ============
+async function handleLoginUser(user) {
+  clearLoginError();
+  setLoadingText('驗證帳號中...');
+  const email = user.email || '';
+
+  // 1. 驗證學校網域
+  if (!email.endsWith('@' + SCHOOL_DOMAIN)) {
+    await window._auth.signOut(window._auth.auth);
+    hideLoading();
+    _loginHandling = false;
+    toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
+    return;
+  }
+
+  // 2. 查 studentBindings 集合
+  const { doc, getDoc, getDocs, collection: col } = firebase_funcs;
+  const emailKey = email.replace(/[@.]/g, '_');
+  const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
+
+  if (!bindSnap.exists()) {
+    if (await isTeacherAccount(user)) {
+      // 老師帳號測試學生端時，不呼叫 signOut，避免同瀏覽器中的 teacher.html 被 Firebase 跨分頁同步登出。
+      showTeacherStudentSetupHint();
+    } else {
+      hideLoading();
+      await window._auth.signOut(window._auth.auth);
+      showLoginError(
+        '帳號尚未綁定，無法登入',
+        '請聯絡老師，請老師在「學生管理」→「帳號綁定」中輸入你的學校信箱完成設定'
+      );
+    }
+    _loginHandling = false;
+    return;
+  }
+
+  const binding = bindSnap.data();
+  const seatNo = binding.seatNo;
+
+  // 3. 取得學生資料（新格式：{activeSemester}_{seatNo}；fallback 舊格式：{seatNo}）
+  setLoadingText('讀取學生資料...');
+  const activeSem = getCurrentSemester();
+  let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem}_${seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+  if (!stuSnap.exists()) {
+    // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
+    stuSnap = await withTimeout(getDoc(doc(db, 'students', seatNo)), 10000, '登入逾時，請確認網路後再試');
+  }
+  if (!stuSnap.exists()) {
+    if (await isTeacherAccount(user)) {
+      showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
+    } else {
+      await window._auth.signOut(window._auth.auth);
+      hideLoading();
+      showLoginError(
+        '找不到本學期學生名單',
+        '可能原因：老師尚未在「學生管理」中啟用本學期名單，或座號設定有誤。請聯絡老師確認後再試'
+      );
+    }
+    _loginHandling = false;
+    return;
+  }
+
+  const stuData = stuSnap.data();
+  currentUser = {
+    role: 'student',
+    uid: user.uid,
+    email,
+    seatNo,
+    name: stuData.name,
+    studentId: stuData.studentId || '',
+    company: stuData.company || '',
+    gender: stuData.gender || '',
+    city: stuData.city || ''
+  };
+
+  // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
+  try {
+    const { updateDoc } = firebase_funcs;
+    await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid });
+  } catch(e) { console.warn('補寫 uid 失敗', e); }
+
+  _loginHandling = false;
+  setLoadingText('登入成功'); // 註：enterApp() 第一行即同步呼叫 hideLoading()，此文字幾乎不會被肉眼看到，純粹是邏輯完整性
+  enterApp();
+}
+
+async function googleStudentLogin() {
+  showLoading();
+  try {
+    if (!window._auth) {
+      hideLoading();
+      toast('系統初始化中，請稍候 1 秒後再試', 'error');
+      return;
+    }
+    const { auth, provider, signInWithPopup } = window._auth;
+    const popupPromise = signInWithPopup(auth, provider);
+    await waitForFirebaseAsync();
+    const result = await popupPromise;
+    await handleLoginUser(result.user);
+  } catch(e) {
+    hideLoading();
+    if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+      // seapp.com / LINE 代理：redirect 往返後 sessionStorage 被清空，
+      // Firebase 無法讀到自己的 redirect state → "missing initial state" 錯誤。
+      // 直接告知使用者改用外部瀏覽器，不觸發 redirect。
+      if (isStoragePartitionedEnv()) {
+        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+        return;
+      }
+      try {
+        await startStudentRedirectLogin();
+      } catch(re) {
+        toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
+      }
+      return;
+    }
+    console.error('Google 登入失敗', e);
+    toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
+  }
+}
+
+async function handleRedirectResult() {
+  // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
+  // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
+  // 呼叫會拋出 "missing initial state" 錯誤。
+  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
+  // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
+  // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
+  // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
+  if (isStoragePartitionedEnv()) {
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    return;
+  }
+  // 設旗標：告知 onAuthStateChanged callback 這條路徑正在處理，不要搶先執行
+  _loginHandling = true;
+  await waitForFirebaseAsync();
+  try {
+    const { auth, getRedirectResult } = window._auth;
+    const result = await getRedirectResult(auth);
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    if (result?.user && !currentUser) {
+      showLoading();
+      await handleLoginUser(result.user);
+    } else {
+      // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
+      _loginHandling = false;
+    }
+  } catch(e) {
+    sessionStorage.removeItem('studentRedirectLoginPending');
+    _loginHandling = false;
+    hideLoading();
+    console.error('Redirect 登入失敗', e);
+    // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
+    // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
+    if (e.code === 'auth/missing-initial-state' || e.message?.includes('missing initial state')) {
+      toast('⚠️ 登入狀態遺失，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    } else {
+      toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    }
+  }
+}
+
+// ============ 進入應用 ============
+function enterApp() {
+  if (window._enteringApp) return;
+  window._enteringApp = true;
+  clearLoginError();
+  hideLoading();
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('header-user-name').textContent = `${currentUser.name} (${currentUser.seatNo}號)`;
+  document.getElementById('header-user-role').textContent = '👨‍🎓 學生';
+  populateSemesterSelects('write-semester');
+  document.getElementById('write-company').value = currentUser.company || '';
+  initWriteMonths();
+  initWriteDraftAutoSave();
+  bindWriteProgressFloat();
+  updateWriteProgress();
+  showPage('s-dashboard');
+}
+
+// ============ 登出 ============
+async function logout() {
+  try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
+  currentUser = null;
+  window._enteringApp = false;
+  location.reload();
+}
+
+// ============ 頁面切換 ============
+function showPage(pageId) {
+  document.querySelectorAll('.main-content > div').forEach(d => d.classList.add('hidden'));
+  document.getElementById('page-' + pageId)?.classList.remove('hidden');
+  document.querySelectorAll('.nav-item, .mobile-nav-item').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-page') === pageId || b.getAttribute('onclick')?.includes(pageId));
+  });
+  const loaders = {
+    's-dashboard': loadStudentDashboard,
+    's-stats': loadStudentStats,
+    's-write': initWriteForm,
+    's-history': () => { initStatsDateSelects(); loadStudentHistory(); },
+  };
+  if (pageId === 's-write' && _skipWriteInit) {
+    _skipWriteInit = false;
+    return;
+  }
+  if (loaders[pageId]) loaders[pageId]();
+}
+
+// ============================================================
+// ===== 學生功能 ==============================================
+// ============================================================
+
+function semMonthToLabel(semester, month) {
+  const [roc, half] = String(semester || '').split('-').map(Number);
+  let year = (roc || 0) + 1911;
+  if (half === 1 && month === 1) year += 1;
+  if (half === 2) year += 1;
+  return `${year}/${month}`;
+}
+
+function syncStatCardHeights() {
+  // 只在手機版（≤768px）同步高度，電腦版不動
+  if (window.innerWidth > 768) return;
+  const cards = document.querySelectorAll('#page-s-dashboard .stat-card');
+  cards.forEach(c => c.style.height = '');          // 先清除，讓內容自然撐開
+  requestAnimationFrame(() => {
+    let max = 0;
+    cards.forEach(c => { max = Math.max(max, c.offsetHeight); });
+    cards.forEach(c => { c.style.height = max + 'px'; });
+  });
+}
+
+function toggleStatDetail(key) {
+  const detail = document.getElementById(`stat-detail-${key}`);
+  if (!detail) return;
+  const willShow = detail.classList.contains('hidden');
+  detail.classList.toggle('hidden', !willShow);
+  syncStatCardHeights();
+}
+
+function renderSubmittedMonthsDetail(journals) {
+  if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
+  const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
+  return sorted.map(j => `<div class="stat-detail-row">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
+}
+
+// 將「老師已審閱」與「有新評語」合併為單一清單，依老師審閱時間新到舊排序
+function getTeacherStatusJournals(journals) {
+  return journals
+    .filter(j => (j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed)
+    .map(j => ({ ...j, _statStatus: (j.teacherCommentUnread && j.teacherComment) ? 'unread' : 'reviewed' }))
+    .sort((a,b) => new Date(b.reviewedAt || 0) - new Date(a.reviewedAt || 0));
+}
+
+function renderTeacherStatusDetail(list) {
+  if (!list.length) return '<div class="stat-detail-empty">尚無老師審閱紀錄</div>';
+  return list.map(j => {
+    const label = escapeHtml(semMonthToLabel(j.semester, j.month));
+    return j._statStatus === 'unread'
+      ? `<div class="stat-detail-row"><span class="journal-unread-badge">● 有新評語</span>${label}</div>`
+      : `<div class="stat-detail-row"><span class="journal-reviewed-badge">✅ 已審閱</span>${label}</div>`;
+  }).join('');
+}
+
+// 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但尚未繳交的月份
+// （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）
+async function getOverdueMonths(sem, journals) {
+  const { collection, getDocs } = firebase_funcs;
+  const snap = await getDocs(collection(db, 'deadlines'));
+  const now = new Date();
+  const submittedMonths = new Set(journals.filter(j => j.semester === sem).map(j => Number(j.month)));
+  const overdue = [];
+  snap.docs.forEach(d => {
+    const dd = d.data();
+    if (dd.semester !== sem || !dd.month || !dd.closeDate) return;
+    const close = new Date(dd.closeDate + 'T23:59:59+08:00');
+    if (close < now && !submittedMonths.has(Number(dd.month))) overdue.push(Number(dd.month));
+  });
+  return overdue.sort((a,b) => a-b);
+}
+
+async function loadStudentDashboard() {
+  if (!currentUser) return;
+  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
+  const [y, t] = sem.split('-').map(Number);
+  document.getElementById('s-dashboard-subtitle').textContent =
+    `${y}學年第${t}學期 ／ ${currentUser.name} 同學${currentUser.company ? '・' + currentUser.company : ''}`;
+  ['submitted', 'teacher', 'overdue'].forEach(key => {
+    document.getElementById(`stat-detail-${key}`)?.classList.add('hidden');
+  });
+  try {
+    const snap = await getMyJournalDocs();
+    const journals = snap.docs.map(d => d.data());
+    // 依 semester 再依 month 排序（與 loadStudentHistory()/exportMyPDF() 同邏輯一致），避免 Firestore 回傳順序不固定
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+
+    // 本月繳交狀態
+    const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
+    document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
+      '<span class="badge badge-green">✅ 本月已繳</span>' :
+      '<span class="badge badge-red">❌ 本月未繳</span>';
+
+    // 已繳交（累計）
+    document.getElementById('s-submitted-count').textContent = journals.length;
+    document.getElementById('stat-detail-submitted').innerHTML = renderSubmittedMonthsDetail(journals);
+
+    // 老師已審閱／有新評語（合併卡）
+    const teacherList = getTeacherStatusJournals(journals);
+    document.getElementById('s-teacher-count').textContent = teacherList.length;
+    document.getElementById('stat-detail-teacher').innerHTML = renderTeacherStatusDetail(teacherList);
+
+    // 已逾期
+    const overdueMonths = await getOverdueMonths(sem, journals);
+    document.getElementById('s-overdue-count').textContent = overdueMonths.length;
+    document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
+      ? overdueMonths.map(m => `<div class="stat-detail-row">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
+      : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
+    syncStatCardHeights();
+  } catch (e) {
+    console.error('載入首頁統計失敗', e);
+    document.getElementById('s-submitted-count').textContent = '-';
+    document.getElementById('s-overdue-count').textContent = '-';
+    document.getElementById('s-teacher-count').textContent = '-';
+    document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
+    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  }
+}
+
+async function loadStudentStats() {
+  if (!currentUser) return;
+  try {
+    const snap = await getMyJournalDocs();
+    const journals = snap.docs.map(d => d.data());
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    renderStudentSalaryLineChart(journals);
+    renderStudentCityChart(journals);
+    renderStudentWorkTypeChart(journals);
+  } catch (e) {
+    console.error('載入統計圖表失敗', e);
+    const errHtml = '<div class="s-chart-empty">⚠️ 資料載入失敗，請重新整理</div>';
+    const wc = document.getElementById('s-work-type-chart'); if (wc) wc.innerHTML = errHtml;
+    const cc = document.getElementById('s-city-chart'); if (cc) cc.innerHTML = errHtml;
+    const sc = document.getElementById('s-salary-line-chart'); if (sc) sc.innerHTML = errHtml;
+    toast('統計資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  }
+}
+
+
+// 圓餅圖弧形路徑共用函式：當某類別佔比達100%（ratio≈1）時，弧形的起點與終點座標會重合，
+// 依 SVG 規範瀏覽器會直接省略該弧形（視為沒有這段弧），導致整個圓形完全不顯示、只剩圖例文字。
+// 改用兩個半圓弧拼成完整圓形繞過此邊界案例。renderStudentWorkTypeChart/renderStudentCityChart 共用。
+function pieSlicePath(cx, cy, r, sa, ea, ratio) {
+  if (ratio >= 0.999999) {
+    return `M ${cx} ${cy-r} A ${r} ${r} 0 1 1 ${cx} ${cy+r} A ${r} ${r} 0 1 1 ${cx} ${cy-r} Z`;
+  }
+  const x1 = cx + r * Math.cos(sa), y1 = cy + r * Math.sin(sa);
+  const x2 = cx + r * Math.cos(ea), y2 = cy + r * Math.sin(ea);
+  const la = ratio > 0.5 ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+}
+
+function renderStudentWorkTypeChart(journals) {
+  const container = document.getElementById('s-work-type-chart');
+  if (!container) return;
+  // 統計各工作類型累計次數（「其他（XXX）」歸類為「其他」）
+  const counts = {};
+  journals.forEach(j => {
+    (j.entries || []).forEach(e => {
+      if (!e.type) return;
+      const type = (e.type.startsWith('其他（') && e.type.endsWith('）')) ? '其他' : e.type;
+      counts[type] = (counts[type] || 0) + 1;
+    });
+  });
+  const entries = Object.entries(counts).filter(([,v]) => v > 0).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) {
+    container.innerHTML = '<div class="s-chart-empty">📊 尚無工作記錄</div>';
+    return;
+  }
+  const COLORS = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#7c3aed','#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6','#14b8a6','#f43f5e','#a78bfa','#34d399'];
+  const total = entries.reduce((s,[,v]) => s+v, 0);
+  const R = 68, CX = 80, CY = 80, W = 160, H = 160;
+  let angle = -Math.PI / 2;
+  const slices = entries.map(([label, count], i) => {
+    const ratio = count / total;
+    const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
+    const color = COLORS[i % COLORS.length];
+    const safeLabel = escapeHtml(label);
+    return { label, count, ratio, color,
+      path: pieSlicePath(CX, CY, R, sa, ea, ratio),
+      tip: `${safeLabel}：${count}次（${Math.round(ratio*100)}%）` };
+  });
+  const pathsSvg = slices.map(s =>
+    `<path d="${s.path}" fill="${s.color}" stroke="var(--bg2)" stroke-width="2" data-tip="${escapeHtml(s.tip)}" class="s-pie-slice" style="cursor:pointer;transition:opacity 0.15s"/>`
+  ).join('');
+  const legendHtml = entries.map(([label, count], i) =>
+    `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${COLORS[i%COLORS.length]}"></span><span style="font-size:11px;color:var(--text)">${escapeHtml(label)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`
+  ).join('');
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:center">
+    <div style="position:relative;flex-shrink:0">
+      <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-pie-svg">${pathsSvg}</svg>
+      <div id="s-pie-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+    </div>
+    <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
+  </div>`;
+  container.querySelectorAll('.s-pie-slice').forEach(path => {
+    path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    path.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect = container.getBoundingClientRect();
+      let lx = e.clientX - rect.left + 12, ly = e.clientY - rect.top - 12;
+      if (lx + 200 > rect.width) lx = e.clientX - rect.left - 200;
+      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+    });
+    path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    // 觸控：點一下顯示 tooltip，再點別處隱藏
+    path.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent = this.getAttribute('data-tip');
+      tipEl.style.display = 'block';
+      const rect = container.getBoundingClientRect();
+      const touch = e.changedTouches?.[0] || e;
+      let lx = (touch.clientX || e.clientX) - rect.left + 12;
+      let ly = (touch.clientY || e.clientY) - rect.top - 12;
+      if (lx + 200 > rect.width) lx = (touch.clientX || e.clientX) - rect.left - 200;
+      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+}
+
+// 台灣 22 縣市標準名稱（與 teacher.html 同步，用最早出現的縣市全名比對）
+const TW_CITIES = ['臺北市','新北市','桃園市','臺中市','臺南市','高雄市','新竹市','嘉義市','基隆市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
+function extractCityFromAddress(address) {
+  const addr = String(address || '').replace(/^\d{3,6}\s*/, '').replace(/台/g, '臺');
+  let best = null;
+  for (const city of TW_CITIES) {
+    const idx = addr.indexOf(city);
+    if (idx !== -1 && (best === null || idx < best.idx)) best = { idx, city };
+  }
+  return best ? best.city.replace(/臺/g, '台') : '';
+}
+
+function renderStudentCityChart(journals) {
+  const container = document.getElementById('s-city-chart');
+  if (!container) return;
+  // 統計每筆工作記錄的縣市（有地址才算）
+  const counts = {};
+  journals.forEach(j => {
+    (j.entries || []).forEach(e => {
+      const addr = (e.address || '').trim();
+      if (!addr) return;
+      const city = extractCityFromAddress(addr) || '其他/未知';
+      counts[city] = (counts[city] || 0) + 1;
+    });
+  });
+  const entries = Object.entries(counts).filter(([,v]) => v > 0).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) {
+    container.innerHTML = '<div class="s-chart-empty">🗺️ 尚無工作地址記錄</div>';
+    return;
+  }
+  // 台中市用系統藍色，其他縣市依序配色
+  const CITY_COLORS = ['#f59e0b','#ef4444','#7c3aed','#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6','#14b8a6','#f43f5e','#a78bfa','#34d399','#fb923c'];
+  const TAICHUNG = '台中市';
+  const total = entries.reduce((s,[,v]) => s+v, 0);
+  let colorIdx = 0;
+  const colorMap = {};
+  entries.forEach(([city]) => {
+    colorMap[city] = city === TAICHUNG ? '#4f8ef7' : CITY_COLORS[colorIdx++ % CITY_COLORS.length];
+  });
+
+  const R = 68, CX = 80, CY = 80, W = 160, H = 160;
+  let angle = -Math.PI / 2;
+  const slices = entries.map(([city, count]) => {
+    const ratio = count / total;
+    const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
+    const color = colorMap[city];
+    return { city, count, ratio, color,
+      path: pieSlicePath(CX, CY, R, sa, ea, ratio),
+      tip: `${escapeHtml(city)}：${count}次（${Math.round(ratio*100)}%）` };
+  });
+  const pathsSvg = slices.map(s =>
+    `<path d="${s.path}" fill="${s.color}" stroke="var(--bg2)" stroke-width="2" data-tip="${escapeHtml(s.tip)}" class="s-city-slice" style="cursor:pointer;transition:opacity 0.15s"/>`
+  ).join('');
+  const legendHtml = entries.map(([city, count]) => {
+    const isLocal = city === TAICHUNG;
+    return `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${colorMap[city]}"></span><span style="font-size:11px;color:${isLocal ? 'var(--accent)' : 'var(--accent-yellow)'};font-weight:${isLocal ? '600' : '400'}">${escapeHtml(city)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`;
+  }).join('');
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:center">
+    <div style="position:relative;flex-shrink:0">
+      <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-city-svg">${pathsSvg}</svg>
+      <div id="s-city-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+    </div>
+    <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
+  </div>`;
+  const tipEl = container.querySelector('#s-city-tip');
+  container.querySelectorAll('.s-city-slice').forEach(path => {
+    path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    path.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect=container.getBoundingClientRect();
+      let lx=e.clientX-rect.left+12, ly=e.clientY-rect.top-12;
+      if(lx+200>rect.width) lx=e.clientX-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+    });
+    path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    path.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
+      const rect=container.getBoundingClientRect();
+      const touch=e.changedTouches?.[0]||e;
+      let lx=(touch.clientX||e.clientX)-rect.left+12;
+      let ly=(touch.clientY||e.clientY)-rect.top-12;
+      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+}
+
+function renderStudentSalaryLineChart(journals) {
+  const container = document.getElementById('s-salary-line-chart');
+  if (!container) return;
+  // 只取有薪資的月記，依學期+月份時間軸排序
+  const sorted = journals
+    .filter(j => j.salary != null && Number.isFinite(Number(j.salary)))
+    .map(j => {
+      const [roc, half] = String(j.semester||'').split('-').map(Number);
+      const m = j.month || 0;
+      let year = (roc||0) + 1911;
+      if (half === 1 && m === 1) year += 1;
+      if (half === 2) year += 1;
+      const label = `${year}/${String(m).padStart(2,'0')}`;
+      return { label, salary: Number(j.salary), semester: j.semester||'', month: m };
+    })
+    .sort((a,b) => a.label.localeCompare(b.label));
+  // 同月有多筆取平均（邊界案例）
+  const byLabel = {};
+  sorted.forEach(p => {
+    if (!byLabel[p.label]) byLabel[p.label] = [];
+    byLabel[p.label].push(p.salary);
+  });
+  const points = Object.entries(byLabel)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([label, vals]) => ({ label, salary: Math.round(vals.reduce((s,v)=>s+v,0)/vals.length) }));
+  if (!points.length) {
+    container.innerHTML = '<div class="s-chart-empty">📈 尚無薪資資料</div>';
+    return;
+  }
+  if (points.length === 1) {
+    container.innerHTML = `<div class="s-chart-empty">💰 ${escapeHtml(points[0].label)}：$${points[0].salary.toLocaleString()} 元<br><span style="font-size:12px;color:var(--text2)">（兩個月以上才會顯示趨勢圖）</span></div>`;
+    return;
+  }
+  const W=560, H=160, ML=68, MR=14, MT=10, MB=32;
+  const plotW=W-ML-MR, plotH=H-MT-MB, n=points.length;
+  const vals = points.map(p=>p.salary);
+  const maxV = Math.max(...vals), rawMin = Math.min(...vals);
+  const pad = (maxV-rawMin)*0.18 || maxV*0.18 || 2000;
+  const minVal = Math.max(0, rawMin-pad);
+  const yRange = (maxV+pad)-minVal || 1;
+  const xPos = i => ML + (n>1 ? i*plotW/(n-1) : plotW/2);
+  const yPos = v => MT+plotH-((v-minVal)/yRange)*plotH;
+  function smPath(pts) {
+    if (!pts.length) return '';
+    if (pts.length===1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i=0;i<pts.length-1;i++) {
+      const [x0,y0]=pts[i],[x1,y1]=pts[i+1],cx=(x0+x1)/2;
+      d += ` C ${cx.toFixed(1)} ${y0.toFixed(1)} ${cx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
+  }
+  let sp = [];
+  // Y 軸格線與標籤
+  for (let i=0;i<5;i++) {
+    const v=minVal+(yRange/4)*i, y=yPos(v).toFixed(1);
+    sp.push(`<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`);
+    sp.push(`<text x="${ML-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--text2)">$${Math.round(v/1000)}k</text>`);
+  }
+  // X 軸
+  const step = n <= 12 ? 1 : Math.ceil(n/10);
+  points.forEach((p,i) => {
+    if (i % step !== 0 && i !== n-1) return;
+    const x=xPos(i).toFixed(1), yBt=(MT+plotH).toFixed(1);
+    sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`);
+    // 第一個／最後一個刻度文字改用 start/end 對齊（而非置中），避免文字超出 viewBox 左右邊界。
+    // 寬螢幕時 SVG 因高度被限制住，左右會留白，置中文字超出 viewBox 範圍仍落在留白裡所以看得到；
+    // 窄螢幕（手機）時 SVG 改成寬度撐滿、無留白，超出 viewBox 範圍的文字會直接被裁掉不顯示。
+    const anchor = (i === n-1) ? 'end' : (i === 0 ? 'start' : 'middle');
+    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="${anchor}" font-size="10" fill="var(--text2)">${escapeHtml(p.label)}</text>`);
+  });
+  sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
+  sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
+  // 折線 + 漸層填色
+  const pathD = smPath(points.map((p,i)=>[xPos(i),yPos(p.salary)]));
+  const fillD = pathD + ` L ${xPos(n-1).toFixed(1)} ${(MT+plotH).toFixed(1)} L ${xPos(0).toFixed(1)} ${(MT+plotH).toFixed(1)} Z`;
+  sp.push(`<defs><linearGradient id="s-sal-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/></linearGradient></defs>`);
+  sp.push(`<path d="${fillD}" fill="url(#s-sal-grad)"/>`);
+  sp.push(`<path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+  // 資料點
+  points.forEach((p,i) => {
+    const x=xPos(i).toFixed(1), y=yPos(p.salary).toFixed(1);
+    sp.push(`<circle cx="${x}" cy="${y}" r="4.5" fill="var(--accent)" stroke="var(--bg2)" stroke-width="2" class="s-sal-dot" data-tip="${escapeHtml(p.label)}：$${p.salary.toLocaleString()} 元" style="cursor:pointer"/>`);
+  });
+  container.innerHTML = `<div style="position:relative;width:100%">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="s-sal-svg">${sp.join('')}</svg>
+    <div id="s-sal-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+  </div>`;
+  const tipEl = container.querySelector('#s-sal-tip');
+  container.querySelectorAll('.s-sal-dot').forEach(dot => {
+    dot.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    dot.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect=container.getBoundingClientRect();
+      let lx=e.clientX-rect.left+14, ly=e.clientY-rect.top-14;
+      if (lx+200>rect.width) lx=e.clientX-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+    });
+    dot.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    dot.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
+      const rect=container.getBoundingClientRect();
+      const touch=e.changedTouches?.[0]||e;
+      let lx=(touch.clientX||e.clientX)-rect.left+14;
+      let ly=(touch.clientY||e.clientY)-rect.top-14;
+      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+}
+
+function initWriteMonths() {
+  const mSel = document.getElementById('write-month');
+  if (!mSel) return;
+  mSel.innerHTML = '';
+  const { semester: currentSem, month: thisMonth } = getCurrentSemMonth();
+  const sem = document.getElementById('write-semester')?.value || getCurrentSemester();
+  const order = getSemesterMonths(sem);
+  const monthsFromDeadlines = writeDeadlineDocs
+    .filter(d => d.semester === sem)
+    .map(d => Number(d.month))
+    .filter(m => order.includes(m));
+  const months = monthsFromDeadlines.length ? [...new Set(monthsFromDeadlines)].sort((a,b) => order.indexOf(a) - order.indexOf(b)) : order;
+  months.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = `${m}月`;
+    if (sem === currentSem && m === thisMonth) opt.selected = true;
+    mSel.appendChild(opt);
+  });
+  if (!mSel.value && mSel.options.length) mSel.selectedIndex = 0;
+}
+
+async function initWriteForm(skipDeadlineCheck = false) {
+  if (!currentUser) return;
+  const { collection, getDocs } = firebase_funcs;
+  const snap = await getDocs(collection(db, 'deadlines'));
+  const now = new Date();
+  const semMap = {};
+  writeDeadlineDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  snap.docs.forEach(d => {
+    const dd = d.data();
+    const openDate = new Date(dd.openDate);
+    const closeDate = new Date(dd.closeDate);
+    if (dd.semester && dd.month) {
+      // 收錄所有有截止日設定的學期（含未開放），未開放月份由 checkMonthDeadline() 鎖定儲存
+      if (!semMap[dd.semester]) semMap[dd.semester] = { label: dd.semesterLabel || dd.semester, latestOpen: openDate };
+      else if (openDate > semMap[dd.semester].latestOpen) semMap[dd.semester].latestOpen = openDate;
+    }
+  });
+  const writeSemSel = document.getElementById('write-semester');
+  const sems = Object.keys(semMap);
+  if (sems.length === 0) {
+    populateSemesterSelects('write-semester');
+  } else {
+    const cur = getCurrentSemester();
+    sems.sort((a, b) => (a === cur ? -1 : b === cur ? 1 : semMap[b].latestOpen - semMap[a].latestOpen));
+    writeSemSel.innerHTML = sems.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(semMap[k].label || '')}</option>`).join('');
+    writeSemSel.value = sems.includes(cur) ? cur : sems[0];
+  }
+  initWriteMonths();
+  document.getElementById('write-company').value = currentUser.company || '';
+  // checkMonthDeadline 會自動載入或清空該月份資料
+  // editJournal() 會傳入 true 跳過此呼叫，避免背景非同步重新讀取目前真實學期/月份的資料，蓋掉剛載入的編輯內容
+  if (!skipDeadlineCheck) checkMonthDeadline();
+  updateWriteProgress();
+}
+
+
+async function checkMonthDeadline(skipFill = false) {
+  if (!currentUser) return;
+  const sem = document.getElementById('write-semester').value;
+  const month = parseInt(document.getElementById('write-month').value);
+  if (!sem || !month) return;
+  const { doc, getDoc } = firebase_funcs;
+  const saveBtn = document.getElementById('save-journal-btn');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '💾 儲存月記';
+  }
+
+  // 1. 檢查截止日期
+  const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
+  const el = document.getElementById('write-deadline-status');
+  if (!deadlineSnap.exists()) {
+    el.innerHTML = '<span class="badge badge-yellow">⚠️ 此月份尚未設定截止日期，仍可填寫</span>';
+  } else {
+    const d = deadlineSnap.data();
+    const now = new Date();
+    const open = new Date(d.openDate + 'T00:00:00+08:00');
+    const close = new Date(d.closeDate + 'T23:59:59+08:00');
+    if (now < open) {
+      el.innerHTML = `<span class="badge badge-yellow">⏳ 開放日：${escapeHtml(d.openDate)}（尚未開放）</span>`;
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '⏳ 尚未開放';
+      }
+    } else if (now > close) {
+      el.innerHTML = `<span class="badge badge-yellow">⚠️ 已截止（${escapeHtml(d.closeDate)}），仍可補交，系統會標記為遲繳</span>`;
+    } else {
+      el.innerHTML = `<span class="badge badge-green">✅ 上傳中，截止日：${escapeHtml(d.closeDate)}</span>`;
+    }
+  }
+
+  // 2. 載入此月份已有的資料（有就填入，沒有就清空）
+  // skipFill=true 時（editJournal 呼叫）僅更新截止日狀態，不覆蓋表單
+  if (skipFill) return;
+  const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
+  // 快取查詢結果供 saveJournal 直接使用，避免儲存時重複 Firestore 讀取
+  window._currentJournalCache = journalSnap.exists()
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
+    : { exists: false };
+  if (journalSnap.exists()) {
+    const j = journalSnap.data();
+    document.getElementById('write-salary').value = j.salary ?? '';
+    document.getElementById('write-mentor').value = j.mentor || '';
+    document.getElementById('write-reflection').value = j.reflection || '';
+    // 薪資單照片
+    const preview = document.getElementById('salary-photo-preview');
+    if (j.salaryPhoto) {
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" data-base64="${escapeHtml(j.salaryPhoto)}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
+    } else { preview.innerHTML = ''; }
+    // 工作摘要
+    const container = document.getElementById('work-entries-container');
+    container.innerHTML = ''; entryCount = 0;
+    (j.entries || []).forEach(e => {
+      addWorkEntry();
+      const id = `entry-${entryCount}`;
+      document.getElementById(`${id}-date`).value = toDateVal(e.date || '');
+      const typeEl = document.getElementById(`${id}-type`);
+      if (typeEl) {
+        if (e.type && e.type.startsWith('其他（') && e.type.endsWith('）')) {
+          typeEl.value = '其他';
+          const otherInputEl = document.getElementById(`${id}-other-input`);
+          if (otherInputEl) otherInputEl.value = e.type.slice(3, -1);
+          showWorkTypeExample(id);
+        } else {
+          typeEl.value = e.type || '';
+        }
+      }
+      document.getElementById(`${id}-address`).value = e.address || '';
+      document.getElementById(`${id}-content`).value = e.content || '';
+      if (e.distance != null) { const m = document.getElementById(`${id}-dist-manual`); if (m) m.value = e.distance; }
+      if (e.noPhoto) { document.getElementById(`${id}-nophoto`).checked = true; toggleNoPhoto(id); }
+      if (e.photos?.length) {
+        const photoGrid = document.getElementById(`${id}-photos`);
+        e.photos.forEach(p => {
+          const wrap = document.createElement('div'); wrap.className = 'photo-thumb-wrap';
+          const _ps = escapeHtml(resolveImgSrc(p));
+          wrap.innerHTML = `<img src="${_ps}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove()">×</button>`;
+          wrap.querySelector('img').dataset.base64 = p;
+          photoGrid.appendChild(wrap);
+        });
+      }
+    });
+    if (!j.entries?.length) addWorkEntry();
+    el.innerHTML += ' <span class="badge badge-blue">📝 已有資料，修改後儲存即覆蓋</span>';
+    // 檢查所有工作摘要日期是否符合所選月份
+    setTimeout(() => {
+      document.querySelectorAll('#work-entries-container .entry-item').forEach(entryDiv => {
+        const entryId = entryDiv.id;
+        if (entryId) checkEntryDateMismatch(entryId);
+      });
+    }, 100);
+  } else {
+    // 清空所有欄位，同時清除快取（新月份沒有舊資料）
+    window._currentJournalCache = { exists: false };
+    document.getElementById('write-salary').value = '';
+    document.getElementById('write-mentor').value = '';
+    document.getElementById('write-reflection').value = '';
+    document.getElementById('salary-photo-preview').innerHTML = '';
+    const container = document.getElementById('work-entries-container');
+    container.innerHTML = ''; entryCount = 0;
+    addWorkEntry();
+  }
+  applyWriteDraftIfAvailable();
+}
+
+// ---- 工作摘要日期輔助 ----
+function getSelectedCEYearMonth() {
+  const sem = document.getElementById('write-semester')?.value || '';
+  const month = parseInt(document.getElementById('write-month')?.value || '0');
+  if (!sem || !month) return null;
+  const twYear = parseInt(sem.split('-')[0]);
+  const semType = parseInt(sem.split('-')[1]);
+  let ceYear = twYear + 1911;
+  // 第1學期：7~12月屬當年，1月屬下一個西元年
+  if (semType === 1 && month === 1) ceYear += 1;
+  // 第2學期：2~6月屬下一個西元年
+  if (semType === 2) ceYear += 1;
+  return { year: ceYear, month };
+}
+
+function checkEntryDateMismatch(id) {
+  const dateInput = document.getElementById(`${id}-date`);
+  if (!dateInput || !dateInput.value) return;
+  const sel = getSelectedCEYearMonth();
+  if (!sel) return;
+  const parts = dateInput.value.split('-').map(Number);
+  const inputYear = parts[0], inputMonth = parts[1];
+  if (inputYear !== sel.year || inputMonth !== sel.month) {
+    toast(`⚠️ 工作摘要日期（${inputYear}年${inputMonth}月）與所選月份（${sel.year}年${sel.month}月）不吻合，請確認是否有誤`, 'error');
+  }
+}
+
+// ---- 工作摘要 ----
+const WORK_TYPES = ['保養維護','設備維修','冷氣安裝','冷凍設備安裝','管路配管','焊接作業','冷媒充填/回收','電路檢測','零件更換','消防設備檢查','倉儲管理','行政協助','現場清潔','其他'];
+const WORK_TYPE_EXAMPLES = {
+  '保養維護': [
+    '至○○公司進行冷氣主機例行保養，清洗濾網、檢查冷媒壓力，並填寫保養記錄表。',
+    '到○○大樓進行年度空調保養，清潔蒸發器盤管及排水管，並測試溫度感應器運作正常。',
+    '至○○住家進行分離式冷氣季節保養，拆洗濾網與外殼，並檢查冷媒管路有無結霜異常。'
+  ],
+  '設備維修': [
+    '協助師傅排查○○大樓分離式冷氣異常，確認壓縮機電容故障後進行更換。',
+    '至○○工廠處理中央空調無法啟動的問題，排查後發現為控制板保險絲燒毀，更換後恢復運轉。',
+    '協助師傅檢修○○店面窗型冷氣不冷的狀況，發現為冷媒外洩造成，初步處理後安排補冷媒。'
+  ],
+  '冷氣安裝': [
+    '至○○建案協助安裝分離式冷氣室內外機，完成配管及電線配置，並測試運轉正常。',
+    '協助於○○住宅新建案安裝多聯式空調室內機，完成管路抽真空作業並確認無洩漏。',
+    '至○○辦公室安裝吊隱式冷氣機，配合師傅施作風管與排水配置，最後試運轉確認出風正常。'
+  ],
+  '冷凍設備安裝': [
+    '協助於○○超市安裝冷凍展示櫃，進行管路配接及冷媒灌充，完成試運轉。',
+    '至○○餐廳協助安裝商用冷藏庫，進行隔間板組裝與壓縮機連接，並設定溫控器參數。',
+    '協助於○○工廠安裝急速冷凍機，配合師傅進行管路保溫施工並測試降溫速率。'
+  ],
+  '管路配管': [
+    '在○○工廠協助進行冷媒銅管配管，使用彎管器製作彎管並以銲接接合。',
+    '至○○大樓協助配置冷媒管路保溫工程，依圖面裁切保溫材並包覆固定於銅管外。',
+    '協助師傅在○○住家進行配管路徑規劃，沿牆角開孔配管並使用固定夾整線。'
+  ],
+  '焊接作業': [
+    '協助師傅進行冷媒銅管的硬銲作業，使用銀銲條完成接頭焊接並做氣密測試。',
+    '在○○工地協助進行冷媒管路氮氣保護銲接，避免管內氧化並完成接頭密合。',
+    '協助師傅修補○○設備銅管破損處，以銀/銅銲條補銲後進行站壓測漏確認無洩漏。'
+  ],
+  '冷媒充填/回收': [
+    '使用冷媒回收機將舊設備冷媒回收至鋼瓶，再對新機組充填適量冷媒並確認壓力值。',
+    '協助於○○大樓進行汰換工程，將舊機冷媒完整回收後依規定填寫回收紀錄表。',
+    '至○○客戶端為新安裝機組進行抽真空與冷媒灌充，依銘牌標示秤重充填並確認運轉壓力。'
+  ],
+  '電路檢測': [
+    '以三用電表量測室外機電路，確認電容容值及壓縮機線圈阻值均在正常範圍。',
+    '協助排查○○設備跳電原因，使用三用電表逐一檢測迴路，找出短路點並回報師傅處理。',
+    '至○○工廠檢測冷氣控制箱接線，確認各端子電壓正常，並標示老舊線路建議更換。'
+  ],
+  '零件更換': [
+    '更換○○客戶冷氣室外機風扇馬達，拆除舊馬達後對照規格安裝新品並測試。',
+    '協助更換○○大樓中央空調的過濾網與皮帶，確認規格相符後安裝並試運轉檢查噪音。',
+    '至○○住家更換故障的冷氣遙控接收板，拆裝面板後安裝新零件並測試訊號接收正常。'
+  ],
+  '消防設備檢查': [
+    '至○○進行消防安檢，逐一確認滅火器壓力表及藥劑期限並填寫記錄表。',
+    '協助於○○大樓檢查室內消防栓出水狀況，確認水壓正常並記錄檢查結果。',
+    '至○○工廠進行火警受信總機測試，逐區按壓探測器確認警報正常並回報異常區域。'
+  ],
+  '倉儲管理': [
+    '協助盤點冷凍零件庫存，清點各型號銅管接頭、濾心等耗材並更新電腦資料。',
+    '協助整理倉庫內冷媒鋼瓶，依品項分類擺放並標示存量，避免混用造成施工錯誤。',
+    '協助盤點本月領用的管材與耗材數量，核對出庫紀錄並回報主管確認庫存無誤。'
+  ],
+  '行政協助': [
+    '協助整理客戶保養合約資料，建立本月到期保養名單並製作排程表。',
+    '協助建立客戶報修紀錄表，將本週維修案件依日期與地區分類整理。',
+    '協助公司整理本月施工照片與工時紀錄，依案件編號歸檔以利後續核銷作業。'
+  ],
+  '現場清潔': [
+    '工作完成後協助清潔施工現場，整理工具並確認無任何材料遺留於現場。',
+    '安裝完成後協助回收包裝材料與廢棄管材，並將施工區域恢復原狀。',
+    '協助清潔室外機平台周邊環境，移除施工產生的金屬屑與膠帶殘留。'
+  ],
+};
+// 每筆工作摘要（依 id）目前輪播到第幾句範例，彼此獨立
+let entryExampleIndex = {};
+
+let entryCount = 0;
+function addWorkEntry() {
+  entryCount++;
+  const id = `entry-${entryCount}`;
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'entry-item';
+  div.style.marginBottom = '12px';
+  const typeOptions = WORK_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <strong style="font-size:13px">工作摘要 #${entryCount}</strong>
+      <button class="btn btn-danger btn-sm" onclick="removeEntry('${id}')">移除</button>
+    </div>
+    <div class="form-row" style="margin-bottom:8px">
+      <div class="form-group"><label>日期</label><input type="date" id="${id}-date" onchange="checkEntryDateMismatch('${id}')"></div>
+      <div class="form-group">
+        <label>工作類型</label>
+        <select id="${id}-type" onchange="showWorkTypeExample('${id}')">
+          <option value="">請選擇類型</option>${typeOptions}
+        </select>
+        <div id="${id}-other-wrap" style="display:none;margin-top:8px">
+          <input type="text" id="${id}-other-input" placeholder="請輸入補充說明" style="width:100%">
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>工作地點地址（用於計算距學校參考距離）</label>
+      <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="width:100%" oninput="clearDistResult('${id}')">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="calcDistance('${id}')">📍 計算距離</button>
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="useCurrentLocation('${id}')">📌 目前位置</button>
+      </div>
+      <div id="${id}-dist-result"></div>
+      <div id="${id}-dist-manual-wrap" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text2)">📝 微調距離：</span>
+        <input type="number" id="${id}-dist-manual" min="0" step="0.1" style="width:100px;padding:6px 10px;font-size:13px" placeholder="例：4.2">
+        <span style="font-size:12px;color:var(--text2)">km</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span><button type="button" id="${id}-example-cycle" class="btn btn-secondary btn-sm" style="display:none;margin-left:6px;padding:1px 7px;font-size:11px;vertical-align:middle" onclick="cycleWorkTypeExample('${id}')" title="換一句範例寫法">🔄</button></label>
+      <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
+    </div>
+    <div class="form-group">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label style="margin:0">工作照片</label>
+        <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;font-size:12px;color:var(--text2)">
+          <input type="checkbox" id="${id}-nophoto" onchange="toggleNoPhoto('${id}')" style="width:auto">
+          不便拍照
+        </label>
+      </div>
+      <div id="${id}-photo-area">
+        <div class="photo-upload-area" onclick="triggerPhotoUpload('${id}')" style="padding:16px">
+          <div style="font-size:22px;margin-bottom:4px">📷</div>
+          <div style="font-size:12px;color:var(--text2)">點擊或拖曳上傳工作照片</div>
+        </div>
+        <input type="file" id="${id}-file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${id}')">
+        <div id="${id}-photos" class="photo-preview-grid"></div>
+      </div>
+      <div id="${id}-nophoto-label" class="hidden" style="color:var(--text2);font-size:13px;padding:8px 0">📵 已選擇不拍照</div>
+    </div>
+  `;
+  document.getElementById('work-entries-container').appendChild(div);
+
+  // 自動引導日期到所選月份
+  const sel = getSelectedCEYearMonth();
+  if (sel) {
+    const dateEl = document.getElementById(`${id}-date`);
+    if (dateEl && !dateEl.value) {
+      dateEl.value = `${sel.year}-${String(sel.month).padStart(2,'0')}-01`;
+    }
+  }
+  updateWriteProgress();
+}
+
+function showWorkTypeExample(id) {
+  const type = document.getElementById(`${id}-type`).value;
+  const otherWrap = document.getElementById(`${id}-other-wrap`);
+  if (otherWrap) otherWrap.style.display = (type === '其他') ? 'block' : 'none';
+  // 切換工作類型時，範例輪播重置回第①句
+  entryExampleIndex[id] = 0;
+  renderWorkTypeExample(id);
+}
+
+function renderWorkTypeExample(id) {
+  const type = document.getElementById(`${id}-type`)?.value;
+  const text = document.getElementById(`${id}-example-text`);
+  const cycleBtn = document.getElementById(`${id}-example-cycle`);
+  const examples = (type && type !== '其他') ? WORK_TYPE_EXAMPLES[type] : null;
+  if (text) {
+    if (examples && examples.length) {
+      const idx = entryExampleIndex[id] || 0;
+      text.textContent = '（例：' + examples[idx] + '）';
+    } else {
+      text.textContent = '';
+    }
+  }
+  if (cycleBtn) cycleBtn.style.display = (examples && examples.length > 1) ? 'inline-block' : 'none';
+}
+
+function cycleWorkTypeExample(id) {
+  const type = document.getElementById(`${id}-type`)?.value;
+  const examples = (type && type !== '其他') ? WORK_TYPE_EXAMPLES[type] : null;
+  if (!examples || !examples.length) return;
+  const cur = entryExampleIndex[id] || 0;
+  entryExampleIndex[id] = (cur + 1) % examples.length;
+  renderWorkTypeExample(id);
+}
+
+function removeEntry(id) {
+  document.getElementById(id)?.remove();
+  updateWriteProgress();
+  scheduleWriteDraftSave();
+}
+
+// ---- 地址轉距離 ----
+const SCHOOL_LAT = 24.114537725329328;
+const SCHOOL_LNG = 120.66152744232892;
+
+function stripPostalCode(addr) { return addr.replace(/^\d{3,6}[\s]?/, '').trim(); }
+function normalizeTaiwanAddress(addr) { return (addr || '').trim().replace(/\s+/g, '').replace(/台/g, '臺'); }
+function stripNeighborhood(addr) {
+  return addr.replace(/([區鄉鎮市])[^縣市區鄉鎮]{1,8}[里村](?=[^縣市區鄉鎮]{1,12}(?:大道|路|街|巷|弄))/g, '$1');
+}
+function preprocessAddress(addr) { let a = normalizeTaiwanAddress(addr); a = stripPostalCode(a); a = stripNeighborhood(a); return a; }
+
+function validateCompleteTaiwanAddress(addr) {
+  const clean = preprocessAddress(addr);
+  if (!clean) return '請輸入工作地點地址';
+  const hasCity = /^[\u4e00-\u9fff]{2,}(縣|市)/.test(clean);
+  const hasRoad = /(大道|路|街|巷|弄|段)/.test(clean);
+  const hasHouseNo = /\d+\s*(號|之\d+號?|[-－]\d+)/.test(clean);
+  if (!hasCity || !hasRoad || !hasHouseNo) {
+    return '工作地址請填完整地址，需包含縣市、路名與門牌號碼，例如：臺中市南區高工路191號；不能只填地標、公司名稱或只有路名';
+  }
+  return '';
+}
+
+function isTaiwanCoord(lat, lng) { return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 21.5 && lat <= 25.5 && lng >= 119 && lng <= 122.5; }
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function clearDistResult(id) {
+  document.getElementById(`${id}-dist-result`).innerHTML = '';
+  const m = document.getElementById(`${id}-dist-manual`);
+  if (m) { m.value = ''; m.dataset.autoFilled = ''; }
+}
+
+// GPS 定位：取得目前位置並計算距學校距離
+function useCurrentLocation(id) {
+  const resultEl = document.getElementById(`${id}-dist-result`);
+  if (!navigator.geolocation) {
+    resultEl.innerHTML = `<div style="color:var(--accent-red);font-size:13px;margin-top:6px">❌ 此裝置不支援 GPS 定位</div>`;
+    return;
+  }
+  resultEl.innerHTML = `<div style="color:var(--accent);font-size:13px;margin-top:6px">📡 正在取得 GPS 位置，請稍候...</div>`;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude } = pos.coords;
+      if (!isTaiwanCoord(latitude, longitude)) {
+        resultEl.innerHTML = `<div style="color:var(--accent-red);font-size:13px;margin-top:6px">❌ GPS 座標不在台灣範圍內，請確認定位是否正常</div>`;
+        return;
+      }
+      const distKm = haversineKm(SCHOOL_LAT, SCHOOL_LNG, latitude, longitude);
+      const finalKm = distKm < 0.1 ? '0.0' : distKm.toFixed(1);
+      resultEl.innerHTML = `<div class="dist-result">📌 距台中高工 <strong>${finalKm} km</strong>（參考）</div>`;
+      const manualInput = document.getElementById(`${id}-dist-manual`);
+      if (manualInput) { manualInput.value = finalKm; manualInput.dataset.autoFilled = '1'; }
+    },
+    (err) => {
+      const msg = err.code === 1 ? '已拒絕定位權限，請在瀏覽器設定中允許存取位置' :
+                  err.code === 2 ? 'GPS 訊號不足，請移至室外後重試' : '定位逾時，請重試';
+      resultEl.innerHTML = `<div style="color:var(--accent-red);font-size:13px;margin-top:6px">❌ ${msg}</div>`;
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+  );
+}
+
+// 開啟 Google Maps 查詢學校→工作地點開車距離
+function openGoogleMapsDistance(addr) {
+  const origin = encodeURIComponent('402臺中市南區高工路191號');
+  const dest = encodeURIComponent(addr);
+  const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+  window.open(url, '_blank');
+}
+
+// 計算距離：直接開啟 Google Maps 導航（學校→工作地址），距離由學生查看後手動填入下方欄位
+// （2026-06-20 改版：原三段式 geocoding 在外縣市/不常見地址常查詢失敗或耗時，故移除，統一改為手動查詢流程）
+function calcDistance(id) {
+  let addr = document.getElementById(`${id}-address`)?.value?.trim();
+  if (!addr) return toast('請先輸入工作地點地址', 'error');
+  const resultEl = document.getElementById(`${id}-dist-result`);
+  const addressError = validateCompleteTaiwanAddress(addr);
+  if (addressError) {
+    resultEl.innerHTML = `<div class="dist-calculating" style="color:var(--accent-red)">❌ ${escapeHtml(addressError)}</div>`;
+    return toast(addressError, 'error');
+  }
+  openGoogleMapsDistance(addr);
+  resultEl.innerHTML = `<div class="dist-result" style="color:var(--accent)">🗺️ 已開啟 Google Maps，請查看距離後手動填入下方欄位</div>`;
+  const manualInput = document.getElementById(`${id}-dist-manual`);
+  if (manualInput) { manualInput.dataset.autoFilled = ''; manualInput.focus(); }
+}
+
+function toggleNoPhoto(id) {
+  const checked = document.getElementById(`${id}-nophoto`).checked;
+  document.getElementById(`${id}-photo-area`).classList.toggle('hidden', checked);
+  document.getElementById(`${id}-nophoto-label`).classList.toggle('hidden', !checked);
+  updateWriteProgress();
+  scheduleWriteDraftSave();
+}
+
+function triggerPhotoUpload(id) { document.getElementById(`${id}-file`).click(); }
+
+// ---- Cloudinary 上傳 ----
+async function uploadToCloudinary(blob, folder) {
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) return null;
+  try {
+    const formData = new FormData();
+    formData.append('file', blob);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    if (folder) formData.append('folder', folder);
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error('上傳失敗 ' + res.status);
+    const data = await res.json();
+    return data.secure_url;
+  } catch(e) {
+    console.warn('Cloudinary 上傳失敗：', e.message);
+    return null; // 由呼叫端決定如何處理失敗
+  }
+}
+
+function disableStudentAutocomplete(root = document) {
+  if (root.matches && root.matches('input, textarea, select')) {
+    root.setAttribute('autocomplete', 'off');
+    root.setAttribute('autocorrect', 'off');
+    root.setAttribute('autocapitalize', 'off');
+    root.setAttribute('spellcheck', 'false');
+  }
+  root.querySelectorAll('input, textarea, select').forEach(el => {
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('autocorrect', 'off');
+    el.setAttribute('autocapitalize', 'off');
+    el.setAttribute('spellcheck', 'false');
+  });
+}
+
+function canvasToBlob(canvas, quality = 0.75) {
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, body] = String(dataUrl || '').split(',');
+  const mime = (header.match(/data:(.*?);base64/) || [])[1] || 'image/jpeg';
+  const binary = atob(body || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+async function uploadPendingWorkPhotos(sem) {
+  const selectedSem = sem || document.getElementById('write-semester')?.value || getCurrentSemester();
+  const folder = `tcivs/${selectedSem}/${currentUser?.seatNo || 'unknown'}`;
+  const pendingImgs = Array.from(document.querySelectorAll('#work-entries-container img[data-pending-upload="1"]'));
+  for (let i = 0; i < pendingImgs.length; i++) {
+    const imgEl = pendingImgs[i];
+    const wrap = imgEl.closest('.photo-thumb-wrap');
+    let overlay = wrap?.querySelector('.photo-uploading');
+    if (!overlay && wrap) {
+      overlay = document.createElement('div');
+      overlay.className = 'photo-uploading';
+      overlay.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:10px;color:#fff';
+      wrap.appendChild(overlay);
+    }
+    if (overlay) overlay.textContent = `上傳中 ${i + 1}/${pendingImgs.length}`;
+    const blob = dataUrlToBlob(imgEl.dataset.localDataUrl || imgEl.src);
+    const url = await uploadToCloudinary(blob, folder);
+    overlay?.remove();
+    wrap?.querySelector('.photo-pending-upload')?.remove();
+    if (!url) {
+      throw new Error('工作照片上傳失敗，請確認網路後重新按儲存');
+    }
+    imgEl.src = url;
+    imgEl.dataset.base64 = url;
+    imgEl.dataset.pendingUpload = '';
+    imgEl.dataset.localDataUrl = '';
+    imgEl.onclick = () => openPhotoModal(url);
+    // 短暫顯示「✓ 已上傳」，讓使用者知道這張已上雲端
+    if (wrap) {
+      const check = document.createElement('div');
+      check.className = 'photo-upload-success';
+      check.textContent = '✓ 已上傳';
+      wrap.appendChild(check);
+      // 動畫結束後自動移除（避免殘留 DOM）
+      check.addEventListener('animationend', () => check.remove());
+    }
+  }
+}
+
+function getWriteDraftKey() {
+  if (!currentUser?.uid) return '';
+  const sem = document.getElementById('write-semester')?.value || '';
+  const month = document.getElementById('write-month')?.value || '';
+  if (!sem || !month) return '';
+  return `studentWriteDraft:${currentUser.uid}:${sem}:${month}`;
+}
+
+function collectWriteDraft() {
+  const entries = Array.from(document.querySelectorAll('#work-entries-container > div')).map(div => {
+    const id = div.id;
+    const type = document.getElementById(`${id}-type`)?.value || '';
+    const photos = Array.from(document.querySelectorAll(`#${id}-photos img`))
+      .filter(img => img?.dataset.pendingUpload !== '1')
+      .map(img => img?.dataset.base64 || '')
+      .filter(src => src && /^https?:\/\//i.test(src));
+    return {
+      date: document.getElementById(`${id}-date`)?.value || '',
+      type,
+      other: document.getElementById(`${id}-other-input`)?.value || '',
+      address: document.getElementById(`${id}-address`)?.value || '',
+      distance: document.getElementById(`${id}-dist-manual`)?.value || '',
+      content: document.getElementById(`${id}-content`)?.value || '',
+      noPhoto: !!document.getElementById(`${id}-nophoto`)?.checked,
+      photos
+    };
+  });
+  return {
+    savedAt: Date.now(),
+    salary: document.getElementById('write-salary')?.value || '',
+    mentor: document.getElementById('write-mentor')?.value || '',
+    reflection: document.getElementById('write-reflection')?.value || '',
+    entries
+  };
+}
+
+function writeDraftHasContent(draft) {
+  if (!draft) return false;
+  if (draft.salary || draft.mentor || draft.reflection) return true;
+  return (draft.entries || []).some(e =>
+    e.date || e.type || e.other || e.address || e.distance || e.content || e.noPhoto || (e.photos || []).length
+  );
+}
+
+function saveWriteDraftNow() {
+  if (_writeDraftHydrating) return;
+  const writePage = document.getElementById('page-s-write');
+  if (writePage && writePage.classList.contains('hidden')) return;
+  const key = getWriteDraftKey();
+  if (!key) return;
+  try {
+    const draft = collectWriteDraft();
+    if (writeDraftHasContent(draft)) localStorage.setItem(key, JSON.stringify(draft));
+    else localStorage.removeItem(key);
+  } catch (e) {
+    console.warn('本機草稿儲存失敗', e);
+  }
+}
+
+function scheduleWriteDraftSave() {
+  if (_writeDraftHydrating) return;
+  clearTimeout(_writeDraftSaveTimer);
+  _writeDraftSaveTimer = setTimeout(saveWriteDraftNow, 350);
+}
+
+function clearCurrentWriteDraft() {
+  const key = getWriteDraftKey();
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch(e) {}
+}
+
+function renderDraftPhoto(url, photoGrid) {
+  if (!url || !photoGrid) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'photo-thumb-wrap';
+  const safeUrl = escapeHtml(resolveImgSrc(url));
+  wrap.innerHTML = `<img src="${safeUrl}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button>`;
+  wrap.querySelector('img').dataset.base64 = url;
+  photoGrid.appendChild(wrap);
+}
+
+function applyWriteDraftIfAvailable() {
+  const key = getWriteDraftKey();
+  if (!key) { updateWriteProgress(); return; }
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e) {}
+  if (!writeDraftHasContent(draft)) { updateWriteProgress(); return; }
+  _writeDraftHydrating = true;
+  try {
+    document.getElementById('write-salary').value = draft.salary || '';
+    document.getElementById('write-mentor').value = draft.mentor || '';
+    document.getElementById('write-reflection').value = draft.reflection || '';
+    const container = document.getElementById('work-entries-container');
+    container.innerHTML = ''; entryCount = 0;
+    (draft.entries || []).forEach(e => {
+      addWorkEntry();
+      const id = `entry-${entryCount}`;
+      document.getElementById(`${id}-date`).value = e.date || '';
+      const typeEl = document.getElementById(`${id}-type`);
+      if (typeEl) typeEl.value = e.type || '';
+      if (e.type === '其他') {
+        const otherInputEl = document.getElementById(`${id}-other-input`);
+        if (otherInputEl) otherInputEl.value = e.other || '';
+      }
+      showWorkTypeExample(id);
+      document.getElementById(`${id}-address`).value = e.address || '';
+      document.getElementById(`${id}-content`).value = e.content || '';
+      const distEl = document.getElementById(`${id}-dist-manual`);
+      if (distEl) distEl.value = e.distance || '';
+      if (e.noPhoto) {
+        document.getElementById(`${id}-nophoto`).checked = true;
+        toggleNoPhoto(id);
+      }
+      const photoGrid = document.getElementById(`${id}-photos`);
+      (e.photos || []).forEach(url => renderDraftPhoto(url, photoGrid));
+    });
+    if (!(draft.entries || []).length) addWorkEntry();
+    const timeText = draft.savedAt ? new Date(draft.savedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '';
+    toast(`已恢復此裝置的本機草稿${timeText ? '（' + timeText + '）' : ''}`, 'info');
+  } finally {
+    _writeDraftHydrating = false;
+    updateWriteProgress();
+  }
+}
+
+function initWriteDraftAutoSave() {
+  if (_writeDraftAutoSaveBound) return;
+  const page = document.getElementById('page-s-write');
+  if (!page) return;
+  const handler = (e) => {
+    updateWriteProgress();
+    if (['write-semester', 'write-month', 'salary-photo-file'].includes(e.target?.id)) return;
+    if (e.target?.type === 'file') return;
+    scheduleWriteDraftSave();
+  };
+  page.addEventListener('input', handler, true);
+  page.addEventListener('change', handler, true);
+  window.addEventListener('beforeunload', saveWriteDraftNow);
+  _writeDraftAutoSaveBound = true;
+}
+
+// 工作摘要的 4 個檢查項目，順序固定供逐筆/逐欄位判斷與顯示共用
+const WORK_FIELD_CHECKS = [
+  { key: 'type', label: '類型', test: e => !!e.type && (e.type !== '其他' || !!e.other) },
+  { key: 'address', label: '地址', test: e => !!e.address },
+  { key: 'distance', label: '距離', test: e => !!e.distance },
+  { key: 'content', label: '內容10字+', test: e => e.content.length >= 10 }
+];
+
+function getWriteProgressState() {
+  const entries = Array.from(document.querySelectorAll('#work-entries-container > div'));
+  const hasBasic = !!(document.getElementById('write-semester')?.value && document.getElementById('write-month')?.value && document.getElementById('write-company')?.value.trim());
+
+  // 逐筆檢查工作摘要：fieldStatus 紀錄「所有筆是否都通過該欄位」（供精簡提示的紅/綠字使用）；
+  // entryIssues 紀錄「哪一則缺什麼」（供動態提示定位到具體那一則使用）
+  const fieldStatus = { type: true, address: true, distance: true, content: true };
+  const entryIssues = [];
+  entries.forEach(div => {
+    const id = div.id;
+    const e = {
+      type: document.getElementById(`${id}-type`)?.value || '',
+      other: document.getElementById(`${id}-other-input`)?.value.trim() || '',
+      content: document.getElementById(`${id}-content`)?.value.trim() || '',
+      address: document.getElementById(`${id}-address`)?.value.trim() || '',
+      distance: document.getElementById(`${id}-dist-manual`)?.value.trim() || ''
+    };
+    const missing = WORK_FIELD_CHECKS.filter(fc => !fc.test(e));
+    missing.forEach(fc => { fieldStatus[fc.key] = false; });
+    if (missing.length) {
+      // 直接讀畫面上顯示的「工作摘要 #N」標題文字，確保跟學生實際看到的標題一致（即使中途刪除過某則造成編號跳號）
+      const entryLabel = div.querySelector('strong')?.textContent?.trim() || '工作摘要';
+      entryIssues.push({ id, label: entryLabel, missing: missing.map(fc => fc.label) });
+    }
+  });
+  const hasWork = entries.length > 0 && entryIssues.length === 0;
+
+  const hasPhotos = entries.length > 0 && entries.every(div => {
+    const id = div.id;
+    const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
+    const photoCount = document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`).length;
+    return noPhoto || photoCount > 0;
+  });
+  const hasReflection = (document.getElementById('write-reflection')?.value.trim().length || 0) >= 20;
+  const items = [
+    { label: '基本資料', done: hasBasic, hint: '學期、月份已確認' },
+    {
+      label: '工作摘要', done: hasWork, hint: '類型／地址／距離／內容10字+',
+      // 沒有任何一則工作摘要時，fieldStatus 沒有意義（沒東西可檢查），不要顯示成全部綠字
+      fieldStatus: entries.length ? fieldStatus : null,
+      entryIssues
+    },
+    { label: '工作照片', done: hasPhotos, hint: '需上傳照片或勾選不便拍照' },
+    { label: '心得', done: hasReflection, hint: '20字+' }
+  ];
+  return { items, done: items.filter(i => i.done).length, total: items.length };
+}
+
+
+// 工作摘要的提示行：fieldStatus 存在時，逐個欄位染色（缺哪個就紅字）；否則維持原始固定文字
+function renderWorkSummaryHintHtml(item) {
+  if (!item.fieldStatus) return escapeHtml(item.hint);
+  return WORK_FIELD_CHECKS.map(fc => {
+    const ok = item.fieldStatus[fc.key];
+    return `<span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'}">${escapeHtml(fc.label)}</span>`;
+  }).join('<span style="color:var(--text2)">／</span>');
+}
+
+// 單行版本（標籤＋提示），給浮動視窗用，不含逐則明細，避免跟完成度提示框重複顯示同樣資訊
+function renderProgressItemLine(i) {
+  const hintHtml = i.entryIssues ? renderWorkSummaryHintHtml(i) : escapeHtml(i.hint);
+  return `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${hintHtml}</span></div>`;
+}
+
+// 完整版本：在單行版本下方補上「哪一則缺什麼」，可點擊捲動到該則。只用在完成度提示框（write-progress-details），
+// 浮動視窗（write-progress-float）刻意不重複顯示這段，兩處只在其中一處看到逐則明細，避免資訊過多
+function renderProgressItemFull(i) {
+  let html = renderProgressItemLine(i);
+  if (i.entryIssues && i.entryIssues.length) {
+    html += i.entryIssues.map(ei =>
+      `<div class="write-progress-subitem" onclick="scrollToEntryIssue('${ei.id}')">↳ ${escapeHtml(ei.label)} 缺：${escapeHtml(ei.missing.join('、'))}</div>`
+    ).join('');
+  }
+  return html;
+}
+
+function scrollToEntryIssue(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('entry-issue-flash');
+  setTimeout(() => el.classList.remove('entry-issue-flash'), 1500);
+}
+
+function updateWriteProgress() {
+  const summaryEl = document.getElementById('write-progress-summary');
+  const detailsEl = document.getElementById('write-progress-details');
+  if (!summaryEl || !detailsEl) return;
+  const state = getWriteProgressState();
+  const missing = state.items.filter(i => !i.done).map(i => i.label);
+  summaryEl.innerHTML = `完成度 <strong>${state.done}/${state.total}</strong>${missing.length ? '　尚缺：' + escapeHtml(missing.join('、')) : '　可儲存'}`;
+  detailsEl.innerHTML = state.items.map(renderProgressItemFull).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
+  syncWriteProgressFloat(false);
+}
+
+function toggleWriteProgressDetails() {
+  const details = document.getElementById('write-progress-details');
+  const btn = document.getElementById('write-progress-toggle');
+  if (!details) return;
+  const hidden = details.classList.toggle('hidden');
+  if (btn) btn.textContent = hidden ? '展開' : '收合';
+}
+
+function isWritePageActive() {
+  const page = document.getElementById('page-s-write');
+  return !!(page && !page.classList.contains('hidden'));
+}
+
+function isWriteProgressBoxVisible() {
+  const page = document.getElementById('page-s-write');
+  const box = document.getElementById('write-progress-box');
+  if (!page || page.classList.contains('hidden') || !box) return false;
+  if (_writeProgressTyping) return true;
+  const rect = box.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  return rect.bottom > 8 && rect.top < vh - 8;
+}
+
+function renderWriteProgressFloatBody(state) {
+  return state.items.map(renderProgressItemLine).join('');
+}
+
+function syncWriteProgressFloat(forceExpanded = false) {
+  const floatEl = document.getElementById('write-progress-float');
+  if (!floatEl) return;
+  const state = getWriteProgressState();
+  const countEl = document.getElementById('write-progress-float-count');
+  const labelEl = document.getElementById('write-progress-float-label');
+  const bodyEl = document.getElementById('write-progress-float-body');
+  const showFloat = isWritePageActive() && !isWriteProgressBoxVisible();
+  if (countEl) countEl.textContent = `${state.done}/${state.total}`;
+  if (labelEl) {
+    const missing = state.items.filter(i => !i.done).map(i => i.label);
+    labelEl.textContent = missing.length ? `尚缺：${missing.join('、')}` : '可儲存';
+  }
+  if (bodyEl) bodyEl.innerHTML = renderWriteProgressFloatBody(state);
+  if (!showFloat) {
+    floatEl.classList.add('hidden');
+    floatEl.classList.add('compact');
+    floatEl.classList.remove('expanded');
+    clearTimeout(_writeProgressFloatTimer);
+    _writeProgressFloatTimer = null;
+    return;
+  }
+  floatEl.classList.remove('hidden');
+  if (forceExpanded) _writeProgressFloatExpanded = true;
+  floatEl.classList.toggle('expanded', _writeProgressFloatExpanded);
+  floatEl.classList.toggle('compact', !_writeProgressFloatExpanded);
+}
+
+function queueWriteProgressFloatCollapse() {
+  clearTimeout(_writeProgressFloatTimer);
+  _writeProgressFloatTimer = setTimeout(() => {
+    _writeProgressFloatExpanded = false;
+    syncWriteProgressFloat(false);
+  }, 5000);
+}
+
+function queueWriteProgressFloatSync(forceExpanded = false) {
+  if (forceExpanded) _writeProgressFloatExpanded = true;
+  clearTimeout(_writeProgressFloatTimer);
+  if (_writeProgressFloatRaf) return;
+  _writeProgressFloatRaf = requestAnimationFrame(() => {
+    _writeProgressFloatRaf = 0;
+    syncWriteProgressFloat(forceExpanded);
+    if (forceExpanded) queueWriteProgressFloatCollapse();
+  });
+}
+
+function handleWriteProgressFloatScroll() {
+  if (!isWritePageActive()) return;
+  if (_writeProgressTyping) {
+    clearTimeout(_writeProgressFloatTimer);
+    syncWriteProgressFloat(false);
+    return;
+  }
+  if (isWriteProgressBoxVisible()) {
+    syncWriteProgressFloat(false);
+    return;
+  }
+  queueWriteProgressFloatSync(true);
+}
+
+function toggleWriteProgressFloat() {
+  // 點擊浮動丸子 → 捲回靜態進度框並展開明細，浮動框本身縮回（進入視野後 scroll handler 自動隱藏）
+  const box = document.getElementById('write-progress-box');
+  if (box) {
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const details = document.getElementById('write-progress-details');
+    const btn = document.getElementById('write-progress-toggle');
+    if (details && details.classList.contains('hidden')) {
+      details.classList.remove('hidden');
+      if (btn) btn.textContent = '收合';
+    }
+  }
+  _writeProgressFloatExpanded = false;
+  syncWriteProgressFloat(false);
+}
+
+function bindWriteProgressFloat() {
+  if (_writeProgressFloatBound) return;
+  window.addEventListener('scroll', handleWriteProgressFloatScroll, { passive: true });
+  window.addEventListener('resize', handleWriteProgressFloatScroll);
+  const writePage = document.getElementById('page-s-write');
+  if (writePage) {
+    writePage.addEventListener('focusin', (e) => {
+      _writeProgressTyping = !!e.target?.closest('input, textarea, select, [contenteditable="true"]');
+      if (_writeProgressTyping) {
+        clearTimeout(_writeProgressFloatTimer);
+        syncWriteProgressFloat(false);
+      }
+    });
+    writePage.addEventListener('focusout', () => {
+      setTimeout(() => {
+        const active = document.activeElement;
+        _writeProgressTyping = !!(active && writePage.contains(active) && active.matches?.('input, textarea, select, [contenteditable="true"]'));
+        if (_writeProgressTyping) return;
+        handleWriteProgressFloatScroll();
+      }, 50);
+    });
+  }
+  _writeProgressFloatBound = true;
+}
+
+function handlePhotoUpload(event, id) {
+  const files = Array.from(event.target.files);
+  const container = document.getElementById(`${id}-photos`);
+  files.forEach(file => {
+    // 壓縮中佔位符：在 FileReader 讀取 + canvas 壓縮期間顯示 spinner
+    const placeholder = document.createElement('div');
+    placeholder.className = 'photo-compress-placeholder';
+    placeholder.innerHTML = '<div class="photo-compress-spinner"></div><div class="photo-compress-label">處理中...</div>';
+    container.appendChild(placeholder);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const maxW = 800, maxH = 600;
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = h * maxW / w; w = maxW; }
+        if (h > maxH) { w = w * maxH / h; h = maxH; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const previewSrc = canvas.toDataURL('image/jpeg', 0.75);
+        const wrap = document.createElement('div');
+        wrap.className = 'photo-thumb-wrap';
+        wrap.innerHTML = `<img src="${previewSrc}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button><div class="photo-pending-upload" style="position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,0.58);color:#fff;border-radius:6px;padding:2px 5px;font-size:10px">儲存時上傳</div>`;
+        wrap.style.position = 'relative';
+        // 移除佔位符，插入縮圖
+        placeholder.replaceWith(wrap);
+        const imgEl = wrap.querySelector('img');
+        imgEl.dataset.pendingUpload = '1';
+        imgEl.dataset.localDataUrl = previewSrc;
+        imgEl.dataset.base64 = '';
+        updateWriteProgress();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  event.target.value = '';
+}
+
+function handleSalaryPhoto(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.createElement('canvas');
+      const maxW = 800, maxH = 600;
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = h * maxW / w; w = maxW; }
+      if (h > maxH) { w = w * maxH / h; h = maxH; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      // 薪資單直接存 base64，不上傳外部服務，由 Firestore Rules 保護隱私
+      const base64 = canvas.toDataURL('image/jpeg', 0.75);
+      // ★ 硬性阻擋：Firestore 文件上限 1MB（1,048,576 bytes）
+      // base64 字串全為 ASCII，存入 Firestore 時 1 char = 1 byte
+      // 700,000 chars ≈ 700KB（base64 欄位本身） + ~100KB（其他欄位）= ~800KB，安全低於 1MB
+      // 注意：× 0.75 是解碼後的圖片大小，不是 Firestore 文件大小，兩者不同
+      if (base64.length > 700000) {
+        toast('薪資單照片太大（壓縮後仍超過限制），請重拍或選解析度較低的圖片', 'error');
+        event.target.value = '';
+        return;
+      }
+      const preview = document.getElementById('salary-photo-preview');
+      preview.innerHTML = `<div style="position:relative;display:inline-block"><img id="salary-preview-img" src="${base64}" data-base64="${base64}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button><span style="display:block;font-size:10px;color:var(--accent-green);margin-top:4px">🔒 僅老師可查看</span></div>`;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveJournal() {
+  const sem = document.getElementById('write-semester').value;
+  const month = parseInt(document.getElementById('write-month').value);
+  const { doc, getDoc, setDoc } = firebase_funcs;
+  try {
+    const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
+    if (deadlineSnap.exists()) {
+      const deadline = deadlineSnap.data();
+      const now = new Date();
+      const open = new Date(deadline.openDate + 'T00:00:00+08:00');
+      if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
+    }
+  } catch(e) {
+    // 截止日查詢失敗不擋儲存，僅 console 記錄
+    console.warn('截止日期查詢失敗，略過檢查', e);
+  }
+  const reflection = document.getElementById('write-reflection').value.trim();
+  if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
+  const salary = parseInt(document.getElementById('write-salary').value) || null;
+  if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
+  // 薪資未填軟性提示（不強制，可繼續儲存）
+  if (salary === null) {
+    const goAhead = window.confirm('⚠️ 本月薪資尚未填寫。\n\n若這個月尚未發薪，可以先儲存其他內容，發薪後再編輯补填。\n\n確定要不填薪資直接儲存嗎？');
+    if (!goAhead) return;
+  }
+  const mentor = document.getElementById('write-mentor').value.trim();
+  const salaryPhotoEl = document.getElementById('salary-photo-preview').querySelector('img');
+  const salaryPhoto = salaryPhotoEl ? salaryPhotoEl.dataset.base64 : '';
+  const entries = [];
+  let distanceError = false;
+  let addressError = '';
+  let photoError = '';
+  let contentError = '';
+  let typeError = '';
+  let entryIndex = 0;
+  document.querySelectorAll('#work-entries-container > div').forEach(div => {
+    entryIndex += 1;
+    const id = div.id;
+    const noPhoto = document.getElementById(`${id}-nophoto`)?.checked;
+    const photoWraps = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`));
+    const photoImgs = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos img`));
+    // 照片仍在上傳中時，img.dataset.base64 尚未寫入（見 handlePhotoUpload），此時不可讓使用者儲存，
+    // 否則會把 undefined 存進 entries.photos，Firestore setDoc() 會直接擲出例外導致整份月記存檔失敗
+    const uploadingCount = photoWraps.filter(w => w.querySelector('.photo-uploading')).length;
+    const photos = noPhoto ? [] : photoImgs.map(img => img?.dataset.base64).filter(Boolean);
+    if (!noPhoto && uploadingCount > 0 && !photoError) {
+      photoError = `第 ${entryIndex} 筆工作摘要有照片尚在上傳中，請稍候片刻再按儲存`;
+    }
+    // 工作照片驗證：未勾「不便拍照」且沒有上傳照片 → 阻止儲存
+    if (!noPhoto && photoImgs.length === 0 && uploadingCount === 0 && !photoError) {
+      photoError = `第 ${entryIndex} 筆工作摘要尚未上傳工作照片，請上傳照片或勾選「📵 不便拍照」`;
+    }
+    const address = document.getElementById(`${id}-address`)?.value?.trim() || '';
+    const manualDistVal = document.getElementById(`${id}-dist-manual`)?.value?.trim();
+    const distance = manualDistVal !== '' && manualDistVal != null ? parseFloat(manualDistVal) : null;
+    const content = document.getElementById(`${id}-content`)?.value?.trim() || '';
+    // 工作內容描述至少 10 字
+    if (content.length < 10 && !contentError) {
+      contentError = `第 ${entryIndex} 筆工作摘要的「工作內容描述」至少需要 10 個字（目前 ${content.length} 字）`;
+    }
+    // 地址必填
+    if (!address && !addressError) {
+      addressError = `第 ${entryIndex} 筆工作摘要尚未填寫工作地點地址`;
+    }
+    // 地址格式驗證（原有功能保留）
+    const msg = address ? validateCompleteTaiwanAddress(address) : '';
+    if (msg && !addressError) addressError = `第 ${entryIndex} 筆工作地址：${msg}`;
+    // 距離必填（地址填了才能算距離，兩者都要有）
+    if (address && (distance === null || isNaN(distance)) && !distanceError) distanceError = true;
+    const typeEl = document.getElementById(`${id}-type`);
+    let workType = typeEl ? typeEl.value : '';
+    // 工作類型必選
+    if (!workType && !typeError) {
+      typeError = `第 ${entryIndex} 筆工作摘要尚未選擇工作類型`;
+    }
+    const otherInputVal = document.getElementById(`${id}-other-input`)?.value?.trim() || '';
+    // 選「其他」時，補充說明欄位必填
+    if (workType === '其他' && !otherInputVal && !typeError) {
+      typeError = `第 ${entryIndex} 筆工作摘要選擇「其他」類型時，請填寫補充說明`;
+    }
+    if (workType === '其他' && otherInputVal) workType = `其他（${otherInputVal}）`;
+    entries.push({ _id: id, date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
+  });
+  const writeIssues = [typeError, contentError, addressError, distanceError ? 'distance' : '', photoError].filter(Boolean);
+  if (writeIssues.length) {
+    document.getElementById('write-progress-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateWriteProgress();
+    return toast('請先完成上方完成度提示中的項目，再按儲存', 'error');
+  }
+  const saveBtn = document.getElementById('save-journal-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
+  showLoading();
+  try {
+    await uploadPendingWorkPhotos(sem);
+    entries.forEach(e => {
+      e.photos = e.noPhoto ? [] : Array.from(document.querySelectorAll(`#${e._id}-photos img`))
+        .map(img => img?.dataset.base64)
+        .filter(Boolean);
+    });
+  } catch(e) {
+    hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    return toast('⚠️ ' + (e.message || '工作照片上傳失敗，請稍後再試'), 'error');
+  }
+  const data = {
+    seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
+    studentName: currentUser.name, company: currentUser.company || '',
+    city: currentUser.city || '', semester: sem, month,
+    salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
+    reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
+    submittedAt: (window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt)
+      ? window._currentJournalCache.submittedAt   // 保留第一次繳交時間
+      : localISOStr(),                             // 第一次才記錄當下時間
+    updatedAt: localISOStr(),                      // 每次儲存都更新
+    ownerUid: currentUser.uid || '',
+    ownerEmail: currentUser.email || '',
+    storagePath: 'user',
+    // 學生重新儲存時清除老師評語，讓老師重新審閱
+    teacherComment: null,
+    teacherReviewed: false,
+    reviewedAt: null,
+    teacherCommentUnread: false
+  };
+  if (JSON.stringify(data).length > 900000) {
+    hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
+  }
+  // 防呆：月份必須為 1–12 的有效整數，避免 month=0 或 NaN 被寫入 Firestore
+  if (!month || month < 1 || month > 12) {
+    hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    return toast('月份選擇無效，請重新選擇月份後再儲存', 'error');
+  }
+  if (saveBtn) saveBtn.textContent = '⏳ 儲存中...';
+  try {
+    const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
+    // 優先使用 checkMonthDeadline 預先快取的查詢結果，避免重複 Firestore 讀取造成延遲
+    const cached = window._currentJournalCache;
+    if (cached?.exists) {
+      const submittedDate = (cached.submittedAt || '').slice(0, 10) || '未知日期';
+      const wasReviewed = !!(cached.teacherReviewed || cached.teacherComment);
+      const reviewWarning = wasReviewed
+        ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
+        : '';
+      hideLoading();
+      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
+      if (!confirmed) {
+        toast('已取消，原本月記保留', 'info');
+        return;
+      }
+      showLoading();
+    }
+    // 快取無效時（直接跳到填寫頁等邊界情況）仍正常儲存，不擋
+    await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
+    window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
+    clearCurrentWriteDraft();
+    toast('月記已成功儲存！', 'success');
+    showPage('s-dashboard');
+  } catch(e) {
+    toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+  }
+}
+
+async function loadStudentHistory() {
+  if (!currentUser) return;
+  const startVal = document.getElementById('s-history-date-start')?.value || '';
+  const endVal = document.getElementById('s-history-date-end')?.value || '';
+  const typeFilter = document.getElementById('s-history-type-filter')?.value || '';
+  const startStr = startVal.replace(/-/g,'');
+  const endStr = endVal.replace(/-/g,'');
+  showLoading();
+  try {
+    const snap = await getMyJournalDocs();
+    let journals = snap.docs.map(d => d.data());
+    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    // 工作類型篩選：月記裡任一工作摘要符合即納入；「其他（XXX）」歸類為「其他」
+    if (typeFilter) {
+      journals = journals.filter(j => (j.entries || []).some(e => {
+        if (!e.type) return false;
+        const normalised = (e.type.startsWith('其他（') && e.type.endsWith('）')) ? '其他' : e.type;
+        return normalised === typeFilter;
+      }));
+    }
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    window._studentHistoryJournals = journals;
+    const toolbar = document.getElementById('s-batch-toolbar');
+    if (toolbar) toolbar.style.display = 'none';
+    const allCb = document.getElementById('s-select-all-cb');
+    if (allCb) allCb.checked = false;
+    document.getElementById('s-history-list').innerHTML = journals.length
+      ? journals.map(j => renderJournalCardSelectable(j)).join('')
+      : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
+    updateHistoryBatchBar();
+  } catch (e) {
+    console.error('載入歷史月記失敗', e);
+    document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
+    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+// 有 checkbox 的歷史月記卡（僅歷史頁使用）
+function renderJournalCardSelectable(j) {
+  const safeMonth = safeNumber(j.month);
+  const isAbnormalMonth = !safeMonth || safeMonth < 1 || safeMonth > 12;
+  const key = `${j.seatNo || ''}-${j.semester || ''}-${safeMonth}`;
+  const cbHtml = `<div class="journal-cb-wrap"><input type="checkbox" class="journal-select-cb" data-key="${escapeHtml(key)}" data-seat="${escapeHtml(j.seatNo || '')}" data-sem="${escapeHtml(j.semester || '')}" data-month="${safeMonth}" onchange="updateHistoryBatchBar()"></div>`;
+  const entryHtml = (j.entries || []).map(e => `
+    <div class="entry-item">
+      <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
+      <div class="entry-content">${escapeHtml(e.content || '')}</div>
+      ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
+      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => `<img src="${escapeHtml(resolveImgSrc(p))}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
+    </div>`).join('');
+  const salaryNum = Number(j.salary);
+  const salaryHtml = Number.isFinite(salaryNum) ? `<span style="color:var(--accent-green);font-weight:600">💰 $${salaryNum.toLocaleString()} 元</span>` : '';
+  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
+  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  // 月份異常（0、NaN）：禁用編輯按鈕，只允許刪除，防止誤觸覆蓋正常月記
+  const editBtn = isAbnormalMonth
+    ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
+    : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  return `<div class="journal-card journal-card-selectable"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
+    ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
+    ${cbHtml}
+    ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
+    <div class="journal-card-header">
+      <div class="journal-card-toprow" style="${((j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed) ? 'padding-right:92px' : ''}">
+        <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
+        <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml((j.semester||'').replace('-1','第1學期').replace('-2','第2學期'))}</span>
+        <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
+      </div>
+    </div>
+    <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
+      <span>公司：${escapeHtml(j.company||'-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}
+    </div>
+    ${salaryPhotoHtml}
+    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
+      <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
+    </div>
+    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
+    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
+      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
+      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
+    </div>` : ''}
+  </div>`;
+}
+
+function toggleSelectAllHistory() {
+  const checked = document.getElementById('s-select-all-cb')?.checked;
+  document.querySelectorAll('#s-history-list .journal-select-cb').forEach(cb => { cb.checked = checked; });
+  updateHistoryBatchBar();
+}
+
+function updateHistoryBatchBar() {
+  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
+  const allCbs = document.querySelectorAll('#s-history-list .journal-select-cb');
+  const allCb = document.getElementById('s-select-all-cb');
+  if (allCb) allCb.checked = allCbs.length > 0 && cbs.length === allCbs.length;
+  const floatBtn = document.getElementById('s-batch-float');
+  const countEl = document.getElementById('s-batch-count');
+  const toolbar = document.getElementById('s-batch-toolbar');
+  if (!floatBtn) return;
+  if (cbs.length === 0) {
+    floatBtn.style.display = 'none';
+    if (toolbar) toolbar.style.display = 'none';
+    if (countEl) countEl.textContent = '已選 0 筆';
+    return;
+  }
+  if (toolbar) toolbar.style.display = 'flex';
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
+  const label = getJournalMonthRangeLabel(journals);
+  if (countEl) countEl.textContent = `已選 ${cbs.length} 筆`;
+  const floatLabel = document.getElementById('s-batch-float-label');
+  if (floatLabel) floatLabel.textContent = `刪除選取（${label}）`;
+  floatBtn.style.display = 'flex';
+}
+
+function getJournalMonthRangeLabel(journals) {
+  if (!journals.length) return '';
+  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  // 學期+月份換算為西元年/月（與 journalMonthInRange/pdfJournalYear 的學期定義一致：
+  // 第1學期 7~12月當年、1月隔年；第2學期 2~6月皆隔年）
+  const toCEYearMonth = (j) => {
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    const month = j.month || 0;
+    let year = (roc || 0) + 1911;
+    if (half === 1 && month === 1) year += 1;
+    if (half === 2) year += 1;
+    return { year, month };
+  };
+  const first = toCEYearMonth(sorted[0]);
+  const last = toCEYearMonth(sorted[sorted.length - 1]);
+  const n = journals.length;
+  if (first.year === last.year && first.month === last.month) return `${first.year}/${first.month}，共${n}筆`;
+  return `${first.year}/${first.month}~${last.year}/${last.month}，共${n}筆`;
+}
+
+function confirmBatchDeleteHistory() {
+  const cbs = [...document.querySelectorAll('#s-history-list .journal-select-cb:checked')];
+  if (!cbs.length) return;
+  const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month) }));
+  const label = getJournalMonthRangeLabel(journals);
+  document.getElementById('batch-delete-history-info').innerHTML =
+    `📆 範圍：<strong>${label}</strong><br>🗑️ 將刪除 <strong>${journals.length} 筆</strong>月記`;
+  const btn = document.getElementById('batch-delete-history-confirm-btn');
+  btn.onclick = () => executeBatchDeleteHistory(journals);
+  openModal('batch-delete-history-modal');
+}
+
+async function executeBatchDeleteHistory(journals) {
+  const { doc, deleteDoc } = firebase_funcs;
+  let success = 0, fail = 0;
+  showLoading();
+  for (const j of journals) {
+    if (String(j.seatNo) !== String(currentUser?.seatNo)) { fail++; continue; }
+    try {
+      await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${j.seatNo}-${j.semester}-${j.month}`));
+      success++;
+    } catch(e) { fail++; console.error('批次刪除失敗', e); }
+  }
+  hideLoading();
+  closeModal('batch-delete-history-modal');
+  document.getElementById('s-batch-float').style.display = 'none';
+  toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
+  loadStudentHistory();
+  loadStudentDashboard();
+}
+
+function checkBrowserForExport() {
+  const ua = navigator.userAgent;
+  const isIOS = /iPhone|iPad|iPod/.test(ua);
+  const isChrome = /CriOS/.test(ua);
+  const hint = document.getElementById('safari-hint');
+  if (hint) hint.style.display = (isIOS && isChrome) ? '' : 'none';
+  return !(isIOS && isChrome);
+}
+
+async function exportMyPDF() {
+  if (!currentUser) return toast('請先登入', 'error');
+  if (!checkBrowserForExport()) return;
+  const startVal = document.getElementById('s-export-date-start')?.value || '';
+  const endVal = document.getElementById('s-export-date-end')?.value || '';
+  const startStr = startVal.replace(/-/g,'');
+  const endStr = endVal.replace(/-/g,'');
+  // 日期都空白時提示（不擋，仍可繼續匯出全部）
+  if (!startVal && !endVal) {
+    const ok = window.confirm('未選擇日期範圍，將匯出全部月記。\n確定繼續嗎？');
+    if (!ok) return;
+  }
+  // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (win) {
+    win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 30 秒內沒有完成，系統會自動顯示錯誤原因。</p></body></html>');
+  }
+  showLoading();
+  try {
+    const snap = await getMyJournalDocs(30000);
+    let journals = snap.docs.map(d => d.data());
+    if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    if (!journals.length) {
+      if (win && !win.closed) {
+        win.document.open();
+        win.document.write('<html><head><meta charset="UTF-8"><title>沒有資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">目前沒有可下載的月記資料</p><p style="font-size:14px;color:#777;">請返回原頁面確認日期範圍或先填寫月記。</p></body></html>');
+        win.document.close();
+      }
+      return toast('無月記資料可下載', 'error');
+    }
+    await printJournalsPDF(journals, `${currentUser.name}實習月記`, win);
+  } catch (e) {
+    console.error('匯出 PDF 失敗', e);
+    const errMsg = (e.message || '請確認網路連線後再試');
+    const safeErrMsg = escapeHtml(errMsg);
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + safeErrMsg + '</p><p style="font-size:14px;color:#777;">請關閉此頁，回到原頁面重新操作。</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉此頁</button></body></html>');
+      win.document.close();
+    } else {
+      // 視窗被封鎖或已關閉，改用 overlay 顯示錯誤
+      let overlay = document.getElementById('print-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'print-overlay';
+        overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:#fff;overflow-y:auto;';
+        document.body.appendChild(overlay);
+      }
+      overlay.innerHTML = '<div style="background:#b91c1c;color:#fff;padding:14px 16px;font-size:14px;line-height:1.7;text-align:center;">月記資料載入失敗<br><span style="font-size:12px;">' + safeErrMsg + '</span><br><button onclick="document.getElementById(\'print-overlay\').style.display=\'none\'" style="margin-top:8px;padding:6px 18px;background:#fff;color:#b91c1c;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">✕ 關閉</button></div>';
+      overlay.style.display = 'block';
+    }
+    toast('匯出失敗：' + errMsg, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+// ---- 編輯月記 ----
+async function editJournal(seatNo, sem, month) {
+  if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能編輯自己的月記', 'error');
+  // 防呆：月份異常（0 或 NaN）代表這是測試/異常資料，拒絕編輯，提示刪除
+  if (!month || month < 1 || month > 12) return toast('⚠️ 此筆月記的月份資料異常，無法編輯。請直接刪除此筆異常資料。', 'error');
+  const { doc, getDoc, updateDoc } = firebase_funcs;
+  showLoading();
+  try {
+  const snap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`));
+  if (!snap.exists()) { hideLoading(); return toast('月記不存在', 'error'); }
+  const j = snap.data();
+  // 預先更新 _currentJournalCache，確保 saveJournal() 保留本筆月記的原始 submittedAt
+  // 不更新時，快取若殘留其他月份的資料（或為 null），saveJournal 會把 submittedAt 重設為當下時間
+  window._currentJournalCache = {
+    exists: true,
+    submittedAt: j.submittedAt,
+    updatedAt: j.updatedAt,
+    teacherReviewed: j.teacherReviewed,
+    teacherComment: j.teacherComment
+  };
+  // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
+  if (j.teacherCommentUnread) {
+    updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), { teacherCommentUnread: false }).catch(() => {});
+  }
+  await initWriteForm(true);
+  document.getElementById('write-semester').value = sem;
+  initWriteMonths();
+  document.getElementById('write-month').value = month;
+  document.getElementById('write-salary').value = j.salary || '';
+  document.getElementById('write-mentor').value = j.mentor || '';
+  document.getElementById('write-reflection').value = j.reflection || '';
+  if (j.salaryPhoto) {
+    document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" data-base64="${escapeHtml(j.salaryPhoto)}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
+  }
+  const container = document.getElementById('work-entries-container');
+  container.innerHTML = '';
+  entryCount = 0;
+  (j.entries || []).forEach(e => {
+    addWorkEntry();
+    const id = `entry-${entryCount}`;
+    document.getElementById(`${id}-date`).value = toDateVal(e.date || '');
+    const typeEl = document.getElementById(`${id}-type`);
+    if (typeEl) {
+      if (e.type && e.type.startsWith('其他（') && e.type.endsWith('）')) {
+        typeEl.value = '其他';
+        const otherInputEl = document.getElementById(`${id}-other-input`);
+        if (otherInputEl) otherInputEl.value = e.type.slice(3, -1);
+        showWorkTypeExample(id);
+      } else {
+        typeEl.value = e.type || '';
+      }
+    }
+    document.getElementById(`${id}-address`).value = e.address || '';
+    document.getElementById(`${id}-content`).value = e.content || '';
+    if (e.distance != null) {
+      const m = document.getElementById(`${id}-dist-manual`);
+      if (m) m.value = e.distance;
+    }
+    if (e.noPhoto) { document.getElementById(`${id}-nophoto`).checked = true; toggleNoPhoto(id); }
+    if (e.photos?.length) {
+      const photoGrid = document.getElementById(`${id}-photos`);
+      e.photos.forEach(p => {
+        const wrap = document.createElement('div');
+        wrap.className = 'photo-thumb-wrap';
+        const _ps = escapeHtml(resolveImgSrc(p));
+        wrap.innerHTML = `<img src="${_ps}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove()">×</button>`;
+        wrap.querySelector('img').dataset.base64 = p;
+        photoGrid.appendChild(wrap);
+      });
+    }
+  });
+  _skipWriteInit = true;
+  showPage('s-write');
+  // skipFill=true：只更新截止日狀態與 saveBtn，不覆蓋 editJournal 剛填入的表單值
+  checkMonthDeadline(true);
+  toast('已載入月記，修改後請重新儲存', 'success');
+  } catch(e) {
+    console.error('載入月記失敗', e);
+    toast('載入月記失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function toDateVal(str) {
+  if (!str) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const m = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  return '';
+}
+
+// ============================================================
+// ===== 共用工具 ==============================================
+// ============================================================
+
+function resolveImgSrc(src) {
+  src = String(src || '');
+  if (!src) return '';
+  if (src.startsWith('http')) return src;
+  if (src.startsWith('data:')) return src;
+  return 'data:image/jpeg;base64,' + src;
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+}
+
+function jsArg(v) {
+  return escapeHtml(JSON.stringify(String(v ?? '')).replace(/[<>&]/g, ch => ({ '<':'\\u003C', '>':'\\u003E', '&':'\\u0026' }[ch])));
+}
+
+function safeNumber(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function journalMonthInRange(j, start8, end8) {
+  const sem = j.semester || '';
+  const [y, half] = sem.split('-').map(Number);
+  const adBase = y + 1911;
+  const month = j.month || 0;
+  let year = adBase;
+
+  // 新制學期時間軸校正
+  // 第1學期：7-12月為當年，1月為隔年
+  if (half === 1 && month === 1) year = adBase + 1;
+  // 第2學期：2-6月皆為隔年
+  if (half === 2) year = adBase + 1;
+
+  // 移除所有非數字字元（防呆支援帶有橫線或純數字的日期格式）
+  const cleanStart = start8 ? start8.replace(/\D/g, '') : '';
+  const cleanEnd = end8 ? end8.replace(/\D/g, '') : '';
+
+  // 精準比對到年與月（YYYYMM），避免大小月月底日期的邊界判斷誤差
+  const currentMonth = `${year}${String(month).padStart(2, '0')}`;
+  const startMonth = cleanStart ? cleanStart.slice(0, 6) : '';
+  const endMonth = cleanEnd ? cleanEnd.slice(0, 6) : '';
+
+  return (!startMonth || currentMonth >= startMonth) && (!endMonth || currentMonth <= endMonth);
+}
+
+function initStatsDateSelects() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+
+  let isFirst = false;
+  let startY = y;
+  let endY = y;
+
+  // 判斷當下時間屬於哪一個學期（7月~隔年1月為第一學期）
+  if (curMonth >= 7) {
+    isFirst = true;
+    endY = y + 1;
+  } else if (curMonth === 1) {
+    isFirst = true;
+    startY = y - 1;
+  }
+
+  // 根據新制設定精準的學期起迄日
+  const startStr = isFirst ? `${startY}-07-01` : `${startY}-02-01`;
+  const endStr = isFirst ? `${endY}-01-31` : `${endY}-06-30`;
+
+  // 涵蓋整個系統中所有關聯的日期輸入框 ID
+  const ids = ['stats-date-start', 't-journals-date-start', 'export-date-start', 's-history-date-start', 's-export-date-start'];
+  const ide = ['stats-date-end', 't-journals-date-end', 'export-date-end', 's-history-date-end', 's-export-date-end'];
+
+  ids.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = startStr; });
+  ide.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = endStr; });
+  // 填入工作類型篩選下拉選項（僅首次，避免重複填入）
+  const typeSel = document.getElementById('s-history-type-filter');
+  if (typeSel && typeSel.options.length <= 1) {
+    WORK_TYPES.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      typeSel.appendChild(opt);
+    });
+  }
+}
+
+function renderJournalCard(j, isTeacher) {
+  const safeMonth = safeNumber(j.month);
+  const isAbnormalMonth = !safeMonth || safeMonth < 1 || safeMonth > 12;
+  const entryHtml = (j.entries || []).map(e => `
+    <div class="entry-item">
+      <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
+      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
+      <div class="entry-content">${escapeHtml(e.content || '')}</div>
+      ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
+      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
+    </div>
+  `).join('');
+  const salaryNum = Number(j.salary);
+  const salaryHtml = Number.isFinite(salaryNum) ? `<span style="color:var(--accent-green);font-weight:600">💰 $${salaryNum.toLocaleString()} 元</span>` : '';
+  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
+  const salaryPhotoHtml = j.salaryPhoto ? `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>` : '';
+  // 月份異常（0、NaN）：禁用編輯按鈕，只允許刪除，防止誤觸覆蓋正常月記
+  const editBtn = isAbnormalMonth
+    ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
+    : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+  return `<div class="journal-card"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
+    ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
+    ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
+    <div class="journal-card-header">
+      <div class="journal-card-toprow" style="${((j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed) ? 'padding-right:92px' : ''}">
+        <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
+        <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml(j.semester?.replace('-1','第1學期').replace('-2','第2學期') || '')}</span>
+        <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
+      </div>
+    </div>
+    <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
+      <span>公司：${escapeHtml(j.company||'-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}
+    </div>
+    ${salaryPhotoHtml}
+    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
+      <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
+    </div>
+    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
+    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
+      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
+      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
+    </div>` : ''}
+  </div>`;
+}
+
+function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
+  const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
+  document.getElementById('delete-journal-info').innerHTML = `📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
+  const btn = document.getElementById('delete-journal-confirm-btn');
+  btn.onclick = () => executeDeleteJournal(seatNo, semester, month, isTeacher);
+  openModal('delete-journal-modal');
+}
+
+async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
+  if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能刪除自己的月記', 'error');
+  const { doc, deleteDoc } = firebase_funcs;
+  try {
+    await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${semester}-${month}`));
+    closeModal('delete-journal-modal');
+    toast('✅ 月記已刪除', 'success');
+    loadStudentHistory();
+    loadStudentDashboard();
+  } catch(e) {
+    toast('刪除失敗：' + (e.message || '請重試'), 'error');
+    closeModal('delete-journal-modal');
+  }
+}
+
+function openPhotoModal(src) {
+  document.getElementById('photo-modal-img').src = src;
+  openModal('photo-modal');
+}
+
+// ---- PDF 產生（pdfmake）----
+function setupPdfMakeFonts() {
+  if (!window.pdfMake) return false;
+  const notoRegular = 'https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf';
+  const notoBold = 'https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Bold.otf';
+  pdfMake.fonts = {
+    NotoSansTC: {
+      normal: notoRegular,
+      bold: notoBold,
+      italics: notoRegular,
+      bolditalics: notoBold
+    }
+  };
+  return true;
+}
+
+// 取本地時區日期字串 YYYY-MM-DD，避免 toISOString() UTC 時差導致日期偏一天
+function localDateStr(d) {
+  const dt = d || new Date();
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function localISOStr(d) {
+  const dt = d || new Date();
+  return localDateStr(dt) + 'T' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0') + ':' + String(dt.getSeconds()).padStart(2,'0');
+}
+
+function pdfText(v) {
+  const s = String(v ?? '');
+  return s.replace(/([A-Za-z0-9]{18})(?=[A-Za-z0-9])/g, '$1\u200b');
+}
+
+function pdfDateText() {
+  const d = new Date();
+  const meridiem = d.getHours() < 12 ? '上午' : '下午';
+  const hh = String(d.getHours() % 12 || 12);
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${meridiem}${hh}:${mm}`;
+}
+
+function pdfFileName(title) {
+  return String(title || '實習月記')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '')
+    .slice(0, 80) + '.pdf';
+}
+
+function imageToDataUrl(src) {
+  const url = resolveImgSrc(src);
+  if (!url) return Promise.resolve(null);
+  if (/^data:image\//i.test(url)) return Promise.resolve(url);
+  return fetch(url, { mode: 'cors', cache: 'force-cache' })
+    .then(r => {
+      if (!r.ok) throw new Error(`圖片讀取失敗：${r.status}`);
+      return r.blob();
+    })
+    .then(blob => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    }))
+    .catch(err => {
+      console.warn('PDF 圖片略過', url, err);
+      return null;
+    });
+}
+
+async function preparePdfJournalImages(journals) {
+  return Promise.all(journals.map(async j => {
+    const copy = { ...j };
+    copy._pdfSalaryPhoto = await imageToDataUrl(j.salaryPhoto);
+    copy._pdfEntries = await Promise.all((j.entries || []).map(async e => ({
+      ...e,
+      _pdfPhotos: (await Promise.all((e.photos || []).map(p => imageToDataUrl(p)))).filter(Boolean)
+    })));
+    return copy;
+  }));
+}
+
+function pdfJournalYear(j) {
+  // 優先取第一筆工作摘要的西元年份
+  const entryYear = (j.entries || [])[0]?.date?.slice(0, 4);
+  if (entryYear && /^\d{4}$/.test(entryYear)) return entryYear;
+  // Fallback：依學期+月份推算（與 AI_CONTEXT.md 學期定義一致）
+  const sem = j.semester || '';
+  const [y, half] = sem.split('-').map(Number);
+  if (!y || !half) return '';
+  const adBase = y + 1911;
+  const month = j.month || 0;
+  let year = adBase;
+  if (half === 1 && month === 1) year = adBase + 1; // 第1學期1月跨年
+  if (half === 2) year = adBase + 1;                // 第2學期全部+1
+  return String(year);
+}
+
+function pdfInfoTable(j) {
+  return {
+    table: {
+      widths: [44, 72, '*', 60, 44],
+      body: [
+        [
+          { text: '座號', style: 'tableHead' },
+          { text: '姓名', style: 'tableHead' },
+          { text: '實習公司', style: 'tableHead' },
+          { text: '年份', style: 'tableHead' },
+          { text: '月份', style: 'tableHead' }
+        ],
+        [
+          { text: pdfText(j.seatNo || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.studentName || currentUser?.name || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(j.company || ''), style: 'tableCell', alignment: 'center' },
+          { text: pdfText(pdfJournalYear(j) ? pdfJournalYear(j) + '年' : ''), style: 'tableCell', alignment: 'center' },
+          { text: `${pdfText(j.month || '')}月`, style: 'tableCell', alignment: 'center' }
+        ]
+      ]
+    },
+    layout: {
+      fillColor: (rowIndex) => rowIndex === 0 ? '#1e3a5f' : null,
+      hLineColor: () => '#999',
+      vLineColor: () => '#999',
+      paddingLeft: () => 5,
+      paddingRight: () => 5,
+      paddingTop: () => 4,
+      paddingBottom: () => 4
+    },
+    margin: [0, 0, 0, 4]
+  };
+}
+function pdfSubmittedRow(j) {
+  return { text: `繳交日期：${pdfText(j.submittedAt?.slice(0,10) || '-')}`, fontSize: 9, color: '#555', margin: [0, 0, 0, 8] };
+}
+
+function pdfWorkEntry(e, idx) {
+  const stack = [
+    { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
+  ];
+  if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}${e.distance != null ? `（距學校 ${e.distance} km）` : ''}`, color: '#555', margin: [0, 0, 0, 3] });
+  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, (e._pdfPhotos?.length || e.noPhoto) ? 4 : 0] });
+  if (e._pdfPhotos?.length) {
+    stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
+    stack.push({
+      columns: e._pdfPhotos.slice(0, 3).map(img => ({ image: img, fit: [210, 92], margin: [0, 0, 6, 0] })),
+      columnGap: 6
+    });
+  } else if (e.noPhoto) {
+    stack.push({ text: '【不便拍照】', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
+  }
+  return {
+    table: { widths: ['*'], body: [[{ stack }]] },
+    layout: {
+      fillColor: () => '#fafafa',
+      hLineColor: () => '#ccc',
+      vLineColor: () => '#ccc',
+      paddingLeft: () => 8,
+      paddingRight: () => 8,
+      paddingTop: () => 7,
+      paddingBottom: () => 7
+    },
+    margin: [0, 0, 0, 7]
+  };
+}
+
+function pdfJournalBlock(j, idx) {
+  const salaryNum = Number(j.salary);
+  const salaryText = Number.isFinite(salaryNum) ? `${salaryNum.toLocaleString()} 元` : '-';
+  const content = [
+    { text: `${pdfText(j.studentName || currentUser?.name || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
+    pdfInfoTable(j),
+    { text: `主要師傅/學長姐：${pdfText(j.mentor || '')}`, margin: [0, 0, 0, 4] },
+    { text: `本月薪資：${pdfText(salaryText)}`, margin: [0, 0, 0, 6] }
+  ];
+  if (j._pdfSalaryPhoto) {
+    content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
+    content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
+  }
+  content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
+  const entries = j._pdfEntries || [];
+  if (entries.length) entries.forEach((e, i) => content.push(pdfWorkEntry(e, i)));
+  else content.push({ text: '無工作摘要', color: '#999', margin: [0, 0, 0, 8] });
+  content.push({ text: '本月心得：', bold: true, margin: [0, 6, 0, 4] });
+  content.push({
+    table: { widths: ['*'], body: [[{ text: pdfText(j.reflection || ''), margin: [2, 2, 2, 2] }]] },
+    layout: {
+      fillColor: () => '#fafafa',
+      hLineColor: () => '#ccc',
+      vLineColor: () => '#ccc',
+      paddingLeft: () => 6,
+      paddingRight: () => 6,
+      paddingTop: () => 6,
+      paddingBottom: () => 6
+    },
+    margin: [0, 0, 0, 7]
+  });
+  if (j.teacherReviewed || j.teacherComment) {
+    content.push({
+      table: { widths: ['*'], body: [[{ stack: [
+        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
+      ] }]] },
+      layout: {
+        fillColor: () => '#f0fdf4',
+        hLineColor: () => '#86efac',
+        vLineColor: () => '#86efac',
+        paddingLeft: () => 8,
+        paddingRight: () => 8,
+        paddingTop: () => 7,
+        paddingBottom: () => 7
+      },
+      margin: [0, 0, 0, 8]
+    });
+  }
+  return content;
+}
+
+function buildPdfDocDefinition(journals, title) {
+  const content = [];
+  journals.forEach((j, idx) => content.push(...pdfJournalBlock(j, idx)));
+  return {
+    pageSize: 'A4',
+    pageMargins: [36, 40, 36, 34],
+    info: { title },
+    defaultStyle: { font: 'NotoSansTC', fontSize: 12, lineHeight: 1.25 },
+    footer: (currentPage, pageCount) => ({
+      columns: [
+        { text: pdfDateText(), alignment: 'left', margin: [36, 0, 0, 0], fontSize: 8 },
+        { text: pdfText(title), alignment: 'center', fontSize: 8 },
+        { text: `${currentPage}/${pageCount}`, alignment: 'right', margin: [0, 0, 36, 0], fontSize: 8 }
+      ]
+    }),
+    styles: {
+      journalTitle: { fontSize: 15, bold: true, margin: [0, 0, 0, 8] },
+      tableHead: { color: '#fff', bold: true, fontSize: 9, alignment: 'center' },
+      tableCell: { fontSize: 9.5 }
+    },
+    content
+  };
+}
+
+function openPdfBlob(blob, filename, win) {
+  const url = URL.createObjectURL(blob);
+  if (win && !win.closed) {
+    win.location.href = url;
+  } else {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
+// win 由呼叫端在使用者點擊的同步執行流中預先開啟，以相容 iOS Safari 彈出視窗限制。
+async function printJournalsPDF(journals, title, win) {
+  if (!setupPdfMakeFonts()) {
+    if (win && !win.closed) win.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#b91c1c">PDF 套件載入失敗，請確認網路後重試。</p>';
+    return toast('PDF 套件載入失敗，請確認網路後重試', 'error');
+  }
+  try {
+    journals = [...journals].sort((a,b) => {
+      const s = (a.seatNo || '').localeCompare(b.seatNo || '');
+      return s !== 0 ? s : (a.month || 0) - (b.month || 0);
+    });
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write('<html><head><meta charset="UTF-8"><title>產生 PDF 中</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">正在產生 PDF，請稍候...</p></body></html>');
+      win.document.close();
+    }
+    const prepared = await preparePdfJournalImages(journals);
+    const docDefinition = buildPdfDocDefinition(prepared, title);
+    const filename = pdfFileName(title);
+    await new Promise(resolve => {
+      pdfMake.createPdf(docDefinition).getBlob(blob => {
+        openPdfBlob(blob, filename, win);
+        toast('PDF 已產生', 'success');
+        resolve();
+      });
+    });
+  } catch (e) {
+    console.error('pdfmake 匯出失敗', e);
+    const msg = e.message || 'PDF 產生失敗';
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write(`<html><head><meta charset="UTF-8"><title>PDF 產生失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">PDF 產生失敗</p><p style="font-size:14px;color:#555;">${escapeHtml(msg)}</p></body></html>`);
+      win.document.close();
+    }
+    toast('PDF 產生失敗：' + msg, 'error');
+  }
+}
+
+// ============ 初始化 ============
+document.addEventListener('DOMContentLoaded', () => {
+  // LINE 內建瀏覽器偵測
+  (function() {
+    const ua = navigator.userAgent;
+    if (!/Line/i.test(ua)) return;
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const symbol = isIOS ? '⋯' : '⋮';
+    const platform = isIOS ? 'iPhone / iPad' : 'Android';
+    const browser = isIOS ? 'Safari' : 'Chrome';
+    const el = document.getElementById('line-warning');
+    const symIcon = document.getElementById('line-warn-symbol-icon');
+    const loginCard = document.getElementById('login-card');
+    if (!el) return;
+    if (symIcon) symIcon.textContent = symbol;
+    el.style.display = 'block';
+    if (loginCard) loginCard.style.display = 'none';
+  })();
+  handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
+  disableStudentAutocomplete();
+  const autocompleteObserver = new MutationObserver(muts => {
+    muts.forEach(m => m.addedNodes.forEach(node => {
+      if (node.nodeType === 1) disableStudentAutocomplete(node);
+    }));
+  });
+  autocompleteObserver.observe(document.body, { childList: true, subtree: true });
+  waitForFirebase(() => {
+    console.log('✅ Firebase 連線成功');
+    // 自動恢復登入狀態
+    const { auth, onAuthStateChanged } = window._auth;
+    onAuthStateChanged(auth, async (user) => {
+      if (user && !currentUser) {
+        // 若 handleRedirectResult 正在處理 redirect 登入，等待它完成再決定是否接手。
+        // 避免兩條路徑同時執行 handleLoginUser 造成 Firestore 競爭查詢。
+        if (_loginHandling) {
+          // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
+          const waitStart = Date.now();
+          while (_loginHandling && Date.now() - waitStart < 15000) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (currentUser) return; // redirect 路徑已登入成功
+        }
+        clearLoginError();
+        showLoading();
+        setLoadingText('驗證帳號中...');
+        const email = user.email || '';
+        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
+        const { doc, getDoc } = firebase_funcs;
+        const emailKey = email.replace(/[@.]/g, '_');
+        try {
+          const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
+          if (!bindSnap.exists()) {
+            if (await isTeacherAccount(user)) {
+              // 老師帳號：絕對不 signOut，只顯示提示，保護 teacher.html session
+              showTeacherStudentSetupHint('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面');
+            } else {
+              hideLoading();
+              await window._auth.signOut(auth);
+              showLoginError(
+                '帳號尚未綁定，無法登入',
+                '請聯絡老師，請老師在「學生管理」→「帳號綁定」中輸入你的學校信箱完成設定'
+              );
+            }
+            return;
+          }
+          const binding = bindSnap.data();
+          const activeSem2 = getCurrentSemester();
+          setLoadingText('讀取學生資料...');
+          let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
+          if (!stuSnap.exists()) {
+            // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
+            stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
+          }
+          if (!stuSnap.exists()) {
+            if (await isTeacherAccount(user)) {
+              showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
+            } else {
+              await window._auth.signOut(auth);
+              hideLoading();
+              showLoginError(
+                '找不到本學期學生名單',
+                '可能原因：老師尚未在「學生管理」中啟用本學期名單，或座號設定有誤。請聯絡老師確認後再試'
+              );
+            }
+            return;
+          }
+          const stuData = stuSnap.data();
+          currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
+          // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
+          try { const { updateDoc } = firebase_funcs; await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid }); } catch(e) { console.warn('補寫 uid 失敗', e); }
+          setLoadingText('登入成功');
+          enterApp();
+        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error'); }
+      }
+    });
+  });
+});
+</script>
+</body>
+</html>
