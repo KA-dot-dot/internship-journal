@@ -277,6 +277,9 @@ tr:last-child td { border-bottom: none; }
 .write-progress-item { display: flex; align-items: center; gap: 6px; }
 .write-progress-item.done { color: var(--accent-green); }
 .write-progress-item.todo { color: var(--accent-yellow); }
+.write-progress-subitem { font-size: 11px; color: var(--accent-red); margin-left: 18px; cursor: pointer; }
+.write-progress-subitem:hover { text-decoration: underline; }
+.entry-item.entry-issue-flash { outline: 2px solid var(--accent-red); outline-offset: 2px; transition: outline-color 0.3s; }
 .write-draft-note { font-size: 11px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
 .write-progress-float {
   position: fixed;
@@ -489,17 +492,17 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             <div id="s-this-month-status" style="margin-top:8px">-</div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
-            <div class="stat-label">已繳交 <span class="stat-card-arrow" id="stat-arrow-submitted">▾</span></div>
+            <div class="stat-label">已繳交（點擊查看） <span class="stat-card-arrow" id="stat-arrow-submitted">▾</span></div>
             <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
-            <div class="stat-label">老師已審閱／有新評語 <span class="stat-card-arrow" id="stat-arrow-teacher">▾</span></div>
+            <div class="stat-label">老師已審閱／有新評語（點擊查看） <span class="stat-card-arrow" id="stat-arrow-teacher">▾</span></div>
             <div id="s-teacher-status-summary" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
-            <div class="stat-label">已逾期 <span class="stat-card-arrow" id="stat-arrow-overdue">▾</span></div>
+            <div class="stat-label">已逾期（點擊查看） <span class="stat-card-arrow" id="stat-arrow-overdue">▾</span></div>
             <div class="stat-value" style="color:var(--accent-red)" id="s-overdue-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-overdue"></div>
           </div>
@@ -2211,18 +2214,41 @@ function initWriteDraftAutoSave() {
   _writeDraftAutoSaveBound = true;
 }
 
+// 工作摘要的 4 個檢查項目，順序固定供逐筆/逐欄位判斷與顯示共用
+const WORK_FIELD_CHECKS = [
+  { key: 'type', label: '類型', test: e => !!e.type && (e.type !== '其他' || !!e.other) },
+  { key: 'address', label: '地址', test: e => !!e.address },
+  { key: 'distance', label: '距離', test: e => !!e.distance },
+  { key: 'content', label: '內容10字+', test: e => e.content.length >= 10 }
+];
+
 function getWriteProgressState() {
   const entries = Array.from(document.querySelectorAll('#work-entries-container > div'));
   const hasBasic = !!(document.getElementById('write-semester')?.value && document.getElementById('write-month')?.value && document.getElementById('write-company')?.value.trim());
-  const hasWork = entries.length > 0 && entries.every(div => {
+
+  // 逐筆檢查工作摘要：fieldStatus 紀錄「所有筆是否都通過該欄位」（供精簡提示的紅/綠字使用）；
+  // entryIssues 紀錄「哪一則缺什麼」（供動態提示定位到具體那一則使用）
+  const fieldStatus = { type: true, address: true, distance: true, content: true };
+  const entryIssues = [];
+  entries.forEach(div => {
     const id = div.id;
-    const type = document.getElementById(`${id}-type`)?.value || '';
-    const other = document.getElementById(`${id}-other-input`)?.value.trim() || '';
-    const content = document.getElementById(`${id}-content`)?.value.trim() || '';
-    const address = document.getElementById(`${id}-address`)?.value.trim() || '';
-    const distance = document.getElementById(`${id}-dist-manual`)?.value.trim() || '';
-    return type && (type !== '其他' || other) && content.length >= 10 && address && distance;
+    const e = {
+      type: document.getElementById(`${id}-type`)?.value || '',
+      other: document.getElementById(`${id}-other-input`)?.value.trim() || '',
+      content: document.getElementById(`${id}-content`)?.value.trim() || '',
+      address: document.getElementById(`${id}-address`)?.value.trim() || '',
+      distance: document.getElementById(`${id}-dist-manual`)?.value.trim() || ''
+    };
+    const missing = WORK_FIELD_CHECKS.filter(fc => !fc.test(e));
+    missing.forEach(fc => { fieldStatus[fc.key] = false; });
+    if (missing.length) {
+      // 直接讀畫面上顯示的「工作摘要 #N」標題文字，確保跟學生實際看到的標題一致（即使中途刪除過某則造成編號跳號）
+      const entryLabel = div.querySelector('strong')?.textContent?.trim() || '工作摘要';
+      entryIssues.push({ id, label: entryLabel, missing: missing.map(fc => fc.label) });
+    }
   });
+  const hasWork = entries.length > 0 && entryIssues.length === 0;
+
   const hasPhotos = entries.length > 0 && entries.every(div => {
     const id = div.id;
     const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
@@ -2232,11 +2258,52 @@ function getWriteProgressState() {
   const hasReflection = (document.getElementById('write-reflection')?.value.trim().length || 0) >= 20;
   const items = [
     { label: '基本資料', done: hasBasic, hint: '學期、月份已確認' },
-    { label: '工作摘要', done: hasWork, hint: '類型／地址／距離／內容10字+' },
+    {
+      label: '工作摘要', done: hasWork, hint: '類型／地址／距離／內容10字+',
+      // 沒有任何一則工作摘要時，fieldStatus 沒有意義（沒東西可檢查），不要顯示成全部綠字
+      fieldStatus: entries.length ? fieldStatus : null,
+      entryIssues
+    },
     { label: '工作照片', done: hasPhotos, hint: '需上傳照片或勾選不便拍照' },
     { label: '心得', done: hasReflection, hint: '20字+' }
   ];
   return { items, done: items.filter(i => i.done).length, total: items.length };
+}
+
+
+// 工作摘要的提示行：fieldStatus 存在時，逐個欄位染色（缺哪個就紅字）；否則維持原始固定文字
+function renderWorkSummaryHintHtml(item) {
+  if (!item.fieldStatus) return escapeHtml(item.hint);
+  return WORK_FIELD_CHECKS.map(fc => {
+    const ok = item.fieldStatus[fc.key];
+    return `<span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'}">${escapeHtml(fc.label)}</span>`;
+  }).join('<span style="color:var(--text2)">／</span>');
+}
+
+// 單行版本（標籤＋提示），給浮動視窗用，不含逐則明細，避免跟完成度提示框重複顯示同樣資訊
+function renderProgressItemLine(i) {
+  const hintHtml = i.entryIssues ? renderWorkSummaryHintHtml(i) : escapeHtml(i.hint);
+  return `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${hintHtml}</span></div>`;
+}
+
+// 完整版本：在單行版本下方補上「哪一則缺什麼」，可點擊捲動到該則。只用在完成度提示框（write-progress-details），
+// 浮動視窗（write-progress-float）刻意不重複顯示這段，兩處只在其中一處看到逐則明細，避免資訊過多
+function renderProgressItemFull(i) {
+  let html = renderProgressItemLine(i);
+  if (i.entryIssues && i.entryIssues.length) {
+    html += i.entryIssues.map(ei =>
+      `<div class="write-progress-subitem" onclick="scrollToEntryIssue('${ei.id}')">↳ ${escapeHtml(ei.label)} 缺：${escapeHtml(ei.missing.join('、'))}</div>`
+    ).join('');
+  }
+  return html;
+}
+
+function scrollToEntryIssue(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('entry-issue-flash');
+  setTimeout(() => el.classList.remove('entry-issue-flash'), 1500);
 }
 
 function updateWriteProgress() {
@@ -2246,9 +2313,7 @@ function updateWriteProgress() {
   const state = getWriteProgressState();
   const missing = state.items.filter(i => !i.done).map(i => i.label);
   summaryEl.innerHTML = `完成度 <strong>${state.done}/${state.total}</strong>${missing.length ? '　尚缺：' + escapeHtml(missing.join('、')) : '　可儲存'}`;
-  detailsEl.innerHTML = state.items.map(i =>
-    `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${escapeHtml(i.hint)}</span></div>`
-  ).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
+  detailsEl.innerHTML = state.items.map(renderProgressItemFull).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
   syncWriteProgressFloat(false);
 }
 
@@ -2276,9 +2341,7 @@ function isWriteProgressBoxVisible() {
 }
 
 function renderWriteProgressFloatBody(state) {
-  return state.items.map(i =>
-    `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${escapeHtml(i.hint)}</span></div>`
-  ).join('');
+  return state.items.map(renderProgressItemLine).join('');
 }
 
 function syncWriteProgressFloat(forceExpanded = false) {
