@@ -203,6 +203,24 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 
+/* 歷史月記：三欄篩選格（起始日｜工作類型｜結束日）RWD */
+.s-history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; align-items:end; }
+.s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
+.s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
+.s-history-filter-grid > .filter-type  { grid-column:1/-1; grid-row:2; }
+.s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:3; }
+@media (min-width:600px) {
+  .s-history-filter-grid { grid-template-columns:1fr 1fr 1fr; }
+  .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
+  .s-history-filter-grid > .filter-type  { grid-column:2; grid-row:1; }
+  .s-history-filter-grid > .filter-end   { grid-column:3; grid-row:1; }
+  .s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:2; }
+}
+/* 圖表卡片 */
+.s-chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:16px; box-shadow:var(--shadow); }
+.s-chart-title { font-size:15px; font-weight:700; margin-bottom:14px; color:var(--text); }
+.s-chart-empty { text-align:center; padding:24px 0; color:var(--text2); font-size:13px; }
+
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { background: var(--bg3); color: var(--text2); padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
@@ -413,9 +431,17 @@ tr:last-child td { border-bottom: none; }
             <div id="s-this-month-status" style="margin-top:8px">-</div>
           </div>
         </div>
-        <div class="card">
-          <div style="font-size:15px;font-weight:700;margin-bottom:14px">📖 最近月記</div>
-          <div id="s-recent-journals"></div>
+        <div class="s-chart-card">
+          <div class="s-chart-title">🥧 各工作類型累計次數</div>
+          <div id="s-work-type-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
+        <div class="s-chart-card">
+          <div class="s-chart-title">🗺️ 工作縣市分布</div>
+          <div id="s-city-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
+        <div class="s-chart-card" style="margin-bottom:0">
+          <div class="s-chart-title">📈 每月薪資趨勢</div>
+          <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
         </div>
       </div>
 
@@ -480,16 +506,22 @@ tr:last-child td { border-bottom: none; }
       <div id="page-s-history" class="hidden fade-in">
         <div class="page-title">📚 歷史月記</div>
         <div class="page-subtitle">查看我所有的實習月記</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;align-items:end">
-          <div>
+        <div class="s-history-filter-grid">
+          <div class="filter-start">
             <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">起始日期</label>
             <input type="date" id="s-history-date-start" style="width:100%">
           </div>
-          <div>
+          <div class="filter-type">
+            <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">工作類型</label>
+            <select id="s-history-type-filter" style="width:100%">
+              <option value="">全部類型</option>
+            </select>
+          </div>
+          <div class="filter-end">
             <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">結束日期</label>
             <input type="date" id="s-history-date-end" style="width:100%">
           </div>
-          <button class="btn btn-primary btn-sm" onclick="loadStudentHistory()" style="grid-column:1/-1;justify-content:center">🔍 查詢</button>
+          <button class="btn btn-primary btn-sm filter-btn" onclick="loadStudentHistory()" style="justify-content:center">🔍 查詢</button>
         </div>
         <!-- 批次選取工具列 -->
         <div id="s-batch-toolbar">
@@ -966,19 +998,296 @@ async function loadStudentDashboard() {
     document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
       '<span class="badge badge-green">✅ 本月已繳</span>' :
       '<span class="badge badge-red">❌ 本月未繳</span>';
-    const recent = journals
-      .sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || b.month - a.month)
-      .slice(0, 3);
-    document.getElementById('s-recent-journals').innerHTML = recent.length ?
-      recent.map(j => renderJournalCard(j, false)).join('') :
-      '<div class="empty-state"><div class="icon">📝</div><p>尚無月記，快去填寫第一份吧！</p></div>';
+    renderStudentWorkTypeChart(journals);
+    renderStudentCityChart(journals);
+    renderStudentSalaryLineChart(journals);
   } catch (e) {
     console.error('載入首頁月記失敗', e);
     document.getElementById('s-submitted-count').textContent = '-';
     document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
-    document.getElementById('s-recent-journals').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
+    const errHtml = '<div class="s-chart-empty">⚠️ 資料載入失敗，請重新整理</div>';
+    const wc = document.getElementById('s-work-type-chart'); if (wc) wc.innerHTML = errHtml;
+    const cc = document.getElementById('s-city-chart'); if (cc) cc.innerHTML = errHtml;
+    const sc = document.getElementById('s-salary-line-chart'); if (sc) sc.innerHTML = errHtml;
     toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
   }
+}
+
+function renderStudentWorkTypeChart(journals) {
+  const container = document.getElementById('s-work-type-chart');
+  if (!container) return;
+  // 統計各工作類型累計次數（「其他（XXX）」歸類為「其他」）
+  const counts = {};
+  journals.forEach(j => {
+    (j.entries || []).forEach(e => {
+      if (!e.type) return;
+      const type = (e.type.startsWith('其他（') && e.type.endsWith('）')) ? '其他' : e.type;
+      counts[type] = (counts[type] || 0) + 1;
+    });
+  });
+  const entries = Object.entries(counts).filter(([,v]) => v > 0).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) {
+    container.innerHTML = '<div class="s-chart-empty">📊 尚無工作記錄</div>';
+    return;
+  }
+  const COLORS = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#7c3aed','#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6','#14b8a6','#f43f5e','#a78bfa','#34d399'];
+  const total = entries.reduce((s,[,v]) => s+v, 0);
+  const R = 68, CX = 80, CY = 80, W = 160, H = 160;
+  let angle = -Math.PI / 2;
+  const slices = entries.map(([label, count], i) => {
+    const ratio = count / total;
+    const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
+    const x1 = CX + R * Math.cos(sa), y1 = CY + R * Math.sin(sa);
+    const x2 = CX + R * Math.cos(ea), y2 = CY + R * Math.sin(ea);
+    const la = ratio > 0.5 ? 1 : 0;
+    const color = COLORS[i % COLORS.length];
+    const safeLabel = escapeHtml(label);
+    return { label, count, ratio, color,
+      path: `M ${CX} ${CY} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`,
+      tip: `${safeLabel}：${count}次（${Math.round(ratio*100)}%）` };
+  });
+  const pathsSvg = slices.map(s =>
+    `<path d="${s.path}" fill="${s.color}" stroke="var(--bg2)" stroke-width="2" data-tip="${escapeHtml(s.tip)}" class="s-pie-slice" style="cursor:pointer;transition:opacity 0.15s"/>`
+  ).join('');
+  const legendHtml = entries.map(([label, count], i) =>
+    `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${COLORS[i%COLORS.length]}"></span><span style="font-size:11px;color:var(--text)">${escapeHtml(label)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`
+  ).join('');
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+    <div style="position:relative;flex-shrink:0">
+      <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-pie-svg">${pathsSvg}</svg>
+      <div id="s-pie-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:110px;padding-top:2px">${legendHtml}</div>
+  </div>`;
+  const tipEl = container.querySelector('#s-pie-tip');
+  container.querySelectorAll('.s-pie-slice').forEach(path => {
+    path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    path.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect = container.getBoundingClientRect();
+      let lx = e.clientX - rect.left + 12, ly = e.clientY - rect.top - 12;
+      if (lx + 200 > rect.width) lx = e.clientX - rect.left - 200;
+      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+    });
+    path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    // 觸控：點一下顯示 tooltip，再點別處隱藏
+    path.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent = this.getAttribute('data-tip');
+      tipEl.style.display = 'block';
+      const rect = container.getBoundingClientRect();
+      const touch = e.changedTouches?.[0] || e;
+      let lx = (touch.clientX || e.clientX) - rect.left + 12;
+      let ly = (touch.clientY || e.clientY) - rect.top - 12;
+      if (lx + 200 > rect.width) lx = (touch.clientX || e.clientX) - rect.left - 200;
+      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+}
+
+// 台灣 22 縣市標準名稱（與 teacher.html 同步，用最早出現的縣市全名比對）
+const TW_CITIES = ['臺北市','新北市','桃園市','臺中市','臺南市','高雄市','新竹市','嘉義市','基隆市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
+function extractCityFromAddress(address) {
+  const addr = String(address || '').replace(/^\d{3,6}\s*/, '').replace(/台/g, '臺');
+  let best = null;
+  for (const city of TW_CITIES) {
+    const idx = addr.indexOf(city);
+    if (idx !== -1 && (best === null || idx < best.idx)) best = { idx, city };
+  }
+  return best ? best.city.replace(/臺/g, '台') : '';
+}
+
+function renderStudentCityChart(journals) {
+  const container = document.getElementById('s-city-chart');
+  if (!container) return;
+  // 統計每筆工作記錄的縣市（有地址才算）
+  const counts = {};
+  journals.forEach(j => {
+    (j.entries || []).forEach(e => {
+      const addr = (e.address || '').trim();
+      if (!addr) return;
+      const city = extractCityFromAddress(addr) || '其他/未知';
+      counts[city] = (counts[city] || 0) + 1;
+    });
+  });
+  const entries = Object.entries(counts).filter(([,v]) => v > 0).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) {
+    container.innerHTML = '<div class="s-chart-empty">🗺️ 尚無工作地址記錄</div>';
+    return;
+  }
+  // 台中市用系統藍色，其他縣市依序配色
+  const CITY_COLORS = ['#f59e0b','#ef4444','#7c3aed','#06b6d4','#f97316','#84cc16','#ec4899','#8b5cf6','#14b8a6','#f43f5e','#a78bfa','#34d399','#fb923c'];
+  const TAICHUNG = '台中市';
+  const total = entries.reduce((s,[,v]) => s+v, 0);
+  let colorIdx = 0;
+  const colorMap = {};
+  entries.forEach(([city]) => {
+    colorMap[city] = city === TAICHUNG ? '#4f8ef7' : CITY_COLORS[colorIdx++ % CITY_COLORS.length];
+  });
+
+  const R = 68, CX = 80, CY = 80, W = 160, H = 160;
+  let angle = -Math.PI / 2;
+  const slices = entries.map(([city, count]) => {
+    const ratio = count / total;
+    const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
+    const x1 = CX + R * Math.cos(sa), y1 = CY + R * Math.sin(sa);
+    const x2 = CX + R * Math.cos(ea), y2 = CY + R * Math.sin(ea);
+    const la = ratio > 0.5 ? 1 : 0;
+    const color = colorMap[city];
+    return { city, count, ratio, color,
+      path: `M ${CX} ${CY} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`,
+      tip: `${escapeHtml(city)}：${count}次（${Math.round(ratio*100)}%）` };
+  });
+  const pathsSvg = slices.map(s =>
+    `<path d="${s.path}" fill="${s.color}" stroke="var(--bg2)" stroke-width="2" data-tip="${escapeHtml(s.tip)}" class="s-city-slice" style="cursor:pointer;transition:opacity 0.15s"/>`
+  ).join('');
+  const legendHtml = entries.map(([city, count]) => {
+    const isLocal = city === TAICHUNG;
+    return `<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${colorMap[city]}"></span><span style="font-size:11px;color:${isLocal ? 'var(--accent)' : 'var(--accent-yellow)'};font-weight:${isLocal ? '600' : '400'}">${escapeHtml(city)}</span><span style="font-size:11px;color:var(--text2);white-space:nowrap">${count}次</span></div>`;
+  }).join('');
+  container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+    <div style="position:relative;flex-shrink:0">
+      <svg viewBox="0 0 ${W} ${H}" style="width:min(${W}px,100%);height:auto;display:block" id="s-city-svg">${pathsSvg}</svg>
+      <div id="s-city-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:110px;padding-top:2px">${legendHtml}</div>
+  </div>`;
+  const tipEl = container.querySelector('#s-city-tip');
+  container.querySelectorAll('.s-city-slice').forEach(path => {
+    path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    path.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect=container.getBoundingClientRect();
+      let lx=e.clientX-rect.left+12, ly=e.clientY-rect.top-12;
+      if(lx+200>rect.width) lx=e.clientX-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+    });
+    path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    path.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
+      const rect=container.getBoundingClientRect();
+      const touch=e.changedTouches?.[0]||e;
+      let lx=(touch.clientX||e.clientX)-rect.left+12;
+      let ly=(touch.clientY||e.clientY)-rect.top-12;
+      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+}
+
+function renderStudentSalaryLineChart(journals) {
+  const container = document.getElementById('s-salary-line-chart');
+  if (!container) return;
+  // 只取有薪資的月記，依學期+月份時間軸排序
+  const sorted = journals
+    .filter(j => j.salary != null && Number.isFinite(Number(j.salary)))
+    .map(j => {
+      const [roc, half] = String(j.semester||'').split('-').map(Number);
+      const m = j.month || 0;
+      let year = (roc||0) + 1911;
+      if (half === 1 && m === 1) year += 1;
+      if (half === 2) year += 1;
+      const label = `${year}/${String(m).padStart(2,'0')}`;
+      return { label, salary: Number(j.salary), semester: j.semester||'', month: m };
+    })
+    .sort((a,b) => a.label.localeCompare(b.label));
+  // 同月有多筆取平均（邊界案例）
+  const byLabel = {};
+  sorted.forEach(p => {
+    if (!byLabel[p.label]) byLabel[p.label] = [];
+    byLabel[p.label].push(p.salary);
+  });
+  const points = Object.entries(byLabel)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([label, vals]) => ({ label, salary: Math.round(vals.reduce((s,v)=>s+v,0)/vals.length) }));
+  if (!points.length) {
+    container.innerHTML = '<div class="s-chart-empty">📈 尚無薪資資料</div>';
+    return;
+  }
+  if (points.length === 1) {
+    container.innerHTML = `<div class="s-chart-empty">💰 ${escapeHtml(points[0].label)}：$${points[0].salary.toLocaleString()} 元<br><span style="font-size:12px;color:var(--text2)">（兩個月以上才會顯示趨勢圖）</span></div>`;
+    return;
+  }
+  const W=560, H=160, ML=68, MR=14, MT=10, MB=32;
+  const plotW=W-ML-MR, plotH=H-MT-MB, n=points.length;
+  const vals = points.map(p=>p.salary);
+  const maxV = Math.max(...vals), rawMin = Math.min(...vals);
+  const pad = (maxV-rawMin)*0.18 || maxV*0.18 || 2000;
+  const minVal = Math.max(0, rawMin-pad);
+  const yRange = (maxV+pad)-minVal || 1;
+  const xPos = i => ML + (n>1 ? i*plotW/(n-1) : plotW/2);
+  const yPos = v => MT+plotH-((v-minVal)/yRange)*plotH;
+  function smPath(pts) {
+    if (!pts.length) return '';
+    if (pts.length===1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i=0;i<pts.length-1;i++) {
+      const [x0,y0]=pts[i],[x1,y1]=pts[i+1],cx=(x0+x1)/2;
+      d += ` C ${cx.toFixed(1)} ${y0.toFixed(1)} ${cx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    return d;
+  }
+  let sp = [];
+  // Y 軸格線與標籤
+  for (let i=0;i<5;i++) {
+    const v=minVal+(yRange/4)*i, y=yPos(v).toFixed(1);
+    sp.push(`<line x1="${ML}" y1="${y}" x2="${W-MR}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`);
+    sp.push(`<text x="${ML-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--text2)">$${Math.round(v/1000)}k</text>`);
+  }
+  // X 軸
+  const step = n <= 12 ? 1 : Math.ceil(n/10);
+  points.forEach((p,i) => {
+    if (i % step !== 0 && i !== n-1) return;
+    const x=xPos(i).toFixed(1), yBt=(MT+plotH).toFixed(1);
+    sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`);
+    sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--text2)">${escapeHtml(p.label.slice(2))}</text>`);
+  });
+  sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
+  sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="var(--border)" stroke-width="1"/>`);
+  // 折線 + 漸層填色
+  const pathD = smPath(points.map((p,i)=>[xPos(i),yPos(p.salary)]));
+  const fillD = pathD + ` L ${xPos(n-1).toFixed(1)} ${(MT+plotH).toFixed(1)} L ${xPos(0).toFixed(1)} ${(MT+plotH).toFixed(1)} Z`;
+  sp.push(`<defs><linearGradient id="s-sal-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/></linearGradient></defs>`);
+  sp.push(`<path d="${fillD}" fill="url(#s-sal-grad)"/>`);
+  sp.push(`<path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+  // 資料點
+  points.forEach((p,i) => {
+    const x=xPos(i).toFixed(1), y=yPos(p.salary).toFixed(1);
+    sp.push(`<circle cx="${x}" cy="${y}" r="4.5" fill="var(--accent)" stroke="var(--bg2)" stroke-width="2" class="s-sal-dot" data-tip="${escapeHtml(p.label)}：$${p.salary.toLocaleString()} 元" style="cursor:pointer"/>`);
+  });
+  container.innerHTML = `<div style="position:relative;width:100%">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block" id="s-sal-svg">${sp.join('')}</svg>
+    <div id="s-sal-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
+  </div>`;
+  const tipEl = container.querySelector('#s-sal-tip');
+  container.querySelectorAll('.s-sal-dot').forEach(dot => {
+    dot.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
+    dot.addEventListener('mousemove', function(e) {
+      if(!tipEl) return;
+      const rect=container.getBoundingClientRect();
+      let lx=e.clientX-rect.left+14, ly=e.clientY-rect.top-14;
+      if (lx+200>rect.width) lx=e.clientX-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+    });
+    dot.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
+    dot.addEventListener('click', function(e) {
+      if(!tipEl) return;
+      tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
+      const rect=container.getBoundingClientRect();
+      const touch=e.changedTouches?.[0]||e;
+      let lx=(touch.clientX||e.clientX)-rect.left+14;
+      let ly=(touch.clientY||e.clientY)-rect.top-14;
+      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
+      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      e.stopPropagation();
+    });
+  });
+  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
 }
 
 function initWriteMonths() {
@@ -1713,6 +2022,7 @@ async function loadStudentHistory() {
   if (!currentUser) return;
   const startVal = document.getElementById('s-history-date-start')?.value || '';
   const endVal = document.getElementById('s-history-date-end')?.value || '';
+  const typeFilter = document.getElementById('s-history-type-filter')?.value || '';
   const startStr = startVal.replace(/-/g,'');
   const endStr = endVal.replace(/-/g,'');
   showLoading();
@@ -1720,6 +2030,14 @@ async function loadStudentHistory() {
     const snap = await getMyJournalDocs();
     let journals = snap.docs.map(d => d.data());
     if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
+    // 工作類型篩選：月記裡任一工作摘要符合即納入；「其他（XXX）」歸類為「其他」
+    if (typeFilter) {
+      journals = journals.filter(j => (j.entries || []).some(e => {
+        if (!e.type) return false;
+        const normalised = (e.type.startsWith('其他（') && e.type.endsWith('）')) ? '其他' : e.type;
+        return normalised === typeFilter;
+      }));
+    }
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     window._studentHistoryJournals = journals;
     const toolbar = document.getElementById('s-batch-toolbar');
@@ -2099,6 +2417,15 @@ function initStatsDateSelects() {
 
   ids.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = startStr; });
   ide.forEach(id => { const el = document.getElementById(id); if (el && !el.value) el.value = endStr; });
+  // 填入工作類型篩選下拉選項（僅首次，避免重複填入）
+  const typeSel = document.getElementById('s-history-type-filter');
+  if (typeSel && typeSel.options.length <= 1) {
+    WORK_TYPES.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      typeSel.appendChild(opt);
+    });
+  }
 }
 
 function renderJournalCard(j, isTeacher) {
