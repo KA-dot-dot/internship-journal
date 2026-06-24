@@ -2883,7 +2883,34 @@ async function saveJournal() {
     updateWriteProgress();
     // 跳到第一個有問題的欄位
     scrollToFirstSaveIssue(entries);
-    return toast(writeIssues[0], 'error');
+    // 靜態進度框（右下角大方框）已在視野內 → 不顯示 toast，避免重複提示；
+    // 捲動後才判斷（rAF 等一幀讓 scrollIntoView 先執行）
+    requestAnimationFrame(() => {
+      if (!isWriteProgressBoxVisible()) {
+        // 靜態框不在視野，顯示浮動提示；點擊可跳回進度框
+        const box = document.getElementById('write-progress-box');
+        const clickHandler = () => {
+          if (box) {
+            box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const details = document.getElementById('write-progress-details');
+            const btn = document.getElementById('write-progress-toggle');
+            if (details && details.classList.contains('hidden')) {
+              details.classList.remove('hidden');
+              if (btn) btn.textContent = '收合';
+            }
+          }
+        };
+        const toastEl = document.getElementById('toast');
+        if (toastEl) {
+          toastEl.onclick = clickHandler;
+          toastEl.style.cursor = 'pointer';
+          // toast 消失後清除 handler
+          setTimeout(() => { toastEl.onclick = null; toastEl.style.cursor = ''; }, 4000);
+        }
+        toast('⚠️ 尚有欄位未填寫，請點此查看', 'error');
+      }
+    });
+    return;
   }
   const saveBtn = document.getElementById('save-journal-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
