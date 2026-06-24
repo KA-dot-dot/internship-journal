@@ -2403,11 +2403,12 @@ async function saveJournal() {
     if (workType === '其他' && otherInputVal) workType = `其他（${otherInputVal}）`;
     entries.push({ _id: id, date: document.getElementById(`${id}-date`)?.value || '', type: workType, content: document.getElementById(`${id}-content`)?.value || '', address, distance, noPhoto: noPhoto || false, photos });
   });
-  if (typeError) return toast(typeError, 'error');
-  if (contentError) return toast(contentError, 'error');
-  if (addressError) return toast(addressError, 'error');
-  if (distanceError) return toast('有工作地點填了地址但尚未計算距離，請按「📍 計算距離」後再儲存', 'error');
-  if (photoError) return toast(photoError, 'error');
+  const writeIssues = [typeError, contentError, addressError, distanceError ? 'distance' : '', photoError].filter(Boolean);
+  if (writeIssues.length) {
+    document.getElementById('write-progress-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateWriteProgress();
+    return toast('請先完成上方完成度提示中的項目，再按儲存', 'error');
+  }
   const saveBtn = document.getElementById('save-journal-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
   showLoading();
