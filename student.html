@@ -203,7 +203,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 
-/* 歷史月記：三欄篩選格（起始日｜工作類型｜結束日）RWD */
+/* 歷史月記：三欄篩選格（起始日｜結束日｜工作類型）RWD；日期區間與工作類型為兩組獨立篩選條件，日期兩欄相鄰，工作類型獨立放最後 */
 .s-history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; align-items:end; }
 .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
 .s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
@@ -212,8 +212,8 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 @media (min-width:600px) {
   .s-history-filter-grid { grid-template-columns:1fr 1fr 1fr; }
   .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
-  .s-history-filter-grid > .filter-type  { grid-column:2; grid-row:1; }
-  .s-history-filter-grid > .filter-end   { grid-column:3; grid-row:1; }
+  .s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
+  .s-history-filter-grid > .filter-type  { grid-column:3; grid-row:1; }
   .s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:2; }
 }
 /* 圖表卡片 */
@@ -993,6 +993,8 @@ async function loadStudentDashboard() {
   try {
     const snap = await getMyJournalDocs();
     const journals = snap.docs.map(d => d.data());
+    // 依 semester 再依 month 排序（與 loadStudentHistory()/exportMyPDF() 同邏輯一致），避免 Firestore 回傳順序不固定
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     document.getElementById('s-submitted-count').textContent = journals.length;
     const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
     document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
@@ -1011,6 +1013,19 @@ async function loadStudentDashboard() {
     const sc = document.getElementById('s-salary-line-chart'); if (sc) sc.innerHTML = errHtml;
     toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
   }
+}
+
+// 圓餅圖弧形路徑共用函式：當某類別佔比達100%（ratio≈1）時，弧形的起點與終點座標會重合，
+// 依 SVG 規範瀏覽器會直接省略該弧形（視為沒有這段弧），導致整個圓形完全不顯示、只剩圖例文字。
+// 改用兩個半圓弧拼成完整圓形繞過此邊界案例。renderStudentWorkTypeChart/renderStudentCityChart 共用。
+function pieSlicePath(cx, cy, r, sa, ea, ratio) {
+  if (ratio >= 0.999999) {
+    return `M ${cx} ${cy-r} A ${r} ${r} 0 1 1 ${cx} ${cy+r} A ${r} ${r} 0 1 1 ${cx} ${cy-r} Z`;
+  }
+  const x1 = cx + r * Math.cos(sa), y1 = cy + r * Math.sin(sa);
+  const x2 = cx + r * Math.cos(ea), y2 = cy + r * Math.sin(ea);
+  const la = ratio > 0.5 ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
 }
 
 function renderStudentWorkTypeChart(journals) {
@@ -1037,13 +1052,10 @@ function renderStudentWorkTypeChart(journals) {
   const slices = entries.map(([label, count], i) => {
     const ratio = count / total;
     const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
-    const x1 = CX + R * Math.cos(sa), y1 = CY + R * Math.sin(sa);
-    const x2 = CX + R * Math.cos(ea), y2 = CY + R * Math.sin(ea);
-    const la = ratio > 0.5 ? 1 : 0;
     const color = COLORS[i % COLORS.length];
     const safeLabel = escapeHtml(label);
     return { label, count, ratio, color,
-      path: `M ${CX} ${CY} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`,
+      path: pieSlicePath(CX, CY, R, sa, ea, ratio),
       tip: `${safeLabel}：${count}次（${Math.round(ratio*100)}%）` };
   });
   const pathsSvg = slices.map(s =>
@@ -1132,12 +1144,9 @@ function renderStudentCityChart(journals) {
   const slices = entries.map(([city, count]) => {
     const ratio = count / total;
     const sa = angle; angle += ratio * Math.PI * 2; const ea = angle;
-    const x1 = CX + R * Math.cos(sa), y1 = CY + R * Math.sin(sa);
-    const x2 = CX + R * Math.cos(ea), y2 = CY + R * Math.sin(ea);
-    const la = ratio > 0.5 ? 1 : 0;
     const color = colorMap[city];
     return { city, count, ratio, color,
-      path: `M ${CX} ${CY} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`,
+      path: pieSlicePath(CX, CY, R, sa, ea, ratio),
       tip: `${escapeHtml(city)}：${count}次（${Math.round(ratio*100)}%）` };
   });
   const pathsSvg = slices.map(s =>
