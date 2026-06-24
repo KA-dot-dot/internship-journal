@@ -330,6 +330,15 @@ tr:last-child td { border-bottom: none; }
 .write-progress-subitem:hover { text-decoration: underline; }
 .entry-item.entry-issue-flash { outline: 2px solid var(--accent-red); outline-offset: 2px; transition: outline-color 0.3s; }
 .write-draft-note { font-size: 11px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
+.textarea-wrap { position: relative; }
+.textarea-wrap textarea { display: block; }
+.textarea-char-counter {
+  position: absolute; bottom: 8px; right: 10px;
+  font-size: 11px; color: var(--text3);
+  pointer-events: none; user-select: none;
+  opacity: 0; transition: opacity 0.15s;
+  background: var(--bg2); padding: 1px 4px; border-radius: 4px;
+}
 .write-progress-float {
   position: fixed;
   right: 14px;
@@ -632,7 +641,10 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
           </div>
           <div class="form-group">
             <label>本月心得（必填）</label>
-            <textarea id="write-reflection" rows="5" placeholder="請填寫本月實習的整體心得與反思，至少20字..."></textarea>
+            <div class="textarea-wrap">
+              <textarea id="write-reflection" rows="5" placeholder="請填寫本月實習的整體心得與反思，至少20字..."></textarea>
+              <span class="textarea-char-counter" id="reflection-char-counter"></span>
+            </div>
           </div>
         </div>
         <div class="card" style="margin-bottom:16px">
@@ -1661,6 +1673,7 @@ async function initWriteForm(skipDeadlineCheck = false) {
   // editJournal() 會傳入 true 跳過此呼叫，避免背景非同步重新讀取目前真實學期/月份的資料，蓋掉剛載入的編輯內容
   if (!skipDeadlineCheck) checkMonthDeadline();
   updateWriteProgress();
+  bindCharCounter('write-reflection', 'reflection-char-counter', 20);
 }
 
 
@@ -1922,7 +1935,10 @@ function addWorkEntry() {
       </div>
       <div class="form-group">
         <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span><button type="button" id="${id}-example-cycle" class="btn btn-secondary btn-sm" style="display:none;margin-left:6px;padding:1px 7px;font-size:11px;vertical-align:middle" onclick="cycleWorkTypeExample('${id}')" title="換一句範例寫法">🔄</button></label>
-        <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
+        <div class="textarea-wrap">
+          <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
+          <span class="textarea-char-counter" id="${id}-content-counter"></span>
+        </div>
       </div>
       <div class="form-group">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -1955,6 +1971,7 @@ function addWorkEntry() {
     }
   }
   updateWriteProgress();
+  bindCharCounter(`${id}-content`, `${id}-content-counter`, 10);
 }
 
 // 點 header 手動展開/收合（移除按鈕不觸發）
@@ -2587,7 +2604,54 @@ function updateWriteProgress() {
   syncWriteProgressFloat(false);
   // 逐筆更新 entry header 狀態並決定自動收合
   document.querySelectorAll('#work-entries-container > div').forEach(div => syncEntryState(div.id));
+
+  // 同步字數 counter（框內右下角灰字）
+  syncCharCounters();
 }
+
+// 更新所有字數 counter：游標在框內且尚未達標時顯示「尚需 N 字」，達標後消失
+function syncCharCounters() {
+  // 心得：至少 20 字
+  const reflEl = document.getElementById('write-reflection');
+  const reflCtr = document.getElementById('reflection-char-counter');
+  if (reflEl && reflCtr) {
+    const need = Math.max(0, 20 - reflEl.value.trim().length);
+    reflCtr.textContent = need > 0 ? `尚需 ${need} 字` : '';
+    if (need <= 0) reflCtr.style.opacity = '0';
+  }
+  // 工作摘要內容：至少 10 字
+  document.querySelectorAll('#work-entries-container > div').forEach(div => {
+    const contentEl = document.getElementById(`${div.id}-content`);
+    const ctr = document.getElementById(`${div.id}-content-counter`);
+    if (!contentEl || !ctr) return;
+    const need = Math.max(0, 10 - contentEl.value.trim().length);
+    ctr.textContent = need > 0 ? `尚需 ${need} 字` : '';
+    if (need <= 0) ctr.style.opacity = '0';
+  });
+}
+
+// 綁 focus/blur 控制 counter 顯示（由 addWorkEntry 與 initWriteForm 呼叫）
+function bindCharCounter(textareaId, counterId, minLen) {
+  const ta = document.getElementById(textareaId);
+  const ctr = document.getElementById(counterId);
+  if (!ta || !ctr) return;
+  ta.addEventListener('focus', () => {
+    const need = Math.max(0, minLen - ta.value.trim().length);
+    if (need > 0) ctr.style.opacity = '1';
+  });
+  ta.addEventListener('input', () => {
+    const need = Math.max(0, minLen - ta.value.trim().length);
+    if (need > 0) {
+      ctr.textContent = `尚需 ${need} 字`;
+      ctr.style.opacity = '1';
+    } else {
+      ctr.textContent = '';
+      ctr.style.opacity = '0';
+    }
+  });
+  ta.addEventListener('blur', () => { ctr.style.opacity = '0'; });
+}
+
 
 function toggleWriteProgressDetails() {
   const details = document.getElementById('write-progress-details');
