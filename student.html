@@ -231,7 +231,8 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .s-chart-title { font-size:15px; font-weight:700; margin-bottom:14px; color:var(--text); }
 .s-chart-empty { text-align:center; padding:24px 0; color:var(--text2); font-size:13px; }
 @media (max-width: 600px) {
-  #s-city-chart > div svg, #s-work-type-chart > div svg { width:120px !important; height:120px !important; }
+  #s-city-chart > div, #s-work-type-chart > div { flex-direction:column !important; align-items:center !important; }
+  .s-pie-legend { flex:none !important; align-self:flex-start; }
 }
 
 .table-wrap { overflow-x: auto; }
