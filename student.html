@@ -1995,6 +1995,8 @@ async function saveJournal() {
     teacherCommentUnread: false
   };
   if (JSON.stringify(data).length > 900000) return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
+  // 防呆：月份必須為 1–12 的有效整數，避免 month=0 或 NaN 被寫入 Firestore
+  if (!month || month < 1 || month > 12) return toast('月份選擇無效，請重新選擇月份後再儲存', 'error');
   const saveBtn = document.getElementById('save-journal-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 儲存中...'; }
   showLoading();
@@ -2011,7 +2013,6 @@ async function saveJournal() {
       hideLoading();
       const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
       if (!confirmed) {
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
         toast('已取消，原本月記保留', 'info');
         return;
       }
@@ -2019,15 +2020,14 @@ async function saveJournal() {
     }
     // 快取無效時（直接跳到填寫頁等邊界情況）仍正常儲存，不擋
     await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
-    hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
     toast('月記已成功儲存！', 'success');
     showPage('s-dashboard');
   } catch(e) {
+    toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
+  } finally {
     hideLoading();
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
-    toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
   }
 }
 
