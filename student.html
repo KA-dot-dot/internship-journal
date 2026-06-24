@@ -202,6 +202,12 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
+.stat-card-clickable { cursor: pointer; user-select: none; }
+.stat-card-arrow { font-size: 10px; color: var(--text2); }
+.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
+.stat-card-detail.hidden { display: none; }
+.stat-detail-row { display: flex; align-items: center; gap: 6px; }
+.stat-detail-empty { color: var(--text2); font-size: 12px; }
 
 /* 歷史月記：三欄篩選格（起始日｜結束日｜工作類型）RWD；日期區間與工作類型為兩組獨立篩選條件，日期兩欄相鄰，工作類型獨立放最後 */
 .s-history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; align-items:end; }
@@ -456,6 +462,9 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
       <button class="nav-item active" onclick="showPage('s-dashboard')" data-page="s-dashboard">
         <span class="icon">🏠</span> 首頁
       </button>
+      <button class="nav-item" onclick="showPage('s-stats')" data-page="s-stats">
+        <span class="icon">📊</span> 統計
+      </button>
       <button class="nav-item" onclick="showPage('s-write')" data-page="s-write">
         <span class="icon">✏️</span> 填寫本月月記
       </button>
@@ -476,18 +485,31 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
         <div class="page-subtitle" id="s-dashboard-subtitle">載入中...</div>
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-label">實習公司</div>
-            <div style="font-size:16px;font-weight:700;margin-top:6px" id="s-company-name">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">已繳月份數</div>
-            <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">本月狀態</div>
+            <div class="stat-label">本月繳交狀態</div>
             <div id="s-this-month-status" style="margin-top:8px">-</div>
           </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
+            <div class="stat-label">已繳交 <span class="stat-card-arrow" id="stat-arrow-submitted">▾</span></div>
+            <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
+            <div class="stat-label">老師已審閱／有新評語 <span class="stat-card-arrow" id="stat-arrow-teacher">▾</span></div>
+            <div id="s-teacher-status-summary" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
+            <div class="stat-label">已逾期 <span class="stat-card-arrow" id="stat-arrow-overdue">▾</span></div>
+            <div class="stat-value" style="color:var(--accent-red)" id="s-overdue-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-overdue"></div>
+          </div>
         </div>
+      </div>
+
+      <!-- ========== 學生：統計 ========== -->
+      <div id="page-s-stats" class="hidden fade-in">
+        <div class="page-title">📊 統計</div>
+        <div class="page-subtitle">薪資、工作地點與工作類型統計圖表</div>
         <div class="s-chart-card">
           <div class="s-chart-title">📈 每月薪資趨勢</div>
           <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
@@ -632,6 +654,7 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
   <!-- 手機底部導航 -->
   <div class="mobile-nav" id="student-mobile-nav">
     <button class="mobile-nav-item active" onclick="showPage('s-dashboard')"><span class="icon">🏠</span>首頁</button>
+    <button class="mobile-nav-item" onclick="showPage('s-stats')"><span class="icon">📊</span>統計</button>
     <button class="mobile-nav-item" onclick="showPage('s-write')"><span class="icon">✏️</span>填寫</button>
     <button class="mobile-nav-item" onclick="showPage('s-history')"><span class="icon">📚</span>歷史</button>
     <button class="mobile-nav-item" onclick="showPage('s-export')"><span class="icon">⬇️</span>下載</button>
@@ -1055,6 +1078,7 @@ function showPage(pageId) {
   });
   const loaders = {
     's-dashboard': loadStudentDashboard,
+    's-stats': loadStudentStats,
     's-write': initWriteForm,
     's-history': () => { initStatsDateSelects(); loadStudentHistory(); },
   };
@@ -1069,36 +1093,135 @@ function showPage(pageId) {
 // ===== 學生功能 ==============================================
 // ============================================================
 
+function semMonthToLabel(semester, month) {
+  const [roc, half] = String(semester || '').split('-').map(Number);
+  let year = (roc || 0) + 1911;
+  if (half === 1 && month === 1) year += 1;
+  if (half === 2) year += 1;
+  return `${year}/${month}`;
+}
+
+function toggleStatDetail(key) {
+  const detail = document.getElementById(`stat-detail-${key}`);
+  const arrow = document.getElementById(`stat-arrow-${key}`);
+  if (!detail) return;
+  const willShow = detail.classList.contains('hidden');
+  detail.classList.toggle('hidden', !willShow);
+  if (arrow) arrow.textContent = willShow ? '▴' : '▾';
+}
+
+function renderSubmittedMonthsDetail(journals) {
+  if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
+  const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
+  return sorted.map(j => `<div class="stat-detail-row">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
+}
+
+// 將「老師已審閱」與「有新評語」合併為單一清單，依老師審閱時間新到舊排序
+function getTeacherStatusJournals(journals) {
+  return journals
+    .filter(j => (j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed)
+    .map(j => ({ ...j, _statStatus: (j.teacherCommentUnread && j.teacherComment) ? 'unread' : 'reviewed' }))
+    .sort((a,b) => new Date(b.reviewedAt || 0) - new Date(a.reviewedAt || 0));
+}
+
+function renderTeacherStatusDetail(list) {
+  if (!list.length) return '<div class="stat-detail-empty">尚無老師審閱紀錄</div>';
+  return list.map(j => {
+    const label = escapeHtml(semMonthToLabel(j.semester, j.month));
+    return j._statStatus === 'unread'
+      ? `<div class="stat-detail-row"><span class="journal-unread-badge" style="position:static">● 有新評語</span>${label}</div>`
+      : `<div class="stat-detail-row"><span class="journal-reviewed-badge" style="position:static">✅ 已審閱</span>${label}</div>`;
+  }).join('');
+}
+
+// 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但尚未繳交的月份
+// （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）
+async function getOverdueMonths(sem, journals) {
+  const { collection, getDocs } = firebase_funcs;
+  const snap = await getDocs(collection(db, 'deadlines'));
+  const now = new Date();
+  const submittedMonths = new Set(journals.filter(j => j.semester === sem).map(j => Number(j.month)));
+  const overdue = [];
+  snap.docs.forEach(d => {
+    const dd = d.data();
+    if (dd.semester !== sem || !dd.month || !dd.closeDate) return;
+    const close = new Date(dd.closeDate + 'T23:59:59+08:00');
+    if (close < now && !submittedMonths.has(Number(dd.month))) overdue.push(Number(dd.month));
+  });
+  return overdue.sort((a,b) => a-b);
+}
+
 async function loadStudentDashboard() {
   if (!currentUser) return;
   const { semester: sem, month: thisMonth } = getCurrentSemMonth();
   const [y, t] = sem.split('-').map(Number);
-  document.getElementById('s-dashboard-subtitle').textContent = `${y}學年第${t}學期 ／ ${currentUser.name} 同學`;
-  document.getElementById('s-company-name').textContent = currentUser.company || '-';
+  document.getElementById('s-dashboard-subtitle').textContent =
+    `${y}學年第${t}學期 ／ ${currentUser.name} 同學${currentUser.company ? '・' + currentUser.company : ''}`;
+  ['submitted', 'teacher', 'overdue'].forEach(key => {
+    document.getElementById(`stat-detail-${key}`)?.classList.add('hidden');
+    const arrow = document.getElementById(`stat-arrow-${key}`);
+    if (arrow) arrow.textContent = '▾';
+  });
   try {
     const snap = await getMyJournalDocs();
     const journals = snap.docs.map(d => d.data());
     // 依 semester 再依 month 排序（與 loadStudentHistory()/exportMyPDF() 同邏輯一致），避免 Firestore 回傳順序不固定
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-    document.getElementById('s-submitted-count').textContent = journals.length;
+
+    // 本月繳交狀態
     const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
     document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
       '<span class="badge badge-green">✅ 本月已繳</span>' :
       '<span class="badge badge-red">❌ 本月未繳</span>';
+
+    // 已繳交（累計）
+    document.getElementById('s-submitted-count').textContent = journals.length;
+    document.getElementById('stat-detail-submitted').innerHTML = renderSubmittedMonthsDetail(journals);
+
+    // 老師已審閱／有新評語（合併卡）
+    const teacherList = getTeacherStatusJournals(journals);
+    const unreadCount = teacherList.filter(j => j._statStatus === 'unread').length;
+    const reviewedCount = teacherList.filter(j => j._statStatus === 'reviewed').length;
+    document.getElementById('s-teacher-status-summary').innerHTML =
+      `<span class="journal-unread-badge" style="position:static">● 有新評語 ${unreadCount}</span>` +
+      `<span class="journal-reviewed-badge" style="position:static">✅ 已審閱 ${reviewedCount}</span>`;
+    document.getElementById('stat-detail-teacher').innerHTML = renderTeacherStatusDetail(teacherList);
+
+    // 已逾期
+    const overdueMonths = await getOverdueMonths(sem, journals);
+    document.getElementById('s-overdue-count').textContent = overdueMonths.length;
+    document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
+      ? overdueMonths.map(m => `<div class="stat-detail-row">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
+      : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
+  } catch (e) {
+    console.error('載入首頁統計失敗', e);
+    document.getElementById('s-submitted-count').textContent = '-';
+    document.getElementById('s-overdue-count').textContent = '-';
+    document.getElementById('s-teacher-status-summary').textContent = '-';
+    document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
+    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+  }
+}
+
+async function loadStudentStats() {
+  if (!currentUser) return;
+  try {
+    const snap = await getMyJournalDocs();
+    const journals = snap.docs.map(d => d.data());
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
     renderStudentSalaryLineChart(journals);
     renderStudentCityChart(journals);
     renderStudentWorkTypeChart(journals);
   } catch (e) {
-    console.error('載入首頁月記失敗', e);
-    document.getElementById('s-submitted-count').textContent = '-';
-    document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
+    console.error('載入統計圖表失敗', e);
     const errHtml = '<div class="s-chart-empty">⚠️ 資料載入失敗，請重新整理</div>';
     const wc = document.getElementById('s-work-type-chart'); if (wc) wc.innerHTML = errHtml;
     const cc = document.getElementById('s-city-chart'); if (cc) cc.innerHTML = errHtml;
     const sc = document.getElementById('s-salary-line-chart'); if (sc) sc.innerHTML = errHtml;
-    toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
+    toast('統計資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
   }
 }
+
 
 // 圓餅圖弧形路徑共用函式：當某類別佔比達100%（ratio≈1）時，弧形的起點與終點座標會重合，
 // 依 SVG 規範瀏覽器會直接省略該弧形（視為沒有這段弧），導致整個圓形完全不顯示、只剩圖例文字。
@@ -2108,10 +2231,10 @@ function getWriteProgressState() {
   });
   const hasReflection = (document.getElementById('write-reflection')?.value.trim().length || 0) >= 20;
   const items = [
-    { label: '基本資料', done: hasBasic, hint: '學期、月份與公司已確認' },
-    { label: '工作摘要', done: hasWork, hint: '每一筆工作摘要都要完整填寫：工作類型（含「其他」需註明項目）、工作地址、距離與 10 字以上內容' },
-    { label: '工作照片', done: hasPhotos, hint: '每筆摘要需上傳照片或勾選不便拍照' },
-    { label: '心得', done: hasReflection, hint: '至少 20 字' }
+    { label: '基本資料', done: hasBasic, hint: '學期、月份已確認' },
+    { label: '工作摘要', done: hasWork, hint: '類型／地址／距離／內容10字+' },
+    { label: '工作照片', done: hasPhotos, hint: '需上傳照片或勾選不便拍照' },
+    { label: '心得', done: hasReflection, hint: '20字+' }
   ];
   return { items, done: items.filter(i => i.done).length, total: items.length };
 }
@@ -2125,7 +2248,7 @@ function updateWriteProgress() {
   summaryEl.innerHTML = `完成度 <strong>${state.done}/${state.total}</strong>${missing.length ? '　尚缺：' + escapeHtml(missing.join('、')) : '　可儲存'}`;
   detailsEl.innerHTML = state.items.map(i =>
     `<div class="write-progress-item ${i.done ? 'done' : 'todo'}"><span>${i.done ? '✓' : '!'}</span><span>${escapeHtml(i.label)}：${escapeHtml(i.hint)}</span></div>`
-  ).join('') + '<div class="write-draft-note">文字內容會暫存在此裝置；新選照片不會存入本機草稿，也不會在正式儲存前上傳雲端。</div>';
+  ).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
   syncWriteProgressFloat(false);
 }
 
