@@ -187,6 +187,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; align-items: stretch; }
+  .stat-card { align-self: stretch; }
   .stat-value { font-size: 22px; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
@@ -205,7 +206,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-card-clickable { cursor: pointer; user-select: none; }
 .stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
 .stat-card-detail.hidden { display: none; }
-.stat-detail-row { display: flex; align-items: center; gap: 6px; }
+.stat-detail-row { display: flex; align-items: center; gap: 8px; }
+.stat-detail-row .journal-unread-badge,
+.stat-detail-row .journal-reviewed-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
 .stat-detail-empty { color: var(--text2); font-size: 12px; }
 
 /* 歷史月記：三欄篩選格（起始日｜結束日｜工作類型）RWD；日期區間與工作類型為兩組獨立篩選條件，日期兩欄相鄰，工作類型獨立放最後 */
@@ -493,8 +496,8 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
-            <div class="stat-label">已審閱／有新評語（點擊查看）</div>
-            <div id="s-teacher-status-summary" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">-</div>
+            <div class="stat-label">審閱／有新評語（點擊查看）</div>
+            <div class="stat-value" style="color:var(--text)" id="s-teacher-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
@@ -1125,8 +1128,8 @@ function renderTeacherStatusDetail(list) {
   return list.map(j => {
     const label = escapeHtml(semMonthToLabel(j.semester, j.month));
     return j._statStatus === 'unread'
-      ? `<div class="stat-detail-row"><span class="journal-unread-badge" style="position:static">● 有新評語</span>${label}</div>`
-      : `<div class="stat-detail-row"><span class="journal-reviewed-badge" style="position:static">✅ 已審閱</span>${label}</div>`;
+      ? `<div class="stat-detail-row"><span class="journal-unread-badge">● 有新評語</span>${label}</div>`
+      : `<div class="stat-detail-row"><span class="journal-reviewed-badge">✅ 已審閱</span>${label}</div>`;
   }).join('');
 }
 
@@ -1174,11 +1177,7 @@ async function loadStudentDashboard() {
 
     // 老師已審閱／有新評語（合併卡）
     const teacherList = getTeacherStatusJournals(journals);
-    const unreadCount = teacherList.filter(j => j._statStatus === 'unread').length;
-    const reviewedCount = teacherList.filter(j => j._statStatus === 'reviewed').length;
-    document.getElementById('s-teacher-status-summary').innerHTML =
-      `<span class="journal-unread-badge" style="position:static">● 有新評語 ${unreadCount}</span>` +
-      `<span class="journal-reviewed-badge" style="position:static">✅ 已審閱 ${reviewedCount}</span>`;
+    document.getElementById('s-teacher-count').textContent = teacherList.length;
     document.getElementById('stat-detail-teacher').innerHTML = renderTeacherStatusDetail(teacherList);
 
     // 已逾期
@@ -1191,7 +1190,7 @@ async function loadStudentDashboard() {
     console.error('載入首頁統計失敗', e);
     document.getElementById('s-submitted-count').textContent = '-';
     document.getElementById('s-overdue-count').textContent = '-';
-    document.getElementById('s-teacher-status-summary').textContent = '-';
+    document.getElementById('s-teacher-count').textContent = '-';
     document.getElementById('s-this-month-status').innerHTML = '<span class="badge badge-yellow">⚠️ 載入失敗</span>';
     toast('月記資料載入失敗：' + (e.message || '請確認網路連線'), 'error');
   }
