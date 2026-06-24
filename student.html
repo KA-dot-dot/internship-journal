@@ -123,32 +123,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---- 照片上傳狀態 ---- */
-/* 壓縮中佔位符（handlePhotoUpload 讀檔期間顯示） */
-.photo-compress-placeholder {
-  width: 90px; height: 72px; background: var(--bg3); border: 1px dashed var(--border);
-  border-radius: 6px; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 4px; flex-shrink: 0;
-}
-.photo-compress-spinner {
-  width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent);
-  border-radius: 50%; animation: spin 0.7s linear infinite;
-}
-.photo-compress-label { font-size: 10px; color: var(--text2); }
-/* 上傳成功「✓ 已上傳」文字 overlay */
-@keyframes photoSuccessFadeOut {
-  0%   { opacity: 1; }
-  60%  { opacity: 1; }
-  100% { opacity: 0; }
-}
-.photo-upload-success {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 6px; font-size: 12px; font-weight: 700;
-  color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6);
-  pointer-events: none;
-  animation: photoSuccessFadeOut 1.2s ease forwards;
-}
+/* ===== 登入頁 ===== */
 #login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, rgba(79,142,247,0.08) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(124,58,237,0.08) 0%, transparent 60%), var(--bg); padding: 20px; }
 .login-container { width: 100%; max-width: 420px; }
 .login-header { text-align: center; margin-bottom: 32px; }
@@ -461,8 +436,6 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
         使用 Google 帳號登入
       </button>
       <p style="text-align:center;font-size:12px;color:var(--text2);margin-top:10px">iPhone 用 Safari・Android 用 Chrome 開啟</p>
-      <!-- 登入失敗靜態說明：由 JS 寫入，預設隱藏 -->
-      <div id="login-error-hint" class="hidden" style="margin-top:16px;padding:12px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);font-size:12px;line-height:1.7;color:var(--accent-red)"></div>
     </div>
   </div>
 </div>
@@ -862,21 +835,6 @@ function toast(msg, type = 'info') {
   toastTimer = setTimeout(() => { el.className = ''; }, 3500);
 }
 
-// 登入失敗靜態說明：把訊息寫入 login card 下方固定區塊，比 toast 更持久
-function showLoginError(mainMsg, hintMsg) {
-  // toast 仍顯示，讓使用者立即知道出錯
-  toast(mainMsg, 'error');
-  const el = document.getElementById('login-error-hint');
-  if (!el) return;
-  // hintMsg 可為純文字或含 <br> 的 HTML，統一用 innerHTML（呼叫端不含使用者輸入，安全）
-  el.innerHTML = `<strong>${mainMsg}</strong>${hintMsg ? '<br>' + hintMsg : ''}`;
-  el.classList.remove('hidden');
-}
-function clearLoginError() {
-  const el = document.getElementById('login-error-hint');
-  if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
-}
-
 function showLoading() { setLoadingText('載入中...'); document.getElementById('loading-overlay').classList.remove('hidden'); }
 function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); setLoadingText('載入中...'); }
 function setLoadingText(msg) { const el = document.getElementById('loading-text'); if (el) el.textContent = msg; }
@@ -936,7 +894,6 @@ function showTeacherStudentSetupHint(message) {
 
 // ============ 登入後共用：驗證並進入系統 ============
 async function handleLoginUser(user) {
-  clearLoginError();
   setLoadingText('驗證帳號中...');
   const email = user.email || '';
 
@@ -961,10 +918,7 @@ async function handleLoginUser(user) {
     } else {
       hideLoading();
       await window._auth.signOut(window._auth.auth);
-      showLoginError(
-        '帳號尚未綁定，無法登入',
-        '請聯絡老師，請老師在「學生管理」→「帳號綁定」中輸入你的學校信箱完成設定'
-      );
+      toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
     }
     _loginHandling = false;
     return;
@@ -987,10 +941,7 @@ async function handleLoginUser(user) {
     } else {
       await window._auth.signOut(window._auth.auth);
       hideLoading();
-      showLoginError(
-        '找不到本學期學生名單',
-        '可能原因：老師尚未在「學生管理」中啟用本學期名單，或座號設定有誤。請聯絡老師確認後再試'
-      );
+      toast('❌ 找不到學生資料，請聯絡老師', 'error');
     }
     _loginHandling = false;
     return;
@@ -1102,7 +1053,6 @@ async function handleRedirectResult() {
 function enterApp() {
   if (window._enteringApp) return;
   window._enteringApp = true;
-  clearLoginError();
   hideLoading();
   document.getElementById('login-page').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -2128,15 +2078,6 @@ async function uploadPendingWorkPhotos(sem) {
     imgEl.dataset.pendingUpload = '';
     imgEl.dataset.localDataUrl = '';
     imgEl.onclick = () => openPhotoModal(url);
-    // 短暫顯示「✓ 已上傳」，讓使用者知道這張已上雲端
-    if (wrap) {
-      const check = document.createElement('div');
-      check.className = 'photo-upload-success';
-      check.textContent = '✓ 已上傳';
-      wrap.appendChild(check);
-      // 動畫結束後自動移除（避免殘留 DOM）
-      check.addEventListener('animationend', () => check.remove());
-    }
   }
 }
 
@@ -2517,12 +2458,6 @@ function handlePhotoUpload(event, id) {
   const files = Array.from(event.target.files);
   const container = document.getElementById(`${id}-photos`);
   files.forEach(file => {
-    // 壓縮中佔位符：在 FileReader 讀取 + canvas 壓縮期間顯示 spinner
-    const placeholder = document.createElement('div');
-    placeholder.className = 'photo-compress-placeholder';
-    placeholder.innerHTML = '<div class="photo-compress-spinner"></div><div class="photo-compress-label">處理中...</div>';
-    container.appendChild(placeholder);
-
     const reader = new FileReader();
     reader.onload = async (e) => {
       const img = new Image();
@@ -2539,8 +2474,7 @@ function handlePhotoUpload(event, id) {
         wrap.className = 'photo-thumb-wrap';
         wrap.innerHTML = `<img src="${previewSrc}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button><div class="photo-pending-upload" style="position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,0.58);color:#fff;border-radius:6px;padding:2px 5px;font-size:10px">儲存時上傳</div>`;
         wrap.style.position = 'relative';
-        // 移除佔位符，插入縮圖
-        placeholder.replaceWith(wrap);
+        container.appendChild(wrap);
         const imgEl = wrap.querySelector('img');
         imgEl.dataset.pendingUpload = '1';
         imgEl.dataset.localDataUrl = previewSrc;
@@ -3581,7 +3515,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           if (currentUser) return; // redirect 路徑已登入成功
         }
-        clearLoginError();
         showLoading();
         setLoadingText('驗證帳號中...');
         const email = user.email || '';
@@ -3597,10 +3530,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
               hideLoading();
               await window._auth.signOut(auth);
-              showLoginError(
-                '帳號尚未綁定，無法登入',
-                '請聯絡老師，請老師在「學生管理」→「帳號綁定」中輸入你的學校信箱完成設定'
-              );
+              toast('❌ 帳號尚未綁定，請聯絡老師完成帳號設定', 'error');
             }
             return;
           }
@@ -3618,10 +3548,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
               await window._auth.signOut(auth);
               hideLoading();
-              showLoginError(
-                '找不到本學期學生名單',
-                '可能原因：老師尚未在「學生管理」中啟用本學期名單，或座號設定有誤。請聯絡老師確認後再試'
-              );
+              toast('❌ 找不到學生資料，請聯絡老師', 'error');
             }
             return;
           }
