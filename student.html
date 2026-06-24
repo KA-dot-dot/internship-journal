@@ -2457,7 +2457,7 @@ function getWriteProgressState() {
     missing.forEach(fc => { fieldStatus[fc.key] = false; });
     if (missing.length) {
       // 直接讀畫面上顯示的「工作摘要 #N」標題文字，確保跟學生實際看到的標題一致（即使中途刪除過某則造成編號跳號）
-      const entryLabel = div.querySelector('strong')?.textContent?.trim() || '工作摘要';
+      const entryLabel = div.querySelector('.entry-header-title')?.textContent?.trim() || '工作摘要';
       entryIssues.push({ id, label: entryLabel, missing: missing.map(fc => fc.label) });
     }
   });
