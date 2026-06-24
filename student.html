@@ -284,29 +284,7 @@ tr:last-child td { border-bottom: none; }
 .journal-month { font-size: 15px; font-weight: 700; }
 .journal-meta { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .journal-entries { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
-.entry-item { background: var(--bg3); border-radius: var(--radius-sm); border-left: 3px solid var(--accent); overflow-wrap: break-word; word-break: break-all; transition: border-left-color 0.25s; }
-.entry-item.entry-collapsed { border-left-color: var(--accent-green); }
-.entry-item.entry-has-issues { border-left-color: var(--accent-yellow); }
-.entry-header { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; cursor:pointer; user-select:none; gap:8px; }
-.entry-header-left { display:flex; align-items:center; gap:8px; min-width:0; flex:1; overflow:hidden; }
-.entry-header-title { font-size:13px; font-weight:700; white-space:nowrap; flex-shrink:0; }
-.entry-header-summary { font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.entry-header-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
-.entry-status-badge { font-size:11px; font-weight:600; white-space:nowrap; }
-.entry-status-badge.done { color:var(--accent-green); }
-.entry-status-badge.todo { color:var(--accent-yellow); }
-.entry-toggle-icon { font-size:11px; color:var(--text2); line-height:1; transition:transform 0.2s; }
-.entry-item.entry-collapsed .entry-toggle-icon { transform:rotate(180deg); }
-.entry-body { padding:0 12px 12px; }
-.entry-item.entry-collapsed .entry-body { display:none; }
-.entry-field-focus { outline:2px solid var(--accent) !important; outline-offset:2px; }
-/* 草稿恢復 Banner */
-.draft-restore-banner { display:flex; align-items:center; gap:12px; background:var(--bg3); border:1px solid var(--accent); border-radius:var(--radius-sm); padding:11px 14px; margin-bottom:14px; flex-wrap:wrap; }
-.draft-restore-banner.hidden { display:none; }
-.draft-restore-banner-icon { font-size:20px; flex-shrink:0; }
-.draft-restore-banner-text { font-size:13px; color:var(--text); flex:1; min-width:160px; line-height:1.4; }
-.draft-restore-banner-text strong { color:var(--accent); }
-.draft-restore-banner-actions { display:flex; gap:8px; flex-shrink:0; }
+.entry-item { background: var(--bg3); border-radius: var(--radius-sm); padding: 12px; border-left: 3px solid var(--accent); overflow-wrap: break-word; word-break: break-all; }
 .entry-date { font-size: 11px; color: var(--text2); margin-bottom: 4px; font-family: 'Space Mono', monospace; }
 .entry-content { font-size: 13px; line-height: 1.6; overflow-wrap: break-word; word-break: break-all; }
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
@@ -596,16 +574,6 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             </div>
           </div>
           <div id="write-deadline-status" style="font-size:13px;margin-bottom:14px"></div>
-          <div id="write-draft-banner" class="draft-restore-banner hidden">
-            <div class="draft-restore-banner-icon">📄</div>
-            <div class="draft-restore-banner-text">
-              <strong>有未送出的草稿</strong><span id="write-draft-banner-time"></span><br>要接著填，還是重新開始？
-            </div>
-            <div class="draft-restore-banner-actions">
-              <button class="btn btn-primary btn-sm" onclick="confirmRestoreDraft()">接續填寫</button>
-              <button class="btn btn-secondary btn-sm" onclick="dismissDraftBanner()">重新填寫</button>
-            </div>
-          </div>
           <div id="write-progress-box" class="write-progress-box">
             <div class="write-progress-summary" onclick="toggleWriteProgressDetails()">
               <div id="write-progress-summary" class="write-progress-main">完成度 0/4　尚缺：基本資料、工作摘要、工作照片、心得</div>
@@ -769,6 +737,22 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="draft-confirm-modal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <div class="modal-title">📄 有未送出的草稿</div>
+    </div>
+    <div class="modal-body">
+      <p id="draft-confirm-time" style="font-size:13px;color:var(--text2);margin-bottom:14px"></p>
+      <p style="font-size:14px;line-height:1.7">這台裝置上有上次還沒送出的月記內容。<br>要接著填，還是重新開始？</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="dismissDraftModal()">重新填寫</button>
+      <button class="btn btn-primary" onclick="confirmRestoreDraft()">接續填寫</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== JavaScript ==================== -->
 <script>
 // ============ 全域狀態 ============
@@ -783,7 +767,7 @@ let _skipWriteInit = false;
 let _writeDraftHydrating = false;
 let _writeDraftSaveTimer = null;
 let _writeDraftAutoSaveBound = false;
-let _pendingDraft = null; // 等待學生確認的草稿（Banner 顯示中）
+let _pendingDraft = null; // 等待學生在 Modal 確認的草稿
 let _writeProgressFloatTimer = null;
 let _writeProgressFloatRaf = 0;
 let _writeProgressFloatBound = false;
@@ -1880,66 +1864,57 @@ function addWorkEntry() {
   div.style.marginBottom = '12px';
   const typeOptions = WORK_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
   div.innerHTML = `
-    <div class="entry-header" id="${id}-header" onclick="toggleEntryCollapse('${id}', event)">
-      <div class="entry-header-left">
-        <span class="entry-header-title">工作摘要 #${entryCount}</span>
-        <span class="entry-header-summary" id="${id}-summary"></span>
-      </div>
-      <div class="entry-header-right">
-        <span class="entry-status-badge todo" id="${id}-status-badge">未完成</span>
-        <button class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:12px" onclick="removeEntry('${id}')" title="移除此筆">移除</button>
-        <span class="entry-toggle-icon" id="${id}-toggle-icon">▲</span>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <strong style="font-size:13px">工作摘要 #${entryCount}</strong>
+      <button class="btn btn-danger btn-sm" onclick="removeEntry('${id}')">移除</button>
+    </div>
+    <div class="form-row" style="margin-bottom:8px">
+      <div class="form-group"><label>日期</label><input type="date" id="${id}-date" onchange="checkEntryDateMismatch('${id}')"></div>
+      <div class="form-group">
+        <label>工作類型</label>
+        <select id="${id}-type" onchange="showWorkTypeExample('${id}')">
+          <option value="">請選擇類型</option>${typeOptions}
+        </select>
+        <div id="${id}-other-wrap" style="display:none;margin-top:8px">
+          <input type="text" id="${id}-other-input" placeholder="請輸入補充說明" style="width:100%">
+        </div>
       </div>
     </div>
-    <div class="entry-body" id="${id}-body">
-      <div class="form-row" style="margin-bottom:8px">
-        <div class="form-group"><label>日期</label><input type="date" id="${id}-date" onchange="checkEntryDateMismatch('${id}')"></div>
-        <div class="form-group">
-          <label>工作類型</label>
-          <select id="${id}-type" onchange="showWorkTypeExample('${id}')">
-            <option value="">請選擇類型</option>${typeOptions}
-          </select>
-          <div id="${id}-other-wrap" style="display:none;margin-top:8px">
-            <input type="text" id="${id}-other-input" placeholder="請輸入補充說明" style="width:100%">
-          </div>
-        </div>
+    <div class="form-group">
+      <label>工作地點地址（用於計算距學校參考距離）</label>
+      <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="width:100%" oninput="clearDistResult('${id}')">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="calcDistance('${id}')">📍 計算距離</button>
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="useCurrentLocation('${id}')">📌 目前位置</button>
       </div>
-      <div class="form-group">
-        <label>工作地點地址（用於計算距學校參考距離）</label>
-        <input type="text" id="${id}-address" placeholder="例：403臺中市西區三民路一段199號" style="width:100%" oninput="clearDistResult('${id}')">
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="calcDistance('${id}')">📍 計算距離</button>
-          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="useCurrentLocation('${id}')">📌 目前位置</button>
-        </div>
-        <div id="${id}-dist-result"></div>
-        <div id="${id}-dist-manual-wrap" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:12px;color:var(--text2)">📝 微調距離：</span>
-          <input type="number" id="${id}-dist-manual" min="0" step="0.1" style="width:100px;padding:6px 10px;font-size:13px" placeholder="例：4.2">
-          <span style="font-size:12px;color:var(--text2)">km</span>
-        </div>
+      <div id="${id}-dist-result"></div>
+      <div id="${id}-dist-manual-wrap" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text2)">📝 微調距離：</span>
+        <input type="number" id="${id}-dist-manual" min="0" step="0.1" style="width:100px;padding:6px 10px;font-size:13px" placeholder="例：4.2">
+        <span style="font-size:12px;color:var(--text2)">km</span>
       </div>
-      <div class="form-group">
-        <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span><button type="button" id="${id}-example-cycle" class="btn btn-secondary btn-sm" style="display:none;margin-left:6px;padding:1px 7px;font-size:11px;vertical-align:middle" onclick="cycleWorkTypeExample('${id}')" title="換一句範例寫法">🔄</button></label>
-        <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>工作內容描述<span id="${id}-example-text" style="font-weight:400;color:var(--text2)"></span><button type="button" id="${id}-example-cycle" class="btn btn-secondary btn-sm" style="display:none;margin-left:6px;padding:1px 7px;font-size:11px;vertical-align:middle" onclick="cycleWorkTypeExample('${id}')" title="換一句範例寫法">🔄</button></label>
+      <textarea id="${id}-content" rows="3" placeholder="描述今天的工作內容..."></textarea>
+    </div>
+    <div class="form-group">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label style="margin:0">工作照片</label>
+        <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;font-size:12px;color:var(--text2)">
+          <input type="checkbox" id="${id}-nophoto" onchange="toggleNoPhoto('${id}')" style="width:auto">
+          不便拍照
+        </label>
       </div>
-      <div class="form-group">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <label style="margin:0">工作照片</label>
-          <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;font-size:12px;color:var(--text2)">
-            <input type="checkbox" id="${id}-nophoto" onchange="toggleNoPhoto('${id}')" style="width:auto">
-            不便拍照
-          </label>
+      <div id="${id}-photo-area">
+        <div class="photo-upload-area" onclick="triggerPhotoUpload('${id}')" style="padding:16px">
+          <div style="font-size:22px;margin-bottom:4px">📷</div>
+          <div style="font-size:12px;color:var(--text2)">點擊或拖曳上傳工作照片</div>
         </div>
-        <div id="${id}-photo-area">
-          <div class="photo-upload-area" onclick="triggerPhotoUpload('${id}')" style="padding:16px">
-            <div style="font-size:22px;margin-bottom:4px">📷</div>
-            <div style="font-size:12px;color:var(--text2)">點擊或拖曳上傳工作照片</div>
-          </div>
-          <input type="file" id="${id}-file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${id}')">
-          <div id="${id}-photos" class="photo-preview-grid"></div>
-        </div>
-        <div id="${id}-nophoto-label" class="hidden" style="color:var(--text2);font-size:13px;padding:8px 0">📵 已選擇不拍照</div>
+        <input type="file" id="${id}-file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${id}')">
+        <div id="${id}-photos" class="photo-preview-grid"></div>
       </div>
+      <div id="${id}-nophoto-label" class="hidden" style="color:var(--text2);font-size:13px;padding:8px 0">📵 已選擇不拍照</div>
     </div>
   `;
   document.getElementById('work-entries-container').appendChild(div);
@@ -1953,75 +1928,6 @@ function addWorkEntry() {
     }
   }
   updateWriteProgress();
-}
-
-// 點擊 header 展開/收合（忽略「移除」按鈕的點擊）
-function toggleEntryCollapse(id, event) {
-  if (event && event.target && event.target.closest('.btn-danger')) return;
-  const div = document.getElementById(id);
-  if (!div) return;
-  div.classList.toggle('entry-collapsed');
-  syncEntryCollapseIcon(id);
-}
-
-function syncEntryCollapseIcon(id) {
-  // 箭頭圖示方向由 CSS rotate 控制，不需另外更新文字
-}
-
-// 更新單一 entry 的 header 摘要文字與狀態徽章
-function updateEntryHeaderBadge(id) {
-  const statusBadge = document.getElementById(`${id}-status-badge`);
-  const summaryEl = document.getElementById(`${id}-summary`);
-  const div = document.getElementById(id);
-  if (!statusBadge || !div) return;
-
-  const type = document.getElementById(`${id}-type`)?.value || '';
-  const other = document.getElementById(`${id}-other-input`)?.value.trim() || '';
-  const address = document.getElementById(`${id}-address`)?.value.trim() || '';
-  const content = document.getElementById(`${id}-content`)?.value.trim() || '';
-  const dist = document.getElementById(`${id}-dist-manual`)?.value.trim() || '';
-  const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
-  const photoCount = document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`).length;
-
-  const typeOk = !!type && (type !== '其他' || !!other);
-  const addressOk = !!address;
-  const distOk = !!dist;
-  const contentOk = content.length >= 10;
-  const photoOk = noPhoto || photoCount > 0;
-
-  const allDone = typeOk && addressOk && distOk && contentOk && photoOk;
-
-  // 狀態徽章
-  statusBadge.textContent = allDone ? '✓ 完成' : '未完成';
-  statusBadge.className = `entry-status-badge ${allDone ? 'done' : 'todo'}`;
-
-  // 摘要文字（收合時才有意義，展開時也可以放著）
-  if (summaryEl) {
-    const typeLabel = type === '其他' ? `其他（${other || '?'}）` : (type || '—');
-    const addrShort = address ? address.replace(/^\d{3,6}\s?/, '').slice(0, 14) : '—';
-    summaryEl.textContent = allDone ? `${typeLabel}・${addrShort}` : '';
-  }
-
-  // 邊框顏色 class
-  div.classList.toggle('entry-collapsed', div.classList.contains('entry-collapsed')); // 維持收合狀態不變
-  div.classList.toggle('entry-has-issues', !allDone);
-  // 若已完成，確保邊框走 entry-collapsed 的綠色（只有收合時才變綠）
-}
-
-// 自動收合完成、展開有問題的 entry
-function autoCollapseEntries(entryIssueIds) {
-  document.querySelectorAll('#work-entries-container > div').forEach(div => {
-    const id = div.id;
-    const hasProblem = entryIssueIds.includes(id);
-    if (!hasProblem) {
-      // 完成的：收合
-      div.classList.add('entry-collapsed');
-    } else {
-      // 有問題的：展開
-      div.classList.remove('entry-collapsed');
-    }
-    updateEntryHeaderBadge(id);
-  });
 }
 
 function showWorkTypeExample(id) {
@@ -2332,8 +2238,6 @@ function renderDraftPhoto(url, photoGrid) {
   photoGrid.appendChild(wrap);
 }
 
-// 草稿恢復：先顯示 Banner，讓學生主動選擇，不再靜默恢復
-
 function applyWriteDraftIfAvailable() {
   const key = getWriteDraftKey();
   if (!key) { updateWriteProgress(); return; }
@@ -2341,29 +2245,27 @@ function applyWriteDraftIfAvailable() {
   try { draft = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e) {}
   if (!writeDraftHasContent(draft)) { updateWriteProgress(); return; }
 
-  // 有草稿 → 暫存起來，顯示 Banner，不自動套用
+  // 有草稿 → 暫存，彈出置中 Modal 讓學生選擇
   _pendingDraft = draft;
-  const banner = document.getElementById('write-draft-banner');
-  const timeEl = document.getElementById('write-draft-banner-time');
-  if (banner) {
-    if (timeEl && draft.savedAt) {
+  const timeEl = document.getElementById('draft-confirm-time');
+  if (timeEl) {
+    if (draft.savedAt) {
       const t = new Date(draft.savedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-      timeEl.textContent = `（${t} 自動儲存）`;
-    } else if (timeEl) {
+      timeEl.textContent = `自動儲存時間：${t}`;
+    } else {
       timeEl.textContent = '';
     }
-    banner.classList.remove('hidden');
   }
+  openModal('draft-confirm-modal');
   updateWriteProgress();
 }
 
-// 學生點「接續填寫」— 套用草稿
+// 學生選「接續填寫」
 function confirmRestoreDraft() {
+  closeModal('draft-confirm-modal');
   const draft = _pendingDraft;
   _pendingDraft = null;
-  document.getElementById('write-draft-banner')?.classList.add('hidden');
   if (!draft) return;
-
   _writeDraftHydrating = true;
   try {
     document.getElementById('write-salary').value = draft.salary || '';
@@ -2401,10 +2303,10 @@ function confirmRestoreDraft() {
   toast('草稿已恢復，可繼續填寫', 'info');
 }
 
-// 學生點「重新填寫」— 丟棄草稿
-function dismissDraftBanner() {
+// 學生選「重新填寫」
+function dismissDraftModal() {
+  closeModal('draft-confirm-modal');
   _pendingDraft = null;
-  document.getElementById('write-draft-banner')?.classList.add('hidden');
   clearCurrentWriteDraft();
   updateWriteProgress();
 }
@@ -2512,63 +2414,9 @@ function renderProgressItemFull(i) {
 function scrollToEntryIssue(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  // 若該 entry 被收合，先展開
-  el.classList.remove('entry-collapsed');
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.add('entry-issue-flash');
   setTimeout(() => el.classList.remove('entry-issue-flash'), 1500);
-}
-
-// 捲動 + focus 到指定 field id（任何頁面內的 input/textarea/select）
-function scrollAndFocusField(fieldId) {
-  const el = document.getElementById(fieldId);
-  if (!el) return;
-  // 若在收合的 entry 內，先展開
-  const entryDiv = el.closest('.entry-item');
-  if (entryDiv) entryDiv.classList.remove('entry-collapsed');
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  setTimeout(() => {
-    el.focus({ preventScroll: true });
-    el.classList.add('entry-field-focus');
-    setTimeout(() => el.classList.remove('entry-field-focus'), 1800);
-  }, 350);
-}
-
-// 儲存驗證失敗時，定位到第一個有問題的欄位並 focus
-function scrollToFirstIssueField(entries, { typeError, contentError, addressError, distanceError, photoError }) {
-  // 按「工作摘要卡片順序 × 欄位順序」找第一個問題欄位
-  // 先依卡片找到第一張有問題的 entry，再在該 entry 內找第一個缺的欄位
-  const entryDivs = Array.from(document.querySelectorAll('#work-entries-container > div'));
-  for (const div of entryDivs) {
-    const id = div.id;
-    const type = document.getElementById(`${id}-type`)?.value || '';
-    const other = document.getElementById(`${id}-other-input`)?.value.trim() || '';
-    const address = document.getElementById(`${id}-address`)?.value.trim() || '';
-    const distVal = document.getElementById(`${id}-dist-manual`)?.value.trim() || '';
-    const distance = distVal !== '' ? parseFloat(distVal) : null;
-    const content = document.getElementById(`${id}-content`)?.value.trim() || '';
-    const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
-    const photoImgs = noPhoto ? [] : Array.from(document.querySelectorAll(`#${id}-photos img`));
-    const uploadingCount = noPhoto ? 0 : document.querySelectorAll(`#${id}-photos .photo-thumb-wrap .photo-uploading`).length;
-
-    // 依驗證順序找第一個缺的欄位
-    if (!type) { scrollAndFocusField(`${id}-type`); return; }
-    if (type === '其他' && !other) { scrollAndFocusField(`${id}-other-input`); return; }
-    if (!address) { scrollAndFocusField(`${id}-address`); return; }
-    if (address && (distance === null || isNaN(distance))) { scrollAndFocusField(`${id}-dist-manual`); return; }
-    if (content.length < 10) { scrollAndFocusField(`${id}-content`); return; }
-    if (!noPhoto && (photoImgs.length === 0 || uploadingCount > 0)) {
-      // 照片：展開 entry 並捲過去，無法 focus file input，捲到照片區即可
-      div.classList.remove('entry-collapsed');
-      const photoArea = document.getElementById(`${id}-photo-area`);
-      if (photoArea) {
-        photoArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        photoArea.style.outline = '2px solid var(--accent-red)';
-        setTimeout(() => { photoArea.style.outline = ''; }, 1800);
-      }
-      return;
-    }
-  }
 }
 
 function updateWriteProgress() {
@@ -2580,9 +2428,6 @@ function updateWriteProgress() {
   summaryEl.innerHTML = `完成度 <strong>${state.done}/${state.total}</strong>${missing.length ? '　尚缺：' + escapeHtml(missing.join('、')) : '　可儲存'}`;
   detailsEl.innerHTML = state.items.map(renderProgressItemFull).join('') + '<div class="write-draft-note">文字自動暫存，照片需按儲存才會上傳雲端。</div>';
   syncWriteProgressFloat(false);
-  // 自動收合已完成的 entry、展開有問題的 entry
-  const issueIds = (state.items.find(i => i.entryIssues) || {}).entryIssues?.map(e => e.id) || [];
-  autoCollapseEntries(issueIds);
 }
 
 function toggleWriteProgressDetails() {
@@ -2805,15 +2650,9 @@ async function saveJournal() {
     console.warn('截止日期查詢失敗，略過檢查', e);
   }
   const reflection = document.getElementById('write-reflection').value.trim();
-  if (!reflection || reflection.length < 20) {
-    scrollAndFocusField('write-reflection');
-    return toast('心得至少需要20字', 'error');
-  }
+  if (!reflection || reflection.length < 20) return toast('心得至少需要20字', 'error');
   const salary = parseInt(document.getElementById('write-salary').value) || null;
-  if (salary !== null && (salary < 0 || salary > 200000)) {
-    scrollAndFocusField('write-salary');
-    return toast('薪資金額請填 0–200,000 元之間', 'error');
-  }
+  if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
   // 薪資未填軟性提示（不強制，可繼續儲存）
   if (salary === null) {
     const goAhead = window.confirm('⚠️ 本月薪資尚未填寫。\n\n若這個月尚未發薪，可以先儲存其他內容，發薪後再編輯补填。\n\n確定要不填薪資直接儲存嗎？');
@@ -2879,12 +2718,9 @@ async function saveJournal() {
   });
   const writeIssues = [typeError, contentError, addressError, distanceError ? 'distance' : '', photoError].filter(Boolean);
   if (writeIssues.length) {
+    document.getElementById('write-progress-box')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     updateWriteProgress();
-    scrollToFirstIssueField(entries, {
-      typeError, contentError, addressError, distanceError, photoError,
-      reflectionShort: false // 心得已在前面提前 return，此處不會同時出現
-    });
-    return toast(writeIssues[0], 'error');
+    return toast('請先完成上方完成度提示中的項目，再按儲存', 'error');
   }
   const saveBtn = document.getElementById('save-journal-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
