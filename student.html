@@ -209,7 +209,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .journal-card-toprow { flex-wrap: wrap !important; padding-right: 0 !important; }
   .journal-unread-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
   .journal-reviewed-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
-  .student-reply-area .reply-input { font-size: 16px; }
+  .thread-input-field { font-size: 16px; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, auto); gap: 10px; margin-bottom: 16px; align-items: stretch; }
@@ -284,13 +284,32 @@ tr:last-child td { border-bottom: none; }
 .journal-card-actions { flex-shrink: 0; display: flex; gap: 8px; }
 .journal-unread-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
 .journal-reviewed-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
-.student-reply-area { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.student-reply-area .reply-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg3); }
-.student-reply-area .reply-label { font-size: 12px; font-weight: 600; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
-.student-reply-area .reply-input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px; background: var(--card); color: var(--text); outline: none; }
-.student-reply-area .reply-input:disabled { background: var(--bg2); color: var(--text2); cursor: not-allowed; }
-.student-reply-area .reply-char-count { font-size: 11px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
-.student-reply-area .reply-char-count.at-limit { color: var(--accent-red); }
+/* 對話串容器 */
+.journal-thread { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.journal-thread-title { font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 12px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+/* 對話氣泡列 */
+.thread-bubble { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.thread-bubble:last-child { border-bottom: none; }
+.thread-bubble-label { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 3px; }
+.thread-bubble-label.label-teacher { color: #22c55e; }
+.thread-bubble-label.label-me { color: var(--accent2); }
+.thread-bubble-body { font-size: 13px; color: var(--text); line-height: 1.65; word-break: break-all; overflow-wrap: anywhere; }
+.thread-bubble-body.text-muted { color: var(--text2); font-size: 12px; }
+/* 等待老師讀取的提示 */
+.thread-waiting { font-size: 11px; color: var(--accent-yellow); margin-top: 3px; }
+/* 輸入列 */
+.thread-input-row { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; background: var(--bg3); border-top: 1px solid var(--border); }
+.thread-input-label { font-size: 11px; font-weight: 700; color: var(--accent2); }
+.thread-input-field { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 15px; background: var(--card); color: var(--text); outline: none; }
+.thread-input-field:disabled { background: var(--bg2); color: var(--text2); cursor: not-allowed; }
+.thread-input-bottom { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.thread-char-count { font-size: 11px; color: var(--text2); }
+.thread-char-count.at-limit { color: var(--accent-red); }
+/* 鎖定提示 */
+.thread-locked-hint { font-size: 12px; color: var(--text2); padding: 7px 12px 9px; background: var(--bg3); border-top: 1px solid var(--border); }
+/* 相容舊 class（保留讓其他地方不壞） */
+.student-reply-area { margin-top: 0; }
+.student-reply-area .reply-input { font-size: 15px; }
 .journal-month { font-size: 15px; font-weight: 700; }
 .journal-meta { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .journal-entries { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
@@ -3175,10 +3194,6 @@ function renderJournalCardSelectable(j) {
       <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
-      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
-    </div>` : ''}
     ${j.teacherReviewed ? renderStudentReplyArea(j) : ''}
   </div>`;
 }
@@ -3553,15 +3568,11 @@ function renderJournalCard(j, isTeacher) {
       <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
-      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
-    </div>` : ''}
     ${j.teacherReviewed ? renderStudentReplyArea(j) : ''}
   </div>`;
 }
 
-// ---- 學生回覆評語 ----
+// ---- 學生回覆評語（對話串版）----
 function renderStudentReplyArea(j) {
   const seatNo = escapeHtml(j.seatNo || '');
   const sem    = escapeHtml(j.semester || '');
@@ -3570,23 +3581,46 @@ function renderStudentReplyArea(j) {
   const locked = !!(j.studentReply && j.studentReplyUnread);
   const replyText = j.studentReply || '';
   const charCount = replyText.length;
-  const lockedHint = locked
-    ? '<span style="font-size:11px;color:var(--accent-yellow);margin-left:4px">⏳ 等待老師閱讀</span>'
+
+  // 老師評語氣泡
+  const teacherBubble = `<div class="thread-bubble">
+    <div class="thread-bubble-label label-teacher">老師</div>
+    <div class="thread-bubble-body${j.teacherComment ? '' : ' text-muted'}">${j.teacherComment ? escapeHtml(j.teacherComment) : '（老師已閱讀，無文字評語）'}</div>
+  </div>`;
+
+  // 學生已回覆：顯示已送出的內容
+  const existingReplyBubble = replyText
+    ? `<div class="thread-bubble">
+        <div class="thread-bubble-label label-me">我</div>
+        <div class="thread-bubble-body">${escapeHtml(replyText)}</div>
+        ${locked ? '<div class="thread-waiting">⏳ 等待老師閱讀</div>' : ''}
+      </div>`
     : '';
-  const disabledAttr = locked ? ' disabled' : '';
-  const actionHtml = locked
-    ? `<span style="font-size:11px;color:var(--text2);white-space:nowrap">老師讀後可再覆</span>`
-    : `<span class="reply-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
-       <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:3px 12px;font-size:12px;flex-shrink:0" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出</button>`;
-  return `<div class="student-reply-area">
-    <div class="reply-row">
-      <span class="reply-label">💬 我的回覆${lockedHint}</span>
-      <input type="text" class="reply-input" maxlength="50" placeholder="回覆老師評語（最多50字）…"${disabledAttr}
+
+  // 輸入區
+  let inputSection = '';
+  if (locked) {
+    inputSection = `<div class="thread-locked-hint">老師讀取後即可再次回覆</div>`;
+  } else {
+    inputSection = `<div class="thread-input-row">
+      <div class="thread-input-label">我的回覆</div>
+      <input type="text" class="thread-input-field" maxlength="50"
+        placeholder="回覆老師評語（最多 50 字）…"
         id="reply-ta-${seatNo}-${sem}-${month}"
         oninput="syncReplyCharCount(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})"
         value="${escapeHtml(replyText)}">
-      ${actionHtml}
-    </div>
+      <div class="thread-input-bottom">
+        <span class="thread-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
+        <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出</button>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="journal-thread">
+    <div class="journal-thread-title">評語與回覆</div>
+    ${teacherBubble}
+    ${existingReplyBubble}
+    ${inputSection}
   </div>`;
 }
 
