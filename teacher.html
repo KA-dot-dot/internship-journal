@@ -2388,7 +2388,7 @@ async function loadTeacherDashboard() {
   };
   // 學生回覆可點擊資料（供展開面板使用）
   window._studentReplyClickData = studentReplies.map(j => ({
-    seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester, month: j.month
+    seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester, month: j.month, ownerUid: j.ownerUid || ''
   }));
   window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
     seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
@@ -2544,7 +2544,7 @@ function goFromStudentReply(idx) {
   const i = Number(idx);
   if (!items[i]) return;
   const s = items[i];
-  openCommentModal(s.seatNo, s.semester, s.month);
+  openCommentModal(s.seatNo, s.semester, s.month, s.ownerUid);
 }
 
 function toggleCrossMonthPanel() {
@@ -5118,38 +5118,17 @@ function toggleLocDetail(subId) {
 // ===== 老師評語功能 ==========================================
 // ============================================================
 
-function openCommentModal(seatNo, semester, month) {
+function openCommentModal(seatNo, semester, month, knownOwnerUid) {
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
-  // 快取存在時直接取 ownerUid；快取不存在（如從主頁統計點擊）時先查詢再開 modal
+  // 優先用傳入的 ownerUid；其次從快取取；都沒有才顯示錯誤
   const cachedJournal = window._teacherJournalsCache ? findTeacherJournal(seatNo, semester, month) : null;
-  const ownerUidFromCache = cachedJournal?.ownerUid || '';
-  if (ownerUidFromCache) {
-    _currentCommentJournal = { seatNo, semester, month, ownerUid: ownerUidFromCache };
-    _openCommentModalWithUid(seatNo, semester, month, ownerUidFromCache, semLabel);
-  } else {
-    // 沒有快取：用 collectionGroup 查詢取得 ownerUid
-    showLoading();
-    const { collectionGroup, getDocs, query, where } = firebase_funcs;
-    getDocs(query(
-      collectionGroup(db, 'journals'),
-      where('seatNo', '==', seatNo),
-      where('semester', '==', semester),
-      where('month', '==', Number(month))
-    )).then(snap => {
-      hideLoading();
-      const found = snap.docs.find(d => d.ref.path.includes('/users/'));
-      const ownerUid = found?.data().ownerUid || found?.ref.path.split('/')[1] || '';
-      if (!ownerUid) {
-        toast('找不到該月記，可能尚未繳交', 'warning');
-        return;
-      }
-      _currentCommentJournal = { seatNo, semester, month, ownerUid };
-      _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel);
-    }).catch(e => {
-      hideLoading();
-      toast('讀取月記失敗：' + (e.message || '請重試'), 'error');
-    });
+  const ownerUid = knownOwnerUid || cachedJournal?.ownerUid || '';
+  if (!ownerUid) {
+    toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
+    return;
   }
+  _currentCommentJournal = { seatNo, semester, month, ownerUid };
+  _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel);
 }
 
 function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
