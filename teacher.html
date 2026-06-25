@@ -437,10 +437,10 @@ tr:last-child td { border-bottom: none; }
 .submit-table td.col-name { position: sticky; left: 55px; z-index: 2; width: 100px; min-width: 100px; max-width: 100px; background: var(--bg2); color: var(--text); font-weight: 600; text-align: center; padding-left: 8px; padding-right: 8px; }
 .submit-table tr:hover td { background: var(--bg3); }
 .submit-table tr:hover td.col-seat, .submit-table tr:hover td.col-name { background: var(--bg3); }
-.submit-cell-done { color: var(--accent-green); font-weight: 700; font-size: 12px; }
-.submit-cell-miss { background: rgba(239,68,68,0.07); color: var(--accent-red); font-weight: 700; font-size: 12px; }
-.submit-cell-late { background: rgba(245,158,11,0.10); color: var(--accent-yellow); font-weight: 700; font-size: 12px; }
-.submit-cell-na { color: var(--text3); }
+.submit-table td.submit-cell-done { background: rgba(34,197,94,0.10); color: var(--accent-green); font-weight: 700; font-size: 12px; }
+.submit-table td.submit-cell-miss { background: rgba(239,68,68,0.16); color: var(--accent-red); font-weight: 700; font-size: 12px; }
+.submit-table td.submit-cell-late { background: rgba(245,158,11,0.18); color: var(--accent-yellow); font-weight: 700; font-size: 12px; }
+.submit-table td.submit-cell-na { color: var(--text3); }
 .submit-sem-row td { background: rgba(79,142,247,0.10); border-bottom: 1px solid var(--border); padding: 0; }
 .submit-sem-row td.submit-sem-sticky { position: sticky; left: 0; z-index: 2; width: 155px; min-width: 155px; max-width: 155px; border-left: 3px solid var(--accent); background: #eaf2ff; text-align: center; }
 .submit-sem-row td.submit-sem-fill { background: rgba(79,142,247,0.10); }
@@ -521,6 +521,7 @@ tr:last-child td { border-bottom: none; }
 .entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
 .comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+.badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
 /* ===== 老師端批次刪除 ===== */
 #t-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
@@ -621,7 +622,7 @@ tr:last-child td { border-bottom: none; }
 
 <div id="loading-overlay" class="hidden">
   <div class="spinner"></div>
-  <span style="font-size:13px;color:var(--text2)">載入中...</span>
+  <span id="loading-text" style="font-size:13px;color:var(--text2)">載入中...</span>
 </div>
 
 <div id="toast"></div>
@@ -779,7 +780,10 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div id="stat-list-panel-missing" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
-            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">📋 本月未繳名單</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700;color:var(--accent-red)">📋 本月未繳名單</div>
+              <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
+            </div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
@@ -864,19 +868,6 @@ tr:last-child td { border-bottom: none; }
         <div class="student-add-btns" style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="openAddStudentModal()">➕ 新增學生</button>
           <button class="btn btn-secondary" onclick="openImportModal()">📥 批次匯入</button>
-        </div>
-        <div class="card" style="margin-bottom:18px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px">🖼️ 批次上傳大頭照</div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-            <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
-            <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
-          </div>
-          <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
-            <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
-            <span id="batch-photo-progress-text">準備中...</span>
-          </div>
-          <div id="batch-photo-result" style="font-size:13px;line-height:1.7"></div>
         </div>
         <div class="card">
           <div class="table-wrap">
@@ -1155,7 +1146,7 @@ tr:last-child td { border-bottom: none; }
               <button class="btn btn-secondary btn-sm" onclick="queryJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
             </div>
             <div id="t-journals-search-row" style="display:flex;flex:1;min-width:0;gap:10px;align-items:center">
-              <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名" style="flex:1;min-width:0;box-sizing:border-box" oninput="loadTeacherJournals()">
+              <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名／公司" style="flex:1;min-width:0;box-sizing:border-box" oninput="loadTeacherJournals()">
               <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
             </div>
           </div>
@@ -1330,6 +1321,14 @@ tr:last-child td { border-bottom: none; }
       </div>
       <div class="form-group"><label>Google 學校帳號</label><input type="text" id="add-google-email" placeholder="u333101@tcivs.tc.edu.tw"></div>
       <p style="font-size:12px;color:var(--text3);margin-top:-8px;margin-bottom:14px">可在此新增或更新帳號；刪除學生時會一併移除 Google 帳號綁定</p>
+      <div class="form-group">
+        <label>大頭照</label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="file" id="add-student-photo" accept="image/*" onchange="handleStudentPhotoSelect()" style="font-size:13px;color:var(--text)">
+          <button type="button" class="btn btn-secondary btn-sm hidden" id="add-student-photo-remove" onclick="removeStudentPhoto()">✕ 移除照片</button>
+        </div>
+        <div id="add-student-photo-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
+      </div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" onclick="saveStudent()">💾 儲存</button>
         <button class="btn btn-secondary" onclick="closeModal('add-student-modal')">取消</button>
@@ -1341,22 +1340,45 @@ tr:last-child td { border-bottom: none; }
 <div class="modal-overlay hidden" id="import-modal">
   <div class="modal">
     <div class="modal-header">
-      <div class="modal-title">📥 批次匯入學生</div>
+      <div class="modal-title">📥 批次匯入</div>
       <button class="modal-close" onclick="closeModal('import-modal')">×</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　實習公司　Google帳號綁定</code>（Google帳號可留空）</p>
-      <div class="config-code" style="margin-bottom:12px;font-size:12px">
-        王小明　01　1130001　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
-        李小華　02　1130002　OO工業有限公司　u333102@tcivs.tc.edu.tw
+      <div class="import-tab-row" style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px">
+        <button type="button" class="btn btn-primary btn-sm import-tab-btn" id="import-tab-btn-info" onclick="switchImportTab('info')">📝 學生資訊</button>
+        <button type="button" class="btn btn-secondary btn-sm import-tab-btn" id="import-tab-btn-photo" onclick="switchImportTab('photo')">🖼️ 大頭照</button>
       </div>
-      <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="importStudents()">📥 匯入</button>
-        <button class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
+
+      <div id="import-tab-info">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:4px">從學校系統或 Excel 複製後，直接貼上（Tab 分隔）</p>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">欄位順序：<code style="color:var(--accent)">姓名　座號　學號　實習公司　Google帳號綁定</code>（Google帳號可留空）</p>
+        <div class="config-code" style="margin-bottom:12px;font-size:12px">
+          王小明　01　1130001　XX科技股份有限公司　u333101@tcivs.tc.edu.tw<br>
+          李小華　02　1130002　OO工業有限公司　u333102@tcivs.tc.edu.tw
+        </div>
+        <div class="form-group"><label>在此貼上資料</label><textarea id="import-data" rows="10" placeholder="從 Excel 複製後貼上..."></textarea></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" onclick="importStudents()">📥 匯入</button>
+          <button class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
+        </div>
+        <div id="import-result" style="margin-top:12px;font-size:13px"></div>
       </div>
-      <div id="import-result" style="margin-top:12px;font-size:13px"></div>
+
+      <div id="import-tab-photo" class="hidden">
+        <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
+        </div>
+        <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
+          <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
+          <span id="batch-photo-progress-text">準備中...</span>
+        </div>
+        <div id="batch-photo-result" style="font-size:13px;line-height:1.7"></div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn btn-secondary" onclick="closeModal('import-modal')">關閉</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1636,7 +1658,7 @@ async function setActiveRosterSemester(semester) {
   await setDoc(doc(db, 'settings', ACTIVE_TERM_SETTING_ID), {
     semester,
     semesterLabel: semesterLabel(semester),
-    updatedAt: new Date().toISOString(),
+    updatedAt: localISOStr(),
     updatedBy: currentUser?.email || ''
   }, { merge: true });
 }
@@ -1673,7 +1695,7 @@ async function saveTermRosterSnapshot(semester, roster) {
     semester,
     semesterLabel: semesterLabel(semester),
     students,
-    updatedAt: new Date().toISOString(),
+    updatedAt: localISOStr(),
     updatedBy: currentUser?.email || ''
   }, { merge: true });
   return students;
@@ -1734,14 +1756,14 @@ async function syncActiveRootFromRoster(semester, roster) {
       company: s.company || '',
       semester,
       ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
-      updatedAt: new Date().toISOString()
+      updatedAt: localISOStr()
     });
     if (s.email) {
       await setDoc(doc(db, 'studentBindings', emailToDocId(s.email)), {
         email: s.email,
         seatNo: s.seatNo,
         studentName: s.name || '',
-        boundAt: new Date().toISOString(),
+        boundAt: localISOStr(),
         boundBy: currentUser?.email || ''
       }, { merge: true });
     }
@@ -1877,8 +1899,8 @@ async function deleteSelectedSemesterData() {
     loadDeadlinesTable();
   } catch(e) {
     toast('刪除學期失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function loadRosterStudentsForSemesters(semesters, journals = []) {
@@ -1915,8 +1937,9 @@ function toast(msg, type = 'info') {
 }
 
 // ============ Loading ============
-function showLoading() { document.getElementById('loading-overlay').classList.remove('hidden'); }
-function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
+function showLoading() { setLoadingText('載入中...'); document.getElementById('loading-overlay').classList.remove('hidden'); }
+function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); setLoadingText('載入中...'); }
+function setLoadingText(msg) { const el = document.getElementById('loading-text'); if (el) el.textContent = msg; }
 
 function withTimeout(promise, ms, message) {
   let timer;
@@ -1956,7 +1979,7 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
     email,
     uid: user.uid,
     name: adminDocData.name || user.displayName || email.split('@')[0],
-    lastLoginAt: new Date().toISOString(),
+    lastLoginAt: localISOStr(),
     migratedFrom: emailToDocId(email)
   };
   if (adminDocData.protected === true) payload.protected = true;
@@ -1976,6 +1999,7 @@ async function startTeacherRedirectLogin() {
 }
 
 async function handleTeacherLoginUser(user) {
+  setLoadingText('驗證帳號中...');
   const { auth } = window._auth;
   const email = normalizeEmail(user.email);
 
@@ -1990,6 +2014,7 @@ async function handleTeacherLoginUser(user) {
   let isAdmin = false;
   let adminDocData = null;
 
+  setLoadingText('確認教師權限...');
   const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
   if (byUid.exists()) {
     isAdmin = true;
@@ -2021,6 +2046,7 @@ async function handleTeacherLoginUser(user) {
   } catch (syncErr) {
     console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
   }
+  setLoadingText('登入成功'); // 註：enterApp() 第一行即同步呼叫 hideLoading()，此文字幾乎不會被肉眼看到，純粹是邏輯完整性
   enterApp();
 }
 
@@ -2051,7 +2077,7 @@ async function googleTeacherLogin() {
       return;
     }
     console.error('Google 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試'), 'error');
+    toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
   } finally {
     hideLoading();
   }
@@ -2098,7 +2124,7 @@ function showPage(pageId) {
     't-deadline': loadDeadlinesTable,
     't-stats': () => { initStatsDateSelects(); ensureStatsCompanyFilterReady(); },
     't-journals': () => { initStatsDateSelects(); },
-    't-export': () => { loadExportStudents(); initStatsDateSelects(); },
+    't-export': () => { initStatsDateSelects(); loadExportStudents(); },
     't-admin': loadAdminPage,
     't-settings': () => { loadStorageInfo(); },
   };
@@ -2184,7 +2210,7 @@ async function addAdmin() {
     await setDoc(doc(db, 'admins', safeId), {
       email,
       name: email.split('@')[0],
-      addedAt: new Date().toISOString(),
+      addedAt: localISOStr(),
       addedBy: currentUser.email
     }, { merge: true });
     document.getElementById('new-admin-email').value = '';
@@ -2238,7 +2264,7 @@ async function bindStudent() {
       email,
       seatNo: seat,
       studentName: stuSnap.data().name || '',
-      boundAt: new Date().toISOString(),
+      boundAt: localISOStr(),
       boundBy: currentUser.email
     });
     hideLoading();
@@ -2248,8 +2274,8 @@ async function bindStudent() {
     loadBindingList();
   } catch(e) {
     toast('綁定失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function loadBindingList() {
@@ -2398,6 +2424,42 @@ async function loadTeacherDashboard() {
   } finally {
     hideLoading();
   }
+}
+
+async function copyMissingList() {
+  const list = (window._statLists || {}).missing || [];
+  if (list.length === 0) {
+    toast('本月所有學生皆已繳交，無需提醒', 'info');
+    return;
+  }
+  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
+  const ceYear = new Date().getFullYear();  // 西元年，例如 2026
+  // 讀取截止日
+  let deadlineStr = '';
+  try {
+    const { doc, getDoc } = firebase_funcs;
+    const snap = await getDoc(doc(db, 'deadlines', `${sem}-${thisMonth}`));
+    if (snap.exists()) {
+      const raw = snap.data().closeDate || '';   // 格式 YYYY-MM-DD
+      if (raw) {
+        const parts = raw.split('-');             // ['2026','06','30']
+        deadlineStr = `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '2026/6/30'
+      }
+    }
+  } catch(e) {
+    console.warn('複製名單：截止日讀取失敗', e);
+  }
+  const deadlineLine = deadlineStr
+    ? `請於 ${deadlineStr} 前完成：`
+    : '請盡快完成：';
+  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
+  const btn = document.getElementById('copy-missing-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
+    toast('已複製未繳名單，可直接貼到 LINE 群組', 'success');
+  }).catch(() => {
+    prompt('請手動複製以下內容：', text);
+  });
 }
 
 function toggleStatList(key) {
@@ -2560,8 +2622,9 @@ async function loadDeadlineInfo(targetId, sem, month) {
   if (!snap.exists()) { el.innerHTML = '<span style="color:var(--accent-yellow)">⚠️ 尚未設定本月截止日期</span>'; return; }
   const d = snap.data();
   const now = new Date();
-  const close = new Date(d.closeDate);
-  const isOpen = now >= new Date(d.openDate) && now <= close;
+  const open = new Date(d.openDate + 'T00:00:00+08:00');
+  const close = new Date(d.closeDate + 'T23:59:59+08:00');
+  const isOpen = now >= open && now <= close;
   const isPast = now > close;
   el.innerHTML = `開放日：<strong>${escapeHtml(d.openDate)}</strong> ／ 截止日：<strong>${escapeHtml(d.closeDate)}</strong> &nbsp;<span class="badge ${isOpen?'badge-green':isPast?'badge-red':'badge-yellow'}">${isOpen?'上傳中':isPast?'已截止':'未開放'}</span>`;
 }
@@ -2633,8 +2696,8 @@ async function loadStudentsTable() {
     await updateStudentTermStatus();
   } catch(e) {
     toast('載入學生名單失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function bindStudentInline(seatNo, name) {
@@ -2677,7 +2740,12 @@ async function removeBindingInline(docId, email) {
 
 function openAddStudentModal() {
   ['add-seat','add-student-id','add-name','add-company','add-google-email'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('add-student-modal').dataset.editId = '';
+  const modal = document.getElementById('add-student-modal');
+  modal.dataset.editId = '';
+  modal.dataset.photoUrl = '';
+  const photoInput = document.getElementById('add-student-photo'); if (photoInput) photoInput.value = '';
+  const photoStatus = document.getElementById('add-student-photo-status'); if (photoStatus) photoStatus.textContent = '';
+  const photoRemoveBtn = document.getElementById('add-student-photo-remove'); if (photoRemoveBtn) photoRemoveBtn.classList.add('hidden');
   openModal('add-student-modal');
 }
 
@@ -2691,8 +2759,47 @@ async function editStudent(seatNo) {
   document.getElementById('add-company').value = s.company || '';
   const googleEl = document.getElementById('add-google-email');
   if (googleEl) googleEl.value = s.email || '';
-  document.getElementById('add-student-modal').dataset.editId = seatNo;
+  const modal = document.getElementById('add-student-modal');
+  modal.dataset.editId = seatNo;
+  modal.dataset.photoUrl = s.photoUrl || '';
+  const photoInput = document.getElementById('add-student-photo'); if (photoInput) photoInput.value = '';
+  const photoStatus = document.getElementById('add-student-photo-status');
+  if (photoStatus) photoStatus.textContent = s.photoUrl ? '目前已有大頭照，選擇新檔案即可更換' : '';
+  const photoRemoveBtn = document.getElementById('add-student-photo-remove');
+  if (photoRemoveBtn) photoRemoveBtn.classList.toggle('hidden', !s.photoUrl);
   openModal('add-student-modal');
+}
+
+async function handleStudentPhotoSelect() {
+  const input = document.getElementById('add-student-photo');
+  const statusEl = document.getElementById('add-student-photo-status');
+  const modal = document.getElementById('add-student-modal');
+  const photoRemoveBtn = document.getElementById('add-student-photo-remove');
+  if (!input || !input.files.length) return;
+  const file = input.files[0];
+  if (statusEl) statusEl.textContent = '⏳ 上傳中...';
+  try {
+    const blob = await compressImageFile(file, 800);
+    const url = await uploadToCloudinary(blob, 'tcivs-photos');
+    if (!url) throw new Error('Cloudinary 回傳空 URL');
+    modal.dataset.photoUrl = url;
+    if (statusEl) statusEl.textContent = '✅ 上傳完成，按「儲存」後生效';
+    if (photoRemoveBtn) photoRemoveBtn.classList.remove('hidden');
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ 上傳失敗：' + e.message;
+    input.value = '';
+  }
+}
+
+function removeStudentPhoto() {
+  const modal = document.getElementById('add-student-modal');
+  const input = document.getElementById('add-student-photo');
+  const statusEl = document.getElementById('add-student-photo-status');
+  const photoRemoveBtn = document.getElementById('add-student-photo-remove');
+  modal.dataset.photoUrl = '';
+  if (input) input.value = '';
+  if (statusEl) statusEl.textContent = '照片已移除，按「儲存」後生效';
+  if (photoRemoveBtn) photoRemoveBtn.classList.add('hidden');
 }
 
 async function saveStudent() {
@@ -2703,12 +2810,14 @@ async function saveStudent() {
   if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
   const semester = getSelectedStudentSemester();
   const active = await getActiveRosterSemester();
+  const photoUrl = document.getElementById('add-student-modal')?.dataset.photoUrl || '';
   const data = normalizeRosterStudent({
     seatNo: seat,
     studentId: document.getElementById('add-student-id').value.trim(),
     name,
     company: document.getElementById('add-company').value.trim(),
-    email: googleEmail
+    email: googleEmail,
+    photoUrl
   }, semester);
   showLoading();
   try {
@@ -2724,39 +2833,72 @@ async function saveStudent() {
     loadExportStudents();
   } catch(e) {
     toast('儲存失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
-  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n只會刪除此學期月記，不會刪其他學期舊資料。`)) return;
-  const { collectionGroup, getDocs, deleteDoc } = firebase_funcs;
+  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將會刪除該學生所有學期的月記資料，此操作無法復原。`)) return;
+  const { collectionGroup, getDocs, deleteDoc, doc } = firebase_funcs;
   showLoading();
   try {
     const active = await getActiveRosterSemester();
-    const next = await updateSelectedTermSnapshot(roster => roster.filter(s => s.seatNo !== seatNo));
+    // 取得名冊中該座號的綁定信箱，用於月記雙重比對（防止座號重複分配時誤刪不同人的月記）
+    const roster = await getRosterForSelectedTerm();
+    const targetEmail = roster.find(s => s.seatNo === seatNo)?.email || '';
+    const next = await updateSelectedTermSnapshot(r => r.filter(s => s.seatNo !== seatNo));
     const journalSnap = await getDocs(collectionGroup(db, 'journals'));
-    const termJournalDocs = userJournalDocs(journalSnap).filter(d => {
-      const j = d.data();
-      return j.seatNo === seatNo && j.semester === semester;
-    });
-    await Promise.all(termJournalDocs.map(d => deleteDoc(d.ref)));
-    if (semester === active) await syncActiveRootFromRoster(semester, next);
+    // 用 seatNo + ownerEmail 雙重比對，避免座號重複分配時誤刪不同人的月記。
+    // 若名冊中無信箱（學生從未綁定），則視為 0 筆，不做寬鬆比對，避免留下任何誤刪漏洞。
+    const allJournalDocs = targetEmail
+      ? userJournalDocs(journalSnap).filter(d => d.data().seatNo === seatNo && d.data().ownerEmail === targetEmail)
+      : [];
+    await Promise.all(allJournalDocs.map(d => deleteDoc(d.ref)));
+    if (semester === active) {
+      await syncActiveRootFromRoster(semester, next);
+    } else {
+      // 非 active 學期刪學生時，syncActiveRootFromRoster 不會執行，
+      // 需手動清除對應的 /students/ 根文件，否則孤兒文件會被統計頁誤抓
+      await deleteDoc(doc(db, 'students', `${semester}_${seatNo}`)).catch(() => {});
+    }
+    // 重置公司清單快取，讓統計頁重新載入（確保刪除後公司消失）
+    const cbList = document.getElementById('company-checkbox-list');
+    if (cbList) cbList.innerHTML = '<div class="company-filter-hint" style="margin:8px">查詢後顯示公司清單</div>';
+    _statsCompanyLoading = false;
     hideLoading();
-    toast(`✅ 已刪除「${name}」於 ${semesterLabel(semester)} 的資料，清除 ${termJournalDocs.length} 筆月記`, 'success');
+    toast(`✅ 已刪除「${name}」的所有資料，清除 ${allJournalDocs.length} 筆月記`, 'success');
     loadStudentsTable();
     loadTeacherJournals(true);
     loadExportStudents();
   } catch(e) {
     toast('刪除學生失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 function openImportModal() {
   document.getElementById('import-data').value = '';
   const r = document.getElementById('import-result'); if(r) r.innerHTML='';
+  const photoInput = document.getElementById('batch-photo-input'); if(photoInput) photoInput.value = '';
+  const photoResult = document.getElementById('batch-photo-result'); if(photoResult) photoResult.innerHTML = '';
+  const photoProgress = document.getElementById('batch-photo-progress'); if(photoProgress) photoProgress.classList.add('hidden');
+  switchImportTab('info');
   openModal('import-modal');
+}
+
+function switchImportTab(tab) {
+  const infoPane = document.getElementById('import-tab-info');
+  const photoPane = document.getElementById('import-tab-photo');
+  const infoBtn = document.getElementById('import-tab-btn-info');
+  const photoBtn = document.getElementById('import-tab-btn-photo');
+  if (!infoPane || !photoPane || !infoBtn || !photoBtn) return;
+  const isInfo = tab === 'info';
+  infoPane.classList.toggle('hidden', !isInfo);
+  photoPane.classList.toggle('hidden', isInfo);
+  infoBtn.classList.toggle('btn-primary', isInfo);
+  infoBtn.classList.toggle('btn-secondary', !isInfo);
+  photoBtn.classList.toggle('btn-primary', !isInfo);
+  photoBtn.classList.toggle('btn-secondary', isInfo);
 }
 
 async function importStudents() {
@@ -2815,8 +2957,8 @@ async function importStudents() {
     else toast('匯入失敗，請確認格式', 'error');
   } catch(e) {
     toast('匯入失敗：' + e.message, 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 async function batchImportPhotos() {
@@ -2925,8 +3067,8 @@ async function loadDeadlinesTable() {
   const now = new Date();
   const rows = snap.docs.sort((a,b) => a.id.localeCompare(b.id)).map(d => {
     const dd = d.data();
-    const close = new Date(dd.closeDate);
-    const open = new Date(dd.openDate);
+    const close = new Date(dd.closeDate + 'T23:59:59+08:00');
+    const open = new Date(dd.openDate + 'T00:00:00+08:00');
     const status = now > close ? '<span class="badge badge-red">已截止</span>' : now >= open ? '<span class="badge badge-green">上傳中</span>' : '<span class="badge badge-yellow">未開放</span>';
     const semShort = (dd.semesterLabel||dd.semester).replace(/學年第(\d)學期.*/, '學年第$1學期');
     const fmtDate = s => s ? s.replace(/^\d{4}-/, '').replace('-', '/') : '-';
@@ -3097,7 +3239,7 @@ async function saveAllDeadlines() {
     const closeDate = normalizeToISODate(closeRaw);
     if (!openDate || !closeDate) { toast(`${m}月的日期格式有誤，請重新確認`, 'error'); return; }
     if (openDate > closeDate) { toast(`${m}月的開放日不能晚於截止日`, 'error'); return; }
-    entries.push({ id: `${sem.key}-${m}`, data: { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: new Date().toISOString() } });
+    entries.push({ id: `${sem.key}-${m}`, data: { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() } });
   }
   if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
@@ -3179,7 +3321,7 @@ async function loadSubmitStats() {
     <tbody>${tbody}</tbody>
   </table></div>`;
   document.getElementById('submit-stats-content').innerHTML = tableHtml;
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('繳交統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 function getStatsDateRange(prefix) {
@@ -3295,9 +3437,13 @@ async function ensureStatsCompanyFilterReady() {
   if (!firebase_funcs || document.querySelectorAll('.company-cb').length || _statsCompanyLoading) return;
   _statsCompanyLoading = true;
   try {
-    const { collection } = firebase_funcs;
-    const snap = await getDocsWithFallback(collection(db, 'students'), '公司清單', 10000);
-    populateCompanyFilter(snap.docs.map(d => d.data().company).filter(Boolean));
+    const { collectionGroup } = firebase_funcs;
+    // 從月記讀公司清單：刪了月記的學生公司就不會出現
+    const snap = await getDocsWithFallback(collectionGroup(db, 'journals'), '公司清單', 10000);
+    const companies = [...new Set(
+      userJournalDocs(snap).map(d => d.data().company).filter(Boolean)
+    )];
+    populateCompanyFilter(companies);
   } catch(e) {
     console.warn('公司清單預載失敗：', e.message);
   } finally {
@@ -3358,6 +3504,20 @@ function applyStatsCompanyFilter() {
   if (window.salary_stats_cache) renderSalaryStatsFromCache(window.salary_stats_cache);
 }
 
+// 台灣 22 縣市標準名稱，用於從地址中正確抓出縣市
+// （取代舊版「比到第一個縣/市字就切」的寫法：若地址前面夾雜地標/園區名稱如「新竹科學園區」，
+//  舊寫法會把地標名也算進縣市字串，這裡改成直接比對 22 個標準縣市全名，取最早出現的那個）
+const TW_CITIES = ['臺北市','新北市','桃園市','臺中市','臺南市','高雄市','新竹市','嘉義市','基隆市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','臺東縣','澎湖縣','金門縣','連江縣'];
+function extractCityFromAddress(address) {
+  const addr = String(address || '').replace(/^\d{3,6}\s*/, '').replace(/台/g, '臺');
+  let best = null;
+  for (const city of TW_CITIES) {
+    const idx = addr.indexOf(city);
+    if (idx !== -1 && (best === null || idx < best.idx)) best = { idx, city };
+  }
+  return best ? best.city.replace(/臺/g, '台') : '';
+}
+
 async function exportAllStatsExcel() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('export-stats');
@@ -3401,8 +3561,7 @@ async function exportAllStatsExcel() {
     (j.entries || []).forEach(e => {
       const address = (e.address || '').trim();
       if (!address) return;
-      const rawAddr = address.replace(/^\d{3,6}\s*/, '');
-      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '').replace(/臺/g, '台');
+      const city = extractCityFromAddress(address);
       locationRows.push({
         公司: s.company || j.company || '',
         座號: j.seatNo || '',
@@ -3414,6 +3573,7 @@ async function exportAllStatsExcel() {
       });
     });
   });
+
 
   // ── 各公司平均工作距離統計 ──
   const companyDistMap = {};
@@ -3522,6 +3682,7 @@ async function exportAllStatsExcel() {
     學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
     月份: `${j.month}月`,
     繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
+    最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
     老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
@@ -3533,7 +3694,7 @@ async function exportAllStatsExcel() {
   const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
-  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 老師評語:'', 已審閱:'' }]);
+  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
 
@@ -3562,7 +3723,7 @@ async function exportAllStatsExcel() {
   toast('✅ 已下載 Excel（9 張工作表，含薪資摘要、異常提醒與各公司平均距離）', 'success');
   } catch(e) {
     console.error('匯出 Excel 失敗', e);
-    toast('匯出失敗：' + (e.message || '請確認網路或重試'), 'error');
+    toast('Excel 匯出失敗：' + (e.message || '請確認網路或重試') + '。可重新整理頁面後再試', 'error');
   } finally {
     hideLoading();
   }
@@ -3605,7 +3766,7 @@ async function loadLocationStats() {
   // 把 journals 存到全域供篩選用
   window.journals_cache = journals;
   renderFilteredCity(journals);
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('地點統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 function renderFilteredCity(journals) {
@@ -3618,9 +3779,9 @@ function renderFilteredCity(journals) {
   journals.forEach(j => {
     if (!isCompanySelected(j.company, selectedCompanies)) return;
     (j.entries||[]).forEach(e => {
-      const rawAddr = (e.address||'').trim().replace(/^\d{3,6}\s*/, '');
-      if (!rawAddr) return;
-      const city = (rawAddr.match(/^(.+?[縣市])/)?.[1] || '未知').replace(/臺/g, '台');
+      const addr = (e.address||'').trim();
+      if (!addr) return;
+      const city = extractCityFromAddress(addr) || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
     });
   });
@@ -3631,7 +3792,11 @@ function renderFilteredCity(journals) {
   if (cityEl) {
     cityEl.innerHTML = sorted.length ? sorted.slice(0,10).map(([city,cnt]) => {
       const pct = total ? Math.round(cnt/total*100) : 0;
-      return `<div class="chart-bar-item"><div class="chart-bar-label">${escapeHtml(city)}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
+      // 外縣市（非台中市）用醒目顏色標出，方便老師一眼看出本月有沒有人填到外縣市
+      const isOutOfCounty = city !== '台中市' && city !== '未知';
+      const barColor = isOutOfCounty ? 'var(--accent-yellow)' : 'var(--accent)';
+      const cityLabel = isOutOfCounty ? `🟠 ${escapeHtml(city)}` : (city === '台中市' ? `🔵 ${escapeHtml(city)}` : escapeHtml(city));
+      return `<div class="chart-bar-item"><div class="chart-bar-label">${cityLabel}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${barColor}"></div></div><div class="chart-bar-pct">${pct}%</div></div>`;
     }).join('') : '<div class="empty-state"><div class="icon">📍</div><p>無地點資料</p></div>';
   }
   const summaryEl = document.getElementById('city-filter-summary');
@@ -3950,14 +4115,12 @@ async function loadSalaryStats() {
     .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
     .map(j => ({ ...j, salary: Number(j.salary) }));
 
-  const companies = [
-    ...stuSnap.docs.map(d => d.data().company).filter(Boolean),
-    ...allActiveJournals.map(j => j.company).filter(Boolean)
-  ];
+  // 公司清單只從「目前日期範圍內的月記」取得，不再抓整個 students 集合（避免跨學期/已刪除學生的公司殘留）
+  const companies = allActiveJournals.map(j => getJournalCompany(j, stuCompanyMap)).filter(Boolean);
   populateCompanyFilter(companies);
   window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap };
   renderSalaryStatsFromCache(window.salary_stats_cache);
-  } catch(e) { toast('統計資料載入失敗：' + (e.message || '請重試'), 'error'); } finally { hideLoading(); }
+  } catch(e) { toast('薪資統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
 
 // ---- 月記總覽 ----
@@ -3989,7 +4152,7 @@ async function fetchJournalsFromServer() {
 function filterAndSortJournals(journals, startStr, endStr, search) {
   let result = [...journals];
   if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
-  if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search));
+  if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search) || (j.company||'').toLowerCase().includes(search));
   result.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
   return result;
 }
@@ -4005,16 +4168,18 @@ async function loadTeacherJournals(forceRefresh) {
   if (!forceRefresh) {
     const cached = loadJournalsFromCache();
     if (cached) {
-      renderJournalListUI(filterAndSortJournals(cached.data, startStr, endStr, search));
+      const cachedFiltered = filterAndSortJournals(cached.data, startStr, endStr, search);
+      renderJournalListUI(cachedFiltered);
       setCacheIndicator('loading', null);
       // 背景靜默更新
       fetchJournalsFromServer().then(fresh => {
         saveJournalsToCache(fresh);
-        renderJournalListUI(filterAndSortJournals(fresh, startStr, endStr, search));
-        setCacheIndicator('fresh', Date.now());
+        const freshFiltered = filterAndSortJournals(fresh, startStr, endStr, search);
+        renderJournalListUI(freshFiltered);
+        setCacheIndicator('fresh', Date.now(), freshFiltered.length);
       }).catch(e => {
         console.warn('背景更新失敗：', e.message);
-        setCacheIndicator('fresh', cached.ts); // 顯示舊快取時間
+        setCacheIndicator('fresh', cached.ts, cachedFiltered.length); // 顯示舊快取時間
       });
       return;
     }
@@ -4026,10 +4191,11 @@ async function loadTeacherJournals(forceRefresh) {
   try {
     const journals = await fetchJournalsFromServer();
     saveJournalsToCache(journals);
-    renderJournalListUI(filterAndSortJournals(journals, startStr, endStr, search));
-    setCacheIndicator('fresh', Date.now());
+    const filtered = filterAndSortJournals(journals, startStr, endStr, search);
+    renderJournalListUI(filtered);
+    setCacheIndicator('fresh', Date.now(), filtered.length);
   } catch(e) {
-    toast('載入失敗：' + e.message, 'error');
+    toast('月記清單載入失敗：' + e.message + '，請確認網路後重新整理，或點上方「強制重新整理」', 'error');
     setCacheIndicator('', null);
   } finally {
     hideLoading();
@@ -4069,11 +4235,21 @@ function updateTeacherBatchBar() {
 function getTeacherJournalMonthRangeLabel(journals) {
   if (!journals.length) return '';
   const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
+  // 學期+月份換算為西元年/月（與 student.html 的 getJournalMonthRangeLabel 邏輯一致）
+  // 第1學期：7~12月為當年，1月為隔年；第2學期：2~6月皆為隔年
+  const toCEYearMonth = (j) => {
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    const month = j.month || 0;
+    let year = (roc || 0) + 1911;
+    if (half === 1 && month === 1) year += 1;
+    if (half === 2) year += 1;
+    return { year, month };
+  };
+  const first = toCEYearMonth(sorted[0]);
+  const last = toCEYearMonth(sorted[sorted.length - 1]);
   const n = journals.length;
-  if (first.month === last.month && first.semester === last.semester) return `${first.month}月，共${n}筆`;
-  return `${first.month}月 ～ ${last.month}月，共${n}筆`;
+  if (first.year === last.year && first.month === last.month) return `${first.year}/${first.month}，共${n}筆`;
+  return `${first.year}/${first.month}~${last.year}/${last.month}，共${n}筆`;
 }
 
 function confirmTeacherBatchDelete() {
@@ -4150,7 +4326,7 @@ async function loadExportStudents() {
       .filter(d => d.id.startsWith(TERM_ROSTER_PREFIX) && Array.isArray(d.data().students) && d.data().students.length)
       .sort((a, b) => b.data().semester.localeCompare(a.data().semester));
 
-    // 方案A：有日期範圍時，只保留重疊學期
+    // 有日期範圍時，只保留重疊學期的學生
     if (activeSems !== null) {
       rosterDocs = rosterDocs.filter(d => activeSems.includes(d.data().semester));
     }
@@ -4171,7 +4347,6 @@ async function loadExportStudents() {
       const active = await getActiveRosterSemester();
       const label = semesterLabel(active);
       const activePrefix = active + '_';
-      // 只取目前學期新格式資料
       const filteredDocs = snap.docs.filter(d => d.id.startsWith(activePrefix));
       const options = filteredDocs
         .sort((a, b) => (a.data().seatNo || '').localeCompare(b.data().seatNo || ''))
@@ -4208,12 +4383,12 @@ async function exportSemesterPDF() {
       if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>無資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">無月記資料可匯出</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
       return toast('無月記資料可匯出', 'error');
     }
-    printJournalsPDF(journals, '實習月記總覽', win);
+    await printJournalsPDF(journals, '實習月記總覽', win);
   } catch(e) {
     console.error('匯出全部月記失敗', e);
     const errMsg = e.message || '請確認網路或權限設定';
     if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + escapeHtml(errMsg) + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
-    toast('匯出失敗：' + errMsg, 'error');
+    toast('PDF 匯出失敗：' + errMsg + '，請確認網路後重試，或重新整理頁面', 'error');
   } finally {
     hideLoading();
   }
@@ -4241,12 +4416,12 @@ async function exportStudentPDF() {
       return toast('該學生尚無月記', 'error');
     }
     const name = journals[0].studentName || seat;
-    printJournalsPDF(journals, `${name}實習月記`, win);
+    await printJournalsPDF(journals, `${name}實習月記`, win);
   } catch(e) {
     console.error('匯出單一學生月記失敗', e);
     const errMsg = e.message || '請確認網路或權限設定';
     if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>匯出失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">月記資料載入失敗</p><p style="font-size:14px;color:#555;">' + escapeHtml(errMsg) + '</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
-    toast('匯出失敗：' + errMsg, 'error');
+    toast('PDF 匯出失敗：' + errMsg + '，請確認網路後重試，或重新整理頁面', 'error');
   } finally {
     hideLoading();
   }
@@ -4300,7 +4475,7 @@ async function saveStorageUsage() {
   const snap = await getDoc(doc(db, 'settings', 'storage'));
   const existing = snap.exists() ? snap.data() : {};
   const thresholdGb = existing.thresholdGb || 20;
-  await setDoc(doc(db, 'settings', 'storage'), { ...existing, usedGb: val, updatedAt: new Date().toISOString() });
+  await setDoc(doc(db, 'settings', 'storage'), { ...existing, usedGb: val, updatedAt: localISOStr() });
   renderStorageBar(val, thresholdGb);
   toast('✅ 已更新儲存用量', 'success');
 }
@@ -4313,7 +4488,7 @@ async function saveStorageThreshold() {
   const snap = await getDoc(doc(db, 'settings', 'storage'));
   const existing = snap.exists() ? snap.data() : {};
   const usedGb = existing.usedGb || 0;
-  await setDoc(doc(db, 'settings', 'storage'), { ...existing, thresholdGb: val, updatedAt: new Date().toISOString() });
+  await setDoc(doc(db, 'settings', 'storage'), { ...existing, thresholdGb: val, updatedAt: localISOStr() });
   renderStorageBar(usedGb, val);
   toast('✅ 警戒線已儲存', 'success');
 }
@@ -4321,15 +4496,6 @@ async function saveStorageThreshold() {
 // ============================================================
 // ===== 共用工具 ==============================================
 // ============================================================
-
-function normalizeBirthday(input) {
-  const s = input.trim().replace(/-/g, '/');
-  const m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
-  if (m) return `${m[1]}/${parseInt(m[2])}/${parseInt(m[3])}`;
-  const m2 = s.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m2) return `${m2[1]}/${parseInt(m2[2])}/${parseInt(m2[3])}`;
-  return null;
-}
 
 function initStatsDateSelects() {
   const now = new Date();
@@ -4422,7 +4588,7 @@ function loadJournalsFromCache() {
   } catch(e) { return null; }
 }
 
-function setCacheIndicator(state, ts) {
+function setCacheIndicator(state, ts, count) {
   const el = document.getElementById('t-cache-indicator');
   if (!el) return;
   if (state === 'loading') {
@@ -4430,7 +4596,8 @@ function setCacheIndicator(state, ts) {
   } else if (state === 'fresh') {
     const d = new Date(ts);
     const hhmm = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-    el.innerHTML = `📦 快取資料（${hhmm}）・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">強制重新整理</button>`;
+    const countTxt = (typeof count === 'number') ? `<span style="font-weight:600;color:var(--text)">共 ${count} 份月記</span>・` : '';
+    el.innerHTML = `${countTxt}📦 快取資料（${hhmm}）・<button onclick="loadTeacherJournals(true)" style="border:none;background:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">強制重新整理</button>`;
   } else {
     el.innerHTML = '';
   }
@@ -4470,7 +4637,7 @@ function renderJournalCard(j, isTeacher) {
         <div><span style="color:var(--accent-red);font-size:12px">${escapeHtml(j.seatNo)} 已刪除學生</span><br><span style="font-size:15px;font-weight:700">${escapeHtml(j.month)}月份月記</span></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-red">已刪除學生</span><span class="badge badge-blue">${escapeHtml(semLabel)}</span>${deleteBtn}</div>
       </div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">此月記屬於已刪除學生，已隱藏原姓名、公司與填寫內容。繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</div>
     </div>`;
   }
   // ★ 2026-05-23 修正：所有使用者輸入欄位套用 escapeHtml 防 XSS
@@ -4499,7 +4666,9 @@ function renderJournalCard(j, isTeacher) {
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
   const isReviewed = !!(j.teacherReviewed);
-  const reviewedBadge = isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '';
+  const reviewedBadge = hasComment
+    ? `<span class="badge-comment">● 有新評語</span>`
+    : (isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '');
   const commentBtn = isTeacher ? (
     hasComment
       ? `<button class="btn-circ gray-circ" title="編輯評語" onclick="openCommentModal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
@@ -4509,11 +4678,12 @@ function renderJournalCard(j, isTeacher) {
   const cbHtml = isTeacher ? `<div class="t-journal-cb-wrap"><input type="checkbox" class="t-journal-select-cb" data-seat="${escapeHtml(j.seatNo)}" data-sem="${escapeHtml(j.semester)}" data-month="${safeMonth}" data-uid="${escapeHtml(j.ownerUid||'')}" data-name="${escapeHtml(j.studentName||'')}" onchange="updateTeacherBatchBar()"></div>` : '';
   return `<div class="${isTeacher ? 't-journal-card-selectable journal-card' : 'journal-card'}" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px">
     ${cbHtml}
+    ${reviewedBadge ? `<div style="margin-bottom:8px">${reviewedBadge}</div>` : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div>${isTeacher ? `<span style="color:var(--text2);font-size:12px">${escapeHtml(j.seatNo)} ${escapeHtml(j.studentName || '-')}</span><br>` : ''}<span style="font-size:15px;font-weight:700">${escapeHtml(j.month)}月份月記</span></div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reviewedBadge}<span class="badge badge-blue">${escapeHtml(semLabel)}</span>${commentBtn}${deleteBtn}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="badge badge-blue">${escapeHtml(semLabel)}</span>${commentBtn}${deleteBtn}</div>
     </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span>繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}</span>${salaryHtml}${mentorHtml}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap"><span>公司：${escapeHtml(j.company || '-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}</div>
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
@@ -4602,6 +4772,19 @@ function setupPdfMakeFonts() {
   };
   pdfMake.fonts = fonts;
   return true;
+}
+
+// 取本地時區日期字串 YYYY-MM-DD，避免 toISOString() UTC 時差導致日期偏一天
+function localDateStr(d) {
+  const dt = d || new Date();
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function localISOStr(d) {
+  const dt = d || new Date();
+  return localDateStr(dt) + 'T' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0') + ':' + String(dt.getSeconds()).padStart(2,'0');
 }
 
 function pdfText(v) {
@@ -4703,8 +4886,11 @@ function pdfInfoTable(j) {
       paddingTop: () => 4,
       paddingBottom: () => 4
     },
-    margin: [0, 0, 0, 10]
+    margin: [0, 0, 0, 4]
   };
+}
+function pdfSubmittedRow(j) {
+  return { text: `繳交日期：${pdfText(j.submittedAt?.slice(0,10) || '-')}`, fontSize: 9, color: '#555', margin: [0, 0, 0, 8] };
 }
 
 function pdfWorkEntry(e, idx) {
@@ -4712,7 +4898,7 @@ function pdfWorkEntry(e, idx) {
     { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
   ];
   if (e.address) stack.push({ text: `工作地點：${pdfText(e.address)}${e.distance != null ? `（距學校 ${e.distance} km）` : ''}`, color: '#555', margin: [0, 0, 0, 3] });
-  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, e._pdfPhotos?.length ? 4 : 0] });
+  stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, (e._pdfPhotos?.length || e.noPhoto) ? 4 : 0] });
   if (e._pdfPhotos?.length) {
     stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
     stack.push({
@@ -4720,6 +4906,8 @@ function pdfWorkEntry(e, idx) {
       columnGap: 6,
       margin: [0, 0, 0, 0]
     });
+  } else if (e.noPhoto) {
+    stack.push({ text: '【不便拍照】', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
   }
   return {
     table: { widths: ['*'], body: [[{ stack }]] },
@@ -4774,7 +4962,7 @@ function pdfJournalBlock(j, idx) {
   if (j.teacherReviewed || j.teacherComment) {
     content.push({
       table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語　已審閱', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
         { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
       ] }]] },
       layout: {
@@ -4850,9 +5038,12 @@ async function printJournalsPDF(journals, title, win) {
     const prepared = await preparePdfJournalImages(journals);
     const docDefinition = buildPdfDocDefinition(prepared, title);
     const filename = pdfFileName(title);
-    pdfMake.createPdf(docDefinition).getBlob(blob => {
-      openPdfBlob(blob, filename, win);
-      toast('PDF 已產生', 'success');
+    await new Promise(resolve => {
+      pdfMake.createPdf(docDefinition).getBlob(blob => {
+        openPdfBlob(blob, filename, win);
+        toast('PDF 已產生', 'success');
+        resolve();
+      });
     });
   } catch (e) {
     console.error('pdfmake 匯出失敗', e);
@@ -4862,7 +5053,7 @@ async function printJournalsPDF(journals, title, win) {
       win.document.write(`<html><head><meta charset="UTF-8"><title>PDF 產生失敗</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#b91c1c;">PDF 產生失敗</p><p style="font-size:14px;color:#555;">${escapeHtml(msg)}</p></body></html>`);
       win.document.close();
     }
-    toast('PDF 產生失敗：' + msg, 'error');
+    toast('PDF 產生失敗：' + msg + '，請確認網路後重試', 'error');
   }
 }
 
@@ -4908,8 +5099,9 @@ async function saveTeacherComment() {
   showLoading();
   try {
     await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
-      teacherComment: comment, teacherReviewed: true, reviewedAt: new Date().toISOString(),
-      teacherCommentUnread: true
+      teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
+      // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
+      teacherCommentUnread: comment.length > 0
     });
     hideLoading();
     closeModal('comment-modal');
@@ -4917,8 +5109,8 @@ async function saveTeacherComment() {
     loadTeacherJournals();
   } catch(e) {
     toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 // ============================================================
@@ -4945,7 +5137,7 @@ async function executeBatchReview() {
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
-    const now = new Date().toISOString();
+    const now = localISOStr();
     await Promise.all(_batchReviewJournals.map(j =>
       updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now })
     ));
@@ -4956,8 +5148,8 @@ async function executeBatchReview() {
     loadTeacherJournals();
   } catch(e) {
     toast('❌ 批次標記失敗：' + (e.message || '請重試'), 'error');
+    hideLoading();
   }
-finally { hideLoading(); }
 }
 
 // ============================================================
@@ -5055,7 +5247,7 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
     months.forEach((m, i) => {
       const x = xPos(i).toFixed(1), yBt = (MT + plotH).toFixed(1);
       sp.push(`<line x1="${x}" y1="${yBt}" x2="${x}" y2="${(parseFloat(yBt)+5).toFixed(1)}" stroke="#2a3047" stroke-width="1"/>`);
-      sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m.slice(2)}</text>`);
+      sp.push(`<text x="${x}" y="${(parseFloat(yBt)+17).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8892aa">${m}</text>`);
     });
     sp.push(`<line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
     sp.push(`<line x1="${ML}" y1="${MT+plotH}" x2="${W-MR}" y2="${MT+plotH}" stroke="#2a3047" stroke-width="1"/>`);
@@ -5304,10 +5496,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = normalizeEmail(user.email);
         if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
         showLoading();
+        setLoadingText('驗證帳號中...');
         try {
           const { doc, getDoc } = firebase_funcs;
           let isAdmin = false;
           let adminDocData = null;
+          setLoadingText('確認教師權限...');
           const byUid = await withTimeout(getDoc(doc(db, 'admins', user.uid)), 10000, '登入逾時，請確認網路後再試');
           if (byUid.exists()) {
             isAdmin = true;
@@ -5327,6 +5521,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (syncErr) {
               console.warn('自動同步老師 UID 權限文件失敗，保留既有登入', syncErr);
             }
+            setLoadingText('登入成功');
             enterApp();
           } else {
             hideLoading();
@@ -5334,7 +5529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(e) {
           console.warn('自動恢復登入失敗，請手動登入', e);
           hideLoading();
-          toast('登入失敗：' + (e.message || '請重試'), 'error');
+          toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
         }
       }
     });
