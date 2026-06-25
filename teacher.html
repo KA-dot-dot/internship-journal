@@ -531,6 +531,7 @@ tr:last-child td { border-bottom: none; }
 .thread-bubble-label.label-student-read { color: var(--text2); }
 .thread-bubble-body { font-size: 13px; color: var(--text); line-height: 1.65; word-break: break-all; overflow-wrap: anywhere; }
 .thread-bubble-body.text-muted { color: var(--text2); font-size: 12px; }
+.thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 .badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
@@ -819,7 +820,7 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
           </div>
           <div class="stat-card" onclick="toggleStatList('student-reply')" style="cursor:pointer;user-select:none" title="點擊查看回覆名單">
-            <div class="stat-label">學生有新回覆 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
+            <div class="stat-label">有新回覆 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" id="stat-student-reply">-</div>
           </div>
         </div>
@@ -4747,19 +4748,30 @@ function renderJournalCard(j, isTeacher) {
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
     ${(isTeacher && hasComment)
-      ? `<div class="journal-thread">
+      ? (() => {
+          function fmtTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d)) return '';
+            const pad = n => String(n).padStart(2,'0');
+            return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          }
+          const tTime = fmtTime(j.reviewedAt);
+          const sTime = fmtTime(j.studentReplyAt);
+          return `<div class="journal-thread">
           <div class="journal-thread-title">評語與回覆</div>
           <div class="thread-bubble">
-            <div class="thread-bubble-label label-teacher">老師</div>
+            <div class="thread-bubble-label label-teacher">老師${tTime ? `<span class="thread-bubble-time">${escapeHtml(tTime)}</span>` : ''}</div>
             <div class="thread-bubble-body">${escapeHtml(j.teacherComment)}</div>
           </div>
           ${j.studentReply
             ? `<div class="thread-bubble">
-                <div class="thread-bubble-label ${j.studentReplyUnread ? 'label-student' : 'label-student-read'}">${j.studentReplyUnread ? '🔴 學生（未讀）' : '學生'}</div>
+                <div class="thread-bubble-label ${j.studentReplyUnread ? 'label-student' : 'label-student-read'}">${j.studentReplyUnread ? '🔴 學生（未讀）' : '學生'}${sTime ? `<span class="thread-bubble-time">${escapeHtml(sTime)}</span>` : ''}</div>
                 <div class="thread-bubble-body">${escapeHtml(j.studentReply)}</div>
               </div>`
             : ''}
-        </div>`
+        </div>`;
+        })()
       : ''}
   </div>`;
 }

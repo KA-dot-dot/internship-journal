@@ -300,13 +300,15 @@ tr:last-child td { border-bottom: none; }
 /* 輸入列 */
 .thread-input-row { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; background: var(--bg3); border-top: 1px solid var(--border); }
 .thread-input-label { font-size: 11px; font-weight: 700; color: var(--accent2); }
-.thread-input-field { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 15px; background: var(--card); color: var(--text); outline: none; }
+.thread-input-field { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 15px; background: var(--card); color: var(--text); outline: none; resize: none; min-height: 60px; line-height: 1.5; font-family: inherit; }
 .thread-input-field:disabled { background: var(--bg2); color: var(--text2); cursor: not-allowed; }
 .thread-input-bottom { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .thread-char-count { font-size: 11px; color: var(--text2); }
 .thread-char-count.at-limit { color: var(--accent-red); }
 /* 鎖定提示 */
 .thread-locked-hint { font-size: 12px; color: var(--text2); padding: 7px 12px 9px; background: var(--bg3); border-top: 1px solid var(--border); }
+/* 時間戳 */
+.thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
 /* 相容舊 class（保留讓其他地方不壞） */
 .student-reply-area { margin-top: 0; }
 .student-reply-area .reply-input { font-size: 15px; }
@@ -3582,33 +3584,44 @@ function renderStudentReplyArea(j) {
   const replyText = j.studentReply || '';
   const charCount = replyText.length;
 
-  // 老師評語氣泡
+  // 時間格式輔助：把 ISO 字串轉成「YYYY/MM/DD HH:MM」
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // 老師評語氣泡（附 reviewedAt 時間）
+  const teacherTimeStr = fmtTime(j.reviewedAt);
   const teacherBubble = `<div class="thread-bubble">
-    <div class="thread-bubble-label label-teacher">老師</div>
+    <div class="thread-bubble-label label-teacher">老師${teacherTimeStr ? `<span class="thread-bubble-time">${escapeHtml(teacherTimeStr)}</span>` : ''}</div>
     <div class="thread-bubble-body${j.teacherComment ? '' : ' text-muted'}">${j.teacherComment ? escapeHtml(j.teacherComment) : '（老師已閱讀，無文字評語）'}</div>
   </div>`;
 
-  // 學生已回覆：顯示已送出的內容
+  // 學生已回覆：顯示已送出的內容（附 studentReplyAt 時間）
+  const replyTimeStr = fmtTime(j.studentReplyAt);
   const existingReplyBubble = replyText
     ? `<div class="thread-bubble">
-        <div class="thread-bubble-label label-me">我</div>
+        <div class="thread-bubble-label label-me">我${replyTimeStr ? `<span class="thread-bubble-time">${escapeHtml(replyTimeStr)}</span>` : ''}</div>
         <div class="thread-bubble-body">${escapeHtml(replyText)}</div>
         ${locked ? '<div class="thread-waiting">⏳ 等待老師閱讀</div>' : ''}
       </div>`
     : '';
 
-  // 輸入區
+  // 輸入區（textarea 可換行，50字上限）
   let inputSection = '';
   if (locked) {
     inputSection = `<div class="thread-locked-hint">老師讀取後即可再次回覆</div>`;
   } else {
     inputSection = `<div class="thread-input-row">
       <div class="thread-input-label">我的回覆</div>
-      <input type="text" class="thread-input-field" maxlength="50"
+      <textarea class="thread-input-field" maxlength="50"
         placeholder="回覆老師評語（最多 50 字）…"
         id="reply-ta-${seatNo}-${sem}-${month}"
         oninput="syncReplyCharCount(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})"
-        value="${escapeHtml(replyText)}">
+        rows="2">${escapeHtml(replyText)}</textarea>
       <div class="thread-input-bottom">
         <span class="thread-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
         <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出</button>
@@ -3645,7 +3658,8 @@ async function saveStudentReply(seatNo, sem, month) {
   try {
     await updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), {
       studentReply: reply,
-      studentReplyUnread: true
+      studentReplyUnread: true,
+      studentReplyAt: localISOStr()
     });
     hideLoading();
     toast('✅ 回覆已送出', 'success');
