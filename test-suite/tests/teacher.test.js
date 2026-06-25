@@ -1,7 +1,48 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v3
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-11）
+ * 老師端自動化測試 v7
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-23）
+ *
+ * v7 新增（2026-06-23）：
+ *   T-SEC-17  printJournalsPDF() 將 pdfMake getBlob() 包進 await new Promise
+ *             （修正：原本 getBlob() 是 callback 式 API，沒有包成 Promise/await，
+ *             導致呼叫端 finally{ hideLoading() } 在 PDF 還沒真正產生完成前就提前
+ *             執行，loading 遮罩比 PDF 早消失。已由使用者人工實測確認修正後
+ *             loading 會撐到 PDF 真正出現才消失。）
+ *   T-SEC-18  exportSemesterPDF()／exportStudentPDF() 呼叫 printJournalsPDF()
+ *             時有 await（同一個 bug 的另一半：即使函式內部包好 Promise，
+ *             呼叫端沒加 await，finally 依然會提早執行）
+ *
+ * v6 新增（2026-06-22 第二次）：
+ *   T-SEC-15  deleteStudent() 月記刪除使用 ownerEmail 雙重比對
+ *             （2026-06-22 修正：原本純座號比對，座號跨學期重複分配給不同人
+ *             時會誤刪對方真實月記，已用Firebase主控台實測證實並修正）
+ *   T-SEC-16  deleteStudent() 非active學期會清除 /students/ 根文件
+ *             （2026-06-22 修正：原本只有 syncActiveRootFromRoster() 會清，
+ *             但該函式只在 semester===active 時執行，非active學期刪除學生
+ *             會留下孤兒文件，已用Firebase主控台兩輪實測對照證實並修正）
+ *
+ * v5 新增（2026-06-22 第一次）：
+ *   T-SEC-14  getTeacherJournalMonthRangeLabel() 使用西元年/月格式
+ *             （2026-06-22 修正：批次刪除區間改為「2025/7~2026/1，共N筆」格式）
+ *
+ * v4 修正（2026-06-21）：
+ *   T-SEC-06B 判斷邏輯修正：
+ *   原版強制要求 finally 關鍵字，但使用者已將 hideLoading()
+ *   從 finally 移入 catch 區塊（效果相同、不重複呼叫）。
+ *   修正為：確認 catch 區塊（catch 後 4 行內）有 hideLoading()，
+ *   不再要求 finally 關鍵字存在。
+ *
+ *   T-SEC-09 函式名稱修正：
+ *   renderTeacherJournalCard → renderJournalCard（共用版，接受 isTeacher 參數）
+ *   對應 AI_CONTEXT.md 2026-06-20 重構命名更新。
+ *
+ * ⚠️ T-SEC-15/16/17/18 為靜態分析（檢查原始碼字串），
+ * 只能防止「日後改動時不小心退回舊寫法」，無法100%保證執行邏輯正確。
+ * T-SEC-17/18 只能確認「await new Promise」與呼叫端「await」這兩個程式碼
+ * 特徵存在，無法重現「loading 遮罩消失時間點」這個實際 timing 行為本身——
+ * 那部分已由使用者在 2026-06-23 人工實測確認過。完整驗證仍需依賴人工測試
+ * （見 AI_CONTEXT.md「deleteStudent() 跨學期邊界案例修正」章節的實測記錄）。
  */
 
 const BASE_URL = 'https://ka-dot-dot.github.io/internship-journal/teacher.html';
@@ -298,9 +339,12 @@ async function runTeacherTests(page, log) {
   });
 
   // T-SEC-06B：2026-06-11 補修的 10 個函式（原 T-SEC-06 沒有涵蓋）
-  await test('T-SEC-06B 2026-06-11 補修的 10 個函式均有 finally { hideLoading() }', async () => {
+  // 2026-06-21 判斷邏輯修正：
+  //   原本要求 finally 關鍵字，但使用者已將 hideLoading() 從 finally 移入 catch，
+  //   效果相同（失敗路徑一定執行 hideLoading），不再強制要求 finally 的存在。
+  //   改為：確認 try / catch 存在，且 catch 後 4 行內有 hideLoading()。
+  await test('T-SEC-06B 2026-06-11 補修的 10 個函式的 catch 均有 hideLoading()', async () => {
     const result = await page.evaluate(() => {
-      // 這 10 個函式是 2026-06-11 T-SEC-08 自動化測試發現並補修的
       const checks = [
         'deleteSelectedSemesterData', 'addAdmin', 'bindStudent',
         'loadStudentsTable', 'bindStudentInline', 'saveStudent',
@@ -312,13 +356,23 @@ async function runTeacherTests(page, log) {
         const fn = window[name];
         if (!fn) return; // 函式不存在時跳過（不算失敗）
         const str = fn.toString();
-        const lacks = [
-          !str.includes('try')          && 'try',
-          !str.includes('catch')        && 'catch',
-          !str.includes('finally')      && 'finally',
-          !str.includes('hideLoading')  && 'hideLoading()',
-        ].filter(Boolean).join('/');
-        if (lacks) missing.push(`${name}() 缺少 ${lacks}`);
+        if (!str.includes('try') || !str.includes('catch')) {
+          missing.push(`${name}() 缺少 try/catch`);
+          return;
+        }
+        if (!str.includes('hideLoading')) {
+          missing.push(`${name}() 缺少 hideLoading()`);
+          return;
+        }
+        // 確認 catch 後 4 行內有 hideLoading（或在 finally 內也算通過）
+        const hasCatchHide = str.split('\n').some((line, i, lines) => {
+          if (!line.includes('} catch') && !line.includes('catch(') && !line.includes('catch (')) return false;
+          const next4 = lines.slice(i, i + 5).join('\n');
+          return next4.includes('hideLoading') || next4.includes('finally');
+        });
+        if (!hasCatchHide) {
+          missing.push(`${name}() 的 catch 區塊未包含 hideLoading()（loading 失敗時可能卡住）`);
+        }
       });
       return { missing };
     });
@@ -373,9 +427,13 @@ async function runTeacherTests(page, log) {
   // T-SEC-09 ～ T-SEC-13  補強測試（原先未覆蓋項目）
   // ════════════════════════════════════════
 
-  await test('T-SEC-09 renderTeacherJournalCard() 使用 escapeHtml 和 jsArg', async () => {
+  // 2026-06-21 更新：函式已重構為共用版 renderJournalCard(j, isTeacher)
+  // 對應 AI_CONTEXT.md 2026-06-20 命名修正（renderTeacherJournalCard 已移除）
+  await test('T-SEC-09 renderJournalCard() 使用 escapeHtml 和 jsArg', async () => {
     const result = await page.evaluate(() => {
-      const fnStr = (typeof renderTeacherJournalCard === 'function') ? renderTeacherJournalCard.toString() : '';
+      // 優先找共用版（2026-06-20 重構後），找不到再找舊版（向下兼容）
+      const fn = window['renderJournalCard'] || window['renderTeacherJournalCard'];
+      const fnStr = (typeof fn === 'function') ? fn.toString() : '';
       if (!fnStr) return { skip: true };
       return {
         skip: false,
@@ -384,8 +442,8 @@ async function runTeacherTests(page, log) {
       };
     });
     if (result.skip) return;
-    if (!result.hasEscapeHtml) throw new Error('renderTeacherJournalCard() 未使用 escapeHtml()');
-    if (!result.hasJsArg)      throw new Error('renderTeacherJournalCard() 的 onclick 未使用 jsArg()');
+    if (!result.hasEscapeHtml) throw new Error('renderJournalCard() 未使用 escapeHtml()');
+    if (!result.hasJsArg)      throw new Error('renderJournalCard() 的 onclick 未使用 jsArg()');
   });
 
   await test('T-SEC-10 loadSalaryPhotoOnDemand() 使用 escapeHtml 且錯誤用 toast()', async () => {
@@ -447,8 +505,141 @@ async function runTeacherTests(page, log) {
     if (result.skip) return;
     if (!result.ok) throw new Error(result.msg);
   });
+  // ════════════════════════════════════════
+  // T-SEC-14  批次刪除月記區間改西元年/月格式（2026-06-22）
+  // 對應 AI_CONTEXT.md 2026-06-22 變更：
+  //   getTeacherJournalMonthRangeLabel() 改用 toCEYearMonth() 轉換，
+  //   格式從「7月 ～ 1月，共N筆」改為「2025/7~2026/1，共N筆」
+  // ════════════════════════════════════════
 
+  await test('T-SEC-14 getTeacherJournalMonthRangeLabel() 使用西元年/月格式', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof getTeacherJournalMonthRangeLabel === 'function')
+        ? getTeacherJournalMonthRangeLabel.toString() : '';
+      if (!fnStr) return { skip: true };
 
+      // 特徵1：有 toCEYearMonth 西元年換算邏輯
+      const hasCEConvert = fnStr.includes('toCEYearMonth') || fnStr.includes('1911');
+
+      // 特徵2：不再回傳裸月份字串（不應再出現 `月，共` 或 `月 ～` 格式）
+      const hasBareMonth =
+        fnStr.includes('月，共') ||
+        fnStr.includes('月 ～') ||
+        fnStr.includes('月～');
+
+      // 特徵3：回傳格式包含 / 分隔的年/月
+      const hasSlashFormat = fnStr.includes("'/'") || fnStr.includes('"/"') ||
+                             fnStr.includes('year') || fnStr.includes('/');
+
+      return { skip: false, hasCEConvert, hasBareMonth, hasSlashFormat };
+    });
+
+    if (result.skip) return;
+    if (!result.hasCEConvert)
+      throw new Error('getTeacherJournalMonthRangeLabel() 未使用西元年換算邏輯（toCEYearMonth / 1911）');
+    if (result.hasBareMonth)
+      throw new Error('getTeacherJournalMonthRangeLabel() 仍回傳裸月份格式（「X月～Y月」），應改為西元年/月格式');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-15 ～ T-SEC-16  deleteStudent() 跨學期邊界案例修正（2026-06-22 第二次）
+  // 對應 AI_CONTEXT.md「deleteStudent() 跨學期邊界案例修正」章節：
+  //   ①月記刪除改用「座號＋ownerEmail」雙重比對，避免座號跨學期重複分配給
+  //     不同人時誤刪對方真實月記（純座號比對已用Firebase主控台實測證實會誤刪）。
+  //   ②非active學期刪除學生時，補上手動刪除 /students/{semester}_{seatNo}
+  //     根文件，避免孤兒文件殘留、被老師主頁「本月未繳名單」誤抓進統計。
+  // 以下為靜態分析（檢查原始碼是否包含關鍵字），無法100%保證執行邏輯正確，
+  // 但可防止日後改動時不小心退回舊寫法。完整驗證見 AI_CONTEXT.md 實測記錄。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-15 deleteStudent() 月記刪除使用 ownerEmail 雙重比對', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof deleteStudent === 'function') ? deleteStudent.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasSeatNoFilter: fnStr.includes('seatNo'),
+        hasOwnerEmail:   fnStr.includes('ownerEmail'),
+        hasTargetEmail:  fnStr.includes('targetEmail'),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasSeatNoFilter)
+      throw new Error('deleteStudent() 找不到 seatNo 篩選邏輯，函式可能已被大幅改寫，需重新確認');
+    if (!result.hasOwnerEmail)
+      throw new Error('deleteStudent() 月記刪除未使用 ownerEmail 比對，可能退回純座號比對——座號跨學期重複分配給不同人時會誤刪對方真實月記');
+    if (!result.hasTargetEmail)
+      throw new Error('deleteStudent() 找不到 targetEmail 變數，座號+信箱雙重比對邏輯可能已被移除');
+  });
+
+  await test('T-SEC-16 deleteStudent() 非active學期會清除 /students/ 根文件', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof deleteStudent === 'function') ? deleteStudent.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasActiveSync:        fnStr.includes('syncActiveRootFromRoster'),
+        hasStudentsDocDelete: /doc\(\s*db\s*,\s*['"]students['"]/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasActiveSync)
+      throw new Error('deleteStudent() 找不到 syncActiveRootFromRoster() 呼叫，active學期分支可能已被移除');
+    if (!result.hasStudentsDocDelete)
+      throw new Error('deleteStudent() 的非active學期分支找不到對 /students/ 文件的 deleteDoc，可能退回「只在active時才清理」的舊寫法，會在非active學期留下孤兒文件');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-17 ～ T-SEC-18  printJournalsPDF() loading 提早消失修正（2026-06-23）
+  // 對應本次修正：pdfMake.createPdf().getBlob() 是 callback 式 API，
+  //   原本沒有包成 Promise/await，呼叫端 finally{ hideLoading() } 會在
+  //   PDF 還沒真正產生完成前就提前執行。修法分兩處：
+  //   ①printJournalsPDF() 內部把 getBlob() 包進 await new Promise(...)
+  //   ②exportSemesterPDF()／exportStudentPDF() 呼叫 printJournalsPDF() 時加 await
+  //   （只修①不修②，或反過來，loading 提早消失的問題都不會真正解決）
+  // 以下為靜態分析（檢查原始碼字串），無法重現「loading 何時消失」這個實際
+  // timing 行為，只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-17 printJournalsPDF() 將 getBlob() 包進 await new Promise', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof printJournalsPDF === 'function') ? printJournalsPDF.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasGetBlob:      fnStr.includes('getBlob'),
+        hasAwaitPromise: fnStr.includes('await new Promise'),
+        hasResolveCall:  /resolve\s*\(\s*\)/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasGetBlob)
+      throw new Error('printJournalsPDF() 找不到 getBlob() 呼叫，函式可能已被大幅改寫，需重新確認');
+    if (!result.hasAwaitPromise)
+      throw new Error('printJournalsPDF() 的 getBlob() 沒有包進 await new Promise(...)，可能退回沒等待 PDF 產生完成就提前 return 的舊寫法，導致 loading 遮罩比 PDF 早消失');
+    if (!result.hasResolveCall)
+      throw new Error('printJournalsPDF() 的 Promise 找不到 resolve() 呼叫，await 可能永遠不會完成（卡住）或包裝方式有誤');
+  });
+
+  await test('T-SEC-18 exportSemesterPDF()／exportStudentPDF() 呼叫 printJournalsPDF() 時有 await', async () => {
+    const result = await page.evaluate(() => {
+      const semFnStr = (typeof exportSemesterPDF === 'function') ? exportSemesterPDF.toString() : '';
+      const stuFnStr = (typeof exportStudentPDF === 'function') ? exportStudentPDF.toString() : '';
+      if (!semFnStr && !stuFnStr) return { skip: true };
+      return {
+        skip: false,
+        semHasCall:  semFnStr.includes('printJournalsPDF'),
+        semHasAwait: /await\s+printJournalsPDF/.test(semFnStr),
+        stuHasCall:  stuFnStr.includes('printJournalsPDF'),
+        stuHasAwait: /await\s+printJournalsPDF/.test(stuFnStr),
+      };
+    });
+    if (result.skip) return;
+    if (result.semHasCall && !result.semHasAwait)
+      throw new Error('exportSemesterPDF() 呼叫 printJournalsPDF() 時沒有 await，finally{ hideLoading() } 仍會在 PDF 產生完成前提早執行');
+    if (result.stuHasCall && !result.stuHasAwait)
+      throw new Error('exportStudentPDF() 呼叫 printJournalsPDF() 時沒有 await，finally{ hideLoading() } 仍會在 PDF 產生完成前提早執行');
+  });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
     const errors = page._testErrors || [];
