@@ -1,13 +1,19 @@
 /**
  * run-tests.js
- * 產學班實習月記系統自動化測試主程式 v4
+ * 產學班實習月記系統自動化測試主程式 v5
  *
  * session 說明：
- *   session.json         → 老師帳號（必須，手動登入一次）
+ *   session.json         → 老師帳號（舊式手動登入，向下相容）
+ *   session-teacher.json → 老師帳號（自動產生，優先使用）
  *   session-student.json → 學生帳號（自動產生，不需學生在場）
  *
+ * 老師 session 取得優先順序：
+ *   1. 自動模式（.env 有 TEST_TEACHER_EMAIL/PASSWORD）→ 每次自動重新登入產生 session-teacher.json
+ *   2. 舊式手動 session（session.json 存在）→ 沿用（向下相容，不破壞現有流程）
+ *   3. 都沒有 → 老師端測試失敗退出
+ *
  * 學生 session 取得優先順序：
- *   1. 自動模式（.env 設定存在）→ 每次測試前自動用 Firebase REST API 重新登入
+ *   1. 自動模式（.env 設定存在）→ 每次測試前自動用 Firebase SDK 重新登入
  *   2. 手動模式（.env 不存在但 session-student.json 存在）→ 沿用舊 session
  *   3. 無 session → S-07 以後的學生功能測試自動跳過
  */
@@ -18,8 +24,10 @@ const path = require('path');
 const { runStudentTests } = require('./tests/student.test');
 const { runTeacherTests } = require('./tests/teacher.test');
 const { autoCreateStudentSession, loadEnv } = require('./auto-student-session');
+const { autoCreateTeacherSession }          = require('./auto-teacher-session');
 
-const SESSION_FILE         = path.join(__dirname, 'session.json');
+const SESSION_FILE         = path.join(__dirname, 'session.json');          // 舊式老師手動 session
+const TEACHER_SESSION_FILE = path.join(__dirname, 'session-teacher.json'); // 新式老師自動 session
 const STUDENT_SESSION_FILE = path.join(__dirname, 'session-student.json');
 const SCREENSHOT_DIR       = path.join(__dirname, '..', 'screenshots');
 const REPORT_FILE          = path.join(__dirname, '..', 'test-report.txt');
@@ -68,41 +76,88 @@ function printSummary(label, results) {
   log(`對應 AI_CONTEXT.md 版本：2026-06-17`);
   log('═'.repeat(50));
 
-  // 2026-06-XX 新增：session.json（老師 Google 帳號登入）只在「會跑老師端測試」時才需要。
-  // --student 模式（例如 CI 的自動健康檢查）沒有人能手動互動登入老師端，
-  // 所以這個檢查改成只在 runTeacher 為 true 時才擋下來。
-  if (runTeacher && !fs.existsSync(SESSION_FILE)) {
-    log('\n❌ 找不到 session.json，請先執行 Step3_RenewSession.bat 重新登入。');
-    process.exit(1);
-  }
+  // ── .env 讀取（一次，後面共用）────────────────────────
+  const env = loadEnv();
 
-  let browser, context;
+  const hasTeacherEnvConfig = !!(
+    (env.FIREBASE_API_KEY      || process.env.FIREBASE_API_KEY) &&
+    (env.TEST_TEACHER_EMAIL    || process.env.TEST_TEACHER_EMAIL) &&
+    (env.TEST_TEACHER_PASSWORD || process.env.TEST_TEACHER_PASSWORD)
+  );
+
+  const hasStudentEnvConfig = !!(
+    (env.FIREBASE_API_KEY      || process.env.FIREBASE_API_KEY) &&
+    (env.TEST_STUDENT_EMAIL    || process.env.TEST_STUDENT_EMAIL) &&
+    (env.TEST_STUDENT_PASSWORD || process.env.TEST_STUDENT_PASSWORD)
+  );
+
+  // ── 啟動瀏覽器（session 尚未決定，先不設 storageState）──
+  let browser;
   try {
     browser = await chromium.launch({ headless: HEADLESS });
-    const contextOptions = {
-      viewport: { width: 1280, height: 800 },
-      locale: 'zh-TW',
-      timezoneId: 'Asia/Taipei',
-    };
-    if (runTeacher) contextOptions.storageState = SESSION_FILE;
-    context = await browser.newContext(contextOptions);
   } catch (err) {
     log(`\n❌ 無法啟動瀏覽器：${err.message}`);
     process.exit(1);
   }
 
-  // ── 學生 session 處理（自動優先）────────────────────────────
-  const env = loadEnv();
-  const hasEnvConfig = !!(
-    (env.FIREBASE_API_KEY    || process.env.FIREBASE_API_KEY) &&
-    (env.TEST_STUDENT_EMAIL  || process.env.TEST_STUDENT_EMAIL) &&
-    (env.TEST_STUDENT_PASSWORD || process.env.TEST_STUDENT_PASSWORD)
-  );
+  // ── 老師 session 處理（自動優先，向下相容舊 session.json）──
+  let teacherSessionFile = null;
 
+  if (runTeacher) {
+    if (hasTeacherEnvConfig) {
+      log('\n🤖 偵測到老師帳號 .env 設定，自動產生老師 session...');
+      const ok = await autoCreateTeacherSession(browser, TEACHER_SESSION_FILE, log);
+      if (ok) {
+        teacherSessionFile = TEACHER_SESSION_FILE;
+        log('   老師端測試將完整執行\n');
+      } else {
+        log('   ⚠️  老師自動登入失敗，嘗試沿用舊 session.json...');
+        if (fs.existsSync(SESSION_FILE)) {
+          teacherSessionFile = SESSION_FILE;
+          log('   ✅ 沿用舊 session.json\n');
+        } else {
+          log('\n❌ 老師 session 取得失敗，且找不到舊的 session.json。');
+          log('   請執行 Step3_RenewSession.bat 手動登入一次，或確認 .env 老師帳號設定正確。');
+          await browser.close();
+          process.exit(1);
+        }
+      }
+    } else if (fs.existsSync(SESSION_FILE)) {
+      // 向下相容：沒有老師 .env 設定但有舊 session.json，直接沿用
+      teacherSessionFile = SESSION_FILE;
+      log('\n✅ 使用舊式老師 session（session.json）');
+      log('   提示：在 test-suite/.env 填入 TEST_TEACHER_EMAIL / TEST_TEACHER_PASSWORD 可改為自動模式\n');
+    } else {
+      log('\n❌ 找不到老師 session，請先執行 Step3_RenewSession.bat 重新登入。');
+      log('   或在 test-suite/.env 填入老師帳號設定以啟用自動模式。');
+      await browser.close();
+      process.exit(1);
+    }
+  }
+
+  // ── 建立 browser context（老師 session 已決定）────────
+  let context;
+  try {
+    const contextOptions = {
+      viewport:   { width: 1280, height: 800 },
+      locale:     'zh-TW',
+      timezoneId: 'Asia/Taipei',
+    };
+    if (runTeacher && teacherSessionFile) {
+      contextOptions.storageState = teacherSessionFile;
+    }
+    context = await browser.newContext(contextOptions);
+  } catch (err) {
+    log(`\n❌ 無法建立瀏覽器 context：${err.message}`);
+    await browser.close();
+    process.exit(1);
+  }
+
+  // ── 學生 session 處理（自動優先）────────────────────────
   let hasStudentSession = false;
 
-  if (hasEnvConfig) {
-    log('\n🤖 偵測到 .env 設定，自動產生學生帳號 session...');
+  if (hasStudentEnvConfig) {
+    log('\n🤖 偵測到學生帳號 .env 設定，自動產生學生 session...');
     hasStudentSession = await autoCreateStudentSession(browser, STUDENT_SESSION_FILE, log);
     if (hasStudentSession) {
       log('   S-07 以後的學生功能測試將完整執行\n');
