@@ -209,7 +209,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .journal-card-toprow { flex-wrap: wrap !important; padding-right: 0 !important; }
   .journal-unread-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
   .journal-reviewed-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
-  .student-reply-area textarea { font-size: 16px; }
+  .student-reply-area .reply-input { font-size: 16px; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, auto); gap: 10px; margin-bottom: 16px; align-items: stretch; }
@@ -234,7 +234,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-card-clickable { cursor: pointer; user-select: none; }
 .stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
 .stat-card-detail.hidden { display: none; }
-.stat-detail-row { display: flex; align-items: center; gap: 8px; }
+.stat-detail-row { display: flex; align-items: center; gap: 8px; border-radius: 6px; transition: background 0.15s; }
+.stat-detail-row.clickable { cursor: pointer; padding: 2px 4px; margin: 0 -4px; }
+.stat-detail-row.clickable:hover { background: var(--bg3); }
 .stat-detail-row .journal-unread-badge,
 .stat-detail-row .journal-reviewed-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
 .stat-detail-empty { color: var(--text2); font-size: 12px; }
@@ -283,11 +285,11 @@ tr:last-child td { border-bottom: none; }
 .journal-unread-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
 .journal-reviewed-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
 .student-reply-area { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.student-reply-area .reply-header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--bg3); font-size: 12px; font-weight: 600; color: var(--text2); }
-.student-reply-area textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 13px; border: none; border-top: 1px solid var(--border); background: var(--card); color: var(--text); resize: none; outline: none; line-height: 1.6; }
-.student-reply-area textarea:disabled { background: var(--bg3); color: var(--text2); cursor: not-allowed; }
-.student-reply-area .reply-footer { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: var(--bg3); border-top: 1px solid var(--border); }
-.student-reply-area .reply-char-count { font-size: 11px; color: var(--text2); }
+.student-reply-area .reply-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg3); }
+.student-reply-area .reply-label { font-size: 12px; font-weight: 600; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
+.student-reply-area .reply-input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px; background: var(--card); color: var(--text); outline: none; }
+.student-reply-area .reply-input:disabled { background: var(--bg2); color: var(--text2); cursor: not-allowed; }
+.student-reply-area .reply-char-count { font-size: 11px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
 .student-reply-area .reply-char-count.at-limit { color: var(--accent-red); }
 .journal-month { font-size: 15px; font-weight: 700; }
 .journal-meta { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
@@ -1250,9 +1252,10 @@ function renderTeacherStatusDetail(list) {
   if (!list.length) return '<div class="stat-detail-empty">尚無老師審閱紀錄</div>';
   return list.map(j => {
     const label = escapeHtml(semMonthToLabel(j.semester, j.month));
-    return j._statStatus === 'unread'
-      ? `<div class="stat-detail-row"><span class="journal-unread-badge">● 有新評語</span>${label}</div>`
-      : `<div class="stat-detail-row"><span class="journal-reviewed-badge">✅ 已審閱</span>${label}</div>`;
+    const badge = j._statStatus === 'unread'
+      ? `<span class="journal-unread-badge">● 有新評語</span>`
+      : `<span class="journal-reviewed-badge">✅ 已審閱</span>`;
+    return `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">${badge}${label}</div>`;
   }).join('');
 }
 
@@ -3066,6 +3069,17 @@ async function saveJournal() {
   }
 }
 
+// 從首頁審閱紀錄列點擊跳轉到對應歷史月記卡片
+function goToJournalCard(sem, month) {
+  window._pendingScrollToJournal = { sem: String(sem), month: Number(month) };
+  // 清除日期篩選，確保目標卡片不會被過濾掉
+  const startEl = document.getElementById('s-history-date-start');
+  const endEl   = document.getElementById('s-history-date-end');
+  if (startEl) startEl.value = '';
+  if (endEl)   endEl.value   = '';
+  showPage('s-history');
+}
+
 async function loadStudentHistory() {
   if (!currentUser) return;
   const startVal = document.getElementById('s-history-date-start')?.value || '';
@@ -3096,6 +3110,20 @@ async function loadStudentHistory() {
       ? journals.map(j => renderJournalCardSelectable(j)).join('')
       : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
     updateHistoryBatchBar();
+    // 從首頁點擊跳轉：捲動到目標卡片並短暫高亮
+    if (window._pendingScrollToJournal) {
+      const { sem, month } = window._pendingScrollToJournal;
+      window._pendingScrollToJournal = null;
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`jcard-${sem}-${month}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.style.outline = '2px solid var(--accent)';
+          el.style.transition = 'outline 0.3s';
+          setTimeout(() => { el.style.outline = ''; }, 2000);
+        }
+      });
+    }
   } catch (e) {
     console.error('載入歷史月記失敗', e);
     document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
@@ -3128,7 +3156,7 @@ function renderJournalCardSelectable(j) {
     ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
     : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  return `<div class="journal-card journal-card-selectable"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
+  return `<div class="journal-card journal-card-selectable" id="jcard-${escapeHtml(j.semester||'')}-${safeMonth}"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
     ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
     ${cbHtml}
     ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
@@ -3543,19 +3571,22 @@ function renderStudentReplyArea(j) {
   const replyText = j.studentReply || '';
   const charCount = replyText.length;
   const lockedHint = locked
-    ? '<span style="font-size:11px;color:var(--accent-yellow);margin-left:6px">⏳ 等待老師閱讀中</span>'
+    ? '<span style="font-size:11px;color:var(--accent-yellow);margin-left:4px">⏳ 等待老師閱讀</span>'
     : '';
   const disabledAttr = locked ? ' disabled' : '';
-  const footerHtml = locked
-    ? `<div class="reply-footer"><span class="reply-char-count">${charCount} / 50</span><span style="font-size:11px;color:var(--text2)">老師閱讀後可再回覆</span></div>`
-    : `<div class="reply-footer"><span class="reply-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount} / 50</span><button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出回覆</button></div>`;
+  const actionHtml = locked
+    ? `<span style="font-size:11px;color:var(--text2);white-space:nowrap">老師讀後可再覆</span>`
+    : `<span class="reply-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
+       <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:3px 12px;font-size:12px;flex-shrink:0" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出</button>`;
   return `<div class="student-reply-area">
-    <div class="reply-header">💬 我的回覆${lockedHint}</div>
-    <textarea rows="2" maxlength="50" placeholder="回覆老師評語（最多 50 字）…"${disabledAttr}
-      id="reply-ta-${seatNo}-${sem}-${month}"
-      oninput="syncReplyCharCount(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})"
-    >${escapeHtml(replyText)}</textarea>
-    ${footerHtml}
+    <div class="reply-row">
+      <span class="reply-label">💬 我的回覆${lockedHint}</span>
+      <input type="text" class="reply-input" maxlength="50" placeholder="回覆老師評語（最多50字）…"${disabledAttr}
+        id="reply-ta-${seatNo}-${sem}-${month}"
+        oninput="syncReplyCharCount(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})"
+        value="${escapeHtml(replyText)}">
+      ${actionHtml}
+    </div>
   </div>`;
 }
 
