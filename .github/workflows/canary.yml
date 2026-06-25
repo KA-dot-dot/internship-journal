@@ -1,8 +1,8 @@
-name: 學生端健康檢查（Canary）
+name: 完整自動化測試（學生端 + 老師端 Canary）
 
 # 三個觸發時機：
-#   1. push 到 main：部署後幾分鐘內就知道有沒有壞掉（如果你的預設分支不是 main，請把下面改成你的分支名）
-#   2. schedule：每天固定時間跑一次，就算當天沒有改動也會檢查（防範 Firebase 端、GitHub Pages 快取等外部變化）
+#   1. push 到 main：部署後幾分鐘內就知道有沒有壞掉
+#   2. schedule：每天固定時間跑一次，就算當天沒有改動也會檢查
 #   3. workflow_dispatch：在 GitHub 網頁上手動按按鈕就能立刻跑一次
 on:
   push:
@@ -13,7 +13,7 @@ on:
 
 jobs:
   canary:
-    name: 學生端自動化測試（針對正式環境）
+    name: 完整自動化測試（學生端 49 項 + 老師端 39 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
@@ -32,14 +32,16 @@ jobs:
         working-directory: test-suite
         run: npx playwright install --with-deps chromium
 
-      - name: 執行學生端自動化測試（直接打正式環境）
+      - name: 執行完整自動化測試（學生端 + 老師端，直接打正式環境）
         working-directory: test-suite
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           TEST_STUDENT_EMAIL: ${{ secrets.TEST_STUDENT_EMAIL }}
           TEST_STUDENT_PASSWORD: ${{ secrets.TEST_STUDENT_PASSWORD }}
+          TEST_TEACHER_EMAIL: ${{ secrets.TEST_TEACHER_EMAIL }}
+          TEST_TEACHER_PASSWORD: ${{ secrets.TEST_TEACHER_PASSWORD }}
           HEADLESS: 'true'
-        run: node run-tests.js --student
+        run: node run-tests.js
 
       - name: 上傳測試報告與失敗截圖（無論成功或失敗都保留）
         if: always()
