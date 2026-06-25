@@ -297,6 +297,8 @@ tr:last-child td { border-bottom: none; }
 .thread-bubble-body.text-muted { color: var(--text2); font-size: 12px; }
 /* 等待老師讀取的提示 */
 .thread-waiting { font-size: 11px; color: var(--accent-yellow); margin-top: 3px; }
+/* 老師已閱讀的提示 */
+.thread-read-confirm { font-size: 11px; color: #22c55e; margin-top: 3px; }
 /* 輸入列 */
 .thread-input-row { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; background: var(--bg3); border-top: 1px solid var(--border); }
 .thread-input-label { font-size: 11px; font-weight: 700; color: var(--accent2); }
@@ -3606,7 +3608,9 @@ function renderStudentReplyArea(j) {
     ? `<div class="thread-bubble">
         <div class="thread-bubble-label label-me">我${replyTimeStr ? `<span class="thread-bubble-time">${escapeHtml(replyTimeStr)}</span>` : ''}</div>
         <div class="thread-bubble-body">${escapeHtml(replyText)}</div>
-        ${locked ? '<div class="thread-waiting">⏳ 等待老師閱讀</div>' : ''}
+        ${locked
+          ? '<div class="thread-waiting">⏳ 等待老師閱讀</div>'
+          : '<div class="thread-read-confirm">✅ 老師已閱讀</div>'}
       </div>`
     : '';
 
