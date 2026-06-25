@@ -5119,17 +5119,17 @@ function toggleLocDetail(subId) {
 // ============================================================
 
 function openCommentModal(seatNo, semester, month) {
-  // ★ 快取競爭防護：快取未就緒時拒絕操作
-  if (!window._teacherJournalsCache) {
-    toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
-    return;
-  }
-  const cachedJournal = findTeacherJournal(seatNo, semester, month);
-  _currentCommentJournal = { seatNo, semester, month, ownerUid: cachedJournal?.ownerUid || "" };
+  // 快取存在時從快取補 ownerUid；快取尚未就緒（如從主頁統計點擊）則繼續執行，ownerUid 從 getDoc 取得
+  const cachedJournal = window._teacherJournalsCache ? findTeacherJournal(seatNo, semester, month) : null;
+  _currentCommentJournal = { seatNo, semester, month, ownerUid: cachedJournal?.ownerUid || '' };
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
   const { doc, getDoc } = firebase_funcs;
   getDoc(getTeacherJournalRef(seatNo, semester, month)).then(snap => {
     const data = snap.exists() ? snap.data() : {};
+    // 若快取當時沒有 ownerUid，從 Firestore 即時補上
+    if (!_currentCommentJournal.ownerUid && data.ownerUid) {
+      _currentCommentJournal.ownerUid = data.ownerUid;
+    }
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
