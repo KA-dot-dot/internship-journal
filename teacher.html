@@ -807,6 +807,10 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">有評語 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
           </div>
+          <div class="stat-card" onclick="toggleStatList('student-reply')" style="cursor:pointer;user-select:none" title="點擊查看回覆名單">
+            <div class="stat-label">學生有新回覆 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
+            <div class="stat-value" id="stat-student-reply">-</div>
+          </div>
         </div>
         <div id="stat-list-panel-reviewed" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-green);padding:14px 18px">
@@ -824,6 +828,12 @@ tr:last-child td { border-bottom: none; }
           <div class="card" style="border-left:3px solid var(--accent2);padding:14px 18px">
             <div style="font-size:13px;font-weight:700;color:var(--accent2);margin-bottom:10px">📋 本月有評語名單</div>
             <div id="stat-list-names-commented" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+        <div id="stat-list-panel-student-reply" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">🔴 學生有新回覆名單</div>
+            <div id="stat-list-names-student-reply" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
         </div>
         <div style="font-size:15px;font-weight:700;margin:18px 0 12px">🔄 跨月待複審</div>
@@ -1414,6 +1424,7 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="modal-body">
       <div id="comment-modal-info" style="background:var(--bg3);padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;color:var(--text2);line-height:1.8"></div>
+      <div id="comment-modal-student-reply" style="display:none;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25);padding:10px 14px;border-radius:8px;margin-bottom:14px"></div>
       <div class="form-group">
         <label>老師評語</label>
         <textarea id="comment-modal-textarea" rows="5" placeholder="請輸入對本份月記的評語與建議..."></textarea>
@@ -2348,12 +2359,20 @@ async function loadTeacherDashboard() {
   const reviewed = activeJournals.filter(j => !!j.teacherReviewed).length;
   const commented = activeJournals.filter(j => (j.teacherComment || '').trim()).length;
   const unreviewed = Math.max(submitted - reviewed, 0);
+  // 全班所有月記中有學生未讀回覆的（不限本月，老師隨時要能看到）
+  const allJournals = userJournalData(jSnap);
+  const studentReplies = allJournals.filter(j => j.studentReplyUnread);
   document.getElementById('stat-submitted').textContent = submitted;
   document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-rate').textContent = total ? Math.round(submitted/total*100) + '%' : '0%';
   document.getElementById('stat-reviewed').textContent = reviewed;
   document.getElementById('stat-unreviewed').textContent = unreviewed;
   document.getElementById('stat-commented').textContent = commented;
+  const replyEl = document.getElementById('stat-student-reply');
+  if (replyEl) {
+    replyEl.textContent = studentReplies.length;
+    replyEl.style.color = studentReplies.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
+  }
   // 各名單（供點擊展開）
   const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
   const missingStudents = activeStuDocs.filter(d => {
@@ -2367,7 +2386,10 @@ async function loadTeacherDashboard() {
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
   };
-  // 本月未審閱的可點擊資料（供審閱隊列使用）
+  // 學生回覆可點擊資料（供展開面板使用）
+  window._studentReplyClickData = studentReplies.map(j => ({
+    seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester, month: j.month
+  }));
   window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
     seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
   }));
@@ -2403,7 +2425,7 @@ async function loadTeacherDashboard() {
     crossMonthEl.style.color = crossMonthJournals.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
   }
   // 重設所有展開面板
-  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2417,7 +2439,7 @@ async function loadTeacherDashboard() {
   } catch(e) {
     console.error('主頁資料載入失敗', e);
     toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
-    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-cross-month'].forEach(id => {
+    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-student-reply','stat-cross-month'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '-';
     });
     document.getElementById('stat-rate').textContent = '-';
@@ -2464,39 +2486,65 @@ async function copyMissingList() {
 
 function toggleStatList(key) {
   const cfg = {
-    missing:    { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
-    submitted:  { color:'var(--accent-green)',  empty:'本月尚無學生繳交月記。' },
-    reviewed:   { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
-    unreviewed: { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
-    commented:  { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' }
+    missing:        { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
+    submitted:      { color:'var(--accent-green)',  empty:'本月尚無學生繳交月記。' },
+    reviewed:       { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
+    unreviewed:     { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
+    commented:      { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' },
+    'student-reply':{ color:'var(--accent-red)',    empty:'✅ 目前沒有學生待讀回覆！' }
   };
   const panel = document.getElementById(`stat-list-panel-${key}`);
   const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
   // 關閉其他面板
-  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
     if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
   });
   const isHidden = panel.style.display === 'none';
   if (isHidden) {
-    const list = (window._statLists || {})[key] || [];
     const c = cfg[key];
-    if (list.length === 0) {
-      namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
-    } else if (key === 'unreviewed') {
-      // 未審閱 badge 可點擊，進入審閱隊列
+    if (key === 'unreviewed') {
       const clickData = window._unreviewedClickData || [];
-      namesEl.innerHTML = clickData.map((s, idx) => {
-        const display = escapeHtml(s.seatNo + ' ' + s.name);
-        return `<span onclick="goFromUnreviewed(${idx})" style="background:rgba(234,179,8,0.12);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
-      }).join('');
+      if (clickData.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+      } else {
+        namesEl.innerHTML = clickData.map((s, idx) => {
+          const display = escapeHtml(s.seatNo + ' ' + s.name);
+          return `<span onclick="goFromUnreviewed(${idx})" style="background:rgba(234,179,8,0.12);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+        }).join('');
+      }
+    } else if (key === 'student-reply') {
+      // 學生回覆：可點擊，直接開啟對應月記的評語視窗
+      const clickData = window._studentReplyClickData || [];
+      if (clickData.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+      } else {
+        const semLabel = s => (s.semester || '').replace('-1','第1學期').replace('-2','第2學期');
+        namesEl.innerHTML = clickData.map((s, idx) => {
+          const display = escapeHtml(`${s.seatNo} ${s.name}｜${semLabel(s)}${s.month}月份月記 有新回覆`);
+          return `<span onclick="goFromStudentReply(${idx})" style="background:rgba(239,68,68,0.10);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block;margin-bottom:2px" title="點擊開啟評語視窗">${display}</span>`;
+        }).join('');
+      }
     } else {
-      namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+      const list = (window._statLists || {})[key] || [];
+      if (list.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+      } else {
+        namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+      }
     }
     panel.style.display = 'block';
   } else {
     panel.style.display = 'none';
   }
+}
+
+function goFromStudentReply(idx) {
+  const items = window._studentReplyClickData || [];
+  const i = Number(idx);
+  if (!items[i]) return;
+  const s = items[i];
+  openCommentModal(s.seatNo, s.semester, s.month);
 }
 
 function toggleCrossMonthPanel() {
@@ -4690,6 +4738,9 @@ function renderJournalCard(j, isTeacher) {
     ${(isTeacher && hasComment)
       ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${escapeHtml(j.teacherComment)}</div>`
       : ''}
+    ${(isTeacher && j.studentReply)
+      ? `<div style="margin-top:6px;padding:8px 12px;background:${j.studentReplyUnread ? 'rgba(239,68,68,0.07)' : 'var(--bg3)'};border:1px solid ${j.studentReplyUnread ? 'rgba(239,68,68,0.25)' : 'var(--border)'};border-radius:8px"><div style="font-size:12px;font-weight:700;color:${j.studentReplyUnread ? 'var(--accent-red)' : 'var(--text2)'};margin-bottom:3px">${j.studentReplyUnread ? '🔴 學生有新回覆' : '💬 學生回覆'}</div><div style="font-size:13px;color:var(--text);line-height:1.6;word-break:break-all">${escapeHtml(j.studentReply)}</div></div>`
+      : ''}
   </div>`;
 }
 
@@ -5083,9 +5134,21 @@ function openCommentModal(seatNo, semester, month) {
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
     document.getElementById('comment-modal-textarea').value = data.teacherComment || '';
+    // 顯示學生回覆
+    const replyBlock = document.getElementById('comment-modal-student-reply');
+    if (replyBlock) {
+      if (data.studentReply) {
+        replyBlock.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--accent-red);margin-bottom:4px">${data.studentReplyUnread ? '🔴 學生有新回覆' : '💬 學生回覆'}</div><div style="font-size:13px;color:var(--text);line-height:1.6;word-break:break-all">${escapeHtml(data.studentReply)}</div>`;
+        replyBlock.style.display = 'block';
+      } else {
+        replyBlock.style.display = 'none';
+      }
+    }
     openModal('comment-modal');
   }).catch(() => {
     document.getElementById('comment-modal-textarea').value = '';
+    const replyBlock = document.getElementById('comment-modal-student-reply');
+    if (replyBlock) replyBlock.style.display = 'none';
     openModal('comment-modal');
   });
 }
@@ -5101,12 +5164,15 @@ async function saveTeacherComment() {
     await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
-      teacherCommentUnread: comment.length > 0
+      teacherCommentUnread: comment.length > 0,
+      // 老師儲存評語時，同步清除學生回覆的未讀旗標
+      studentReplyUnread: false
     });
     hideLoading();
     closeModal('comment-modal');
     toast('✅ 評語已儲存，月記標記為已審閱', 'success');
     loadTeacherJournals();
+    loadTeacherDashboard();
   } catch(e) {
     toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
     hideLoading();
