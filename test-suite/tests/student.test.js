@@ -1,7 +1,23 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v7
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-17）
+ * 學生端自動化測試 v9
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-23）
+ *
+ * v9 新增（2026-06-23）：
+ *   S-SEC-19  editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標
+ *   S-SEC-20  showPage()／initWriteForm() 仍支援 _skipWriteInit／skipDeadlineCheck 跳過機制
+ *             （修正：editJournal() 載入舊月記填表後，showPage('s-write') 及
+ *             initWriteForm() 結尾都會非同步重新呼叫 checkMonthDeadline()（無 skipFill），
+ *             背景任務完成後會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容；
+ *             編輯非當前月份的舊月記時幾乎必然發生。已加 _skipWriteInit 旗標
+ *             + initWriteForm(skipDeadlineCheck) 參數兩處修正，拆成兩個測試
+ *             分別檢查，避免只修一半卻誤判通過。）
+ *
+ * v8 新增（2026-06-22）：
+ *   S-SEC-17  editJournal/checkMonthDeadline 正確還原「其他（補充說明）」型別
+ *             （2026-06-22 修正：型別靜默失效 bug 迴歸測試）
+ *   S-SEC-18  saveJournal() 照片上傳中存檔防呆邏輯存在
+ *             （2026-06-22 修正：上傳中按儲存會存入空白 URL）
  *
  * v7 修正（2026-06-17）：
  *   _captureFsCtx() 根本原因修正：
@@ -34,6 +50,10 @@
  *   S-17   _loginHandling 互斥旗標已宣告，handleLoginUser() 所有 return 路徑均清旗標
  *   S-17B  onAuthStateChanged 有 _loginHandling 輪詢等待邏輯（最多 15 秒）
  *   S-SEC-16  calcDistance() 的 addressError 插入 innerHTML 前有 escapeHtml()（2026-06-17 防禦性加固）
+ *
+ * ⚠️ S-SEC-19/20 為靜態分析（檢查原始碼字串），無法重現「編輯舊月記後表單
+ * 是否真的被背景任務蓋掉」這個實際 timing 行為（需要一筆非當前月份的月記
+ * 資料才能人工驗證），只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
  */
 
 const BASE_URL = 'https://ka-dot-dot.github.io/internship-journal/student.html';
@@ -764,6 +784,148 @@ async function runStudentTests(page, browserContext, log) {
     if (result.skip) return;
     if (!result.hasInnerHTML)   throw new Error('initWriteForm() 找不到 innerHTML 賦值');
     if (!result.hasEscapeLabel) throw new Error('initWriteForm() 的學期 label 未使用 escapeHtml()');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-17  「其他（補充說明）」型別 editJournal 載入修正（2026-06-22）
+  // 對應 AI_CONTEXT.md 2026-06-22 變更：
+  //   editJournal / checkMonthDeadline 載入 entry 時，
+  //   若 e.type 為「其他（XXX）」格式，需拆出補充說明分別填入
+  //   select（設為「其他」）與 other-input，並呼叫 showWorkTypeExample()
+  // ════════════════════════════════════════
+
+  await test('S-SEC-17 editJournal/checkMonthDeadline 正確還原「其他（補充說明）」型別', async () => {
+    const result = await page.evaluate(() => {
+      // 靜態分析：確認兩處 forEach 都有「其他（」的拆解邏輯
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      // 特徵1：以 startsWith('其他（') 或 match(/^其他（/) 判斷
+      const hasOtherDetect =
+        scripts.includes("startsWith('其他（')") ||
+        scripts.includes('startsWith("其他（")') ||
+        scripts.includes("match(/^其他（");
+
+      // 特徵2：拆出補充說明後設回 other-input
+      const hasOtherInput = scripts.includes('other-input') && scripts.includes('otherInputEl');
+
+      // 特徵3：拆解後呼叫 showWorkTypeExample
+      const hasShowExample = (scripts.match(/showWorkTypeExample\(/g) || []).length >= 2;
+
+      // 特徵4：兩處 forEach 都有處理（checkMonthDeadline + editJournal）
+      // 確認 showWorkTypeExample 在 type 判斷區塊內出現至少 2 次
+      const showExampleCount = (scripts.match(/showWorkTypeExample\(/g) || []).length;
+
+      return {
+        hasOtherDetect,
+        hasOtherInput,
+        hasShowExample,
+        showExampleCount,
+      };
+    });
+
+    if (!result.hasOtherDetect)
+      throw new Error('未偵測到「其他（」型別判斷邏輯，editJournal 載入「其他（補充說明）」時 type 會靜默失效');
+    if (!result.hasOtherInput)
+      throw new Error('未偵測到 otherInputEl 補充說明回填邏輯，other-input 欄位不會顯示補充說明');
+    if (!result.hasShowExample || result.showExampleCount < 2)
+      throw new Error(`showWorkTypeExample() 呼叫次數不足（${result.showExampleCount} 次），兩處 forEach 均需呼叫`);
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-18  照片上傳中存檔防呆（2026-06-22）
+  // 對應 AI_CONTEXT.md 2026-06-22 變更：
+  //   saveJournal() 儲存前偵測 .photo-uploading，
+  //   上傳中時阻擋儲存並提示；photos 陣列加 .filter(Boolean)
+  // ════════════════════════════════════════
+
+  await test('S-SEC-18 saveJournal() 照片上傳中存檔防呆邏輯存在', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵1：偵測 .photo-uploading 蓋板
+      const hasUploadingCheck = fnStr.includes('photo-uploading');
+
+      // 特徵2：uploadingCount > 0 時阻擋儲存（設定 photoError）
+      const hasUploadingBlock = fnStr.includes('uploadingCount') && fnStr.includes('photoError');
+
+      // 特徵3：photos 陣列有 .filter(Boolean) 防禦性過濾
+      const hasFilterBoolean = fnStr.includes('filter(Boolean)');
+
+      return { skip: false, hasUploadingCheck, hasUploadingBlock, hasFilterBoolean };
+    });
+
+    if (result.skip) return;
+    if (!result.hasUploadingCheck)
+      throw new Error('saveJournal() 未偵測 .photo-uploading 蓋板，照片上傳中按儲存會存入空白 URL');
+    if (!result.hasUploadingBlock)
+      throw new Error('saveJournal() 未阻擋上傳中的儲存（uploadingCount + photoError 邏輯不存在）');
+    if (!result.hasFilterBoolean)
+      throw new Error('saveJournal() 的 photos 陣列缺少 .filter(Boolean) 防禦性過濾');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-19 ～ S-SEC-20  editJournal() 競爭寫入修正（2026-06-23）
+  // 對應修正：editJournal() 載入舊月記填表後，showPage('s-write') 及
+  //   initWriteForm() 結尾都會非同步重新呼叫 checkMonthDeadline()（無 skipFill），
+  //   背景任務完成後會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容。
+  //   編輯非當前月份的舊月記時幾乎必然發生，不需使用者打字也會被蓋掉。
+  // 修法分兩半：
+  //   ①editJournal() 第一次呼叫改為 initWriteForm(true)，跳過內部背景的
+  //     checkMonthDeadline()；呼叫 showPage('s-write') 前設定 _skipWriteInit
+  //     旗標，讓 showPage 觸發的第二次 initWriteForm() 整個跳過。
+  //   ②showPage() 需檢查並消費 _skipWriteInit 旗標；initWriteForm() 需接受
+  //     skipDeadlineCheck 參數並據此決定要不要呼叫 checkMonthDeadline()。
+  //   只修一半（例如只設旗標但 showPage 沒檢查、或只傳參數但 initWriteForm
+  //   沒接）都無法真正解決問題，所以拆成兩個測試分別檢查。
+  // 以下為靜態分析（檢查原始碼字串），無法重現「編輯舊月記後表單是否被
+  // 背景蓋掉」這個實際 timing 行為本身（需要一筆非當前月份的月記資料才能
+  // 人工驗證），只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-19 editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasSkippedInitCall: /initWriteForm\(\s*true\s*\)/.test(fnStr),
+        hasSkipFlagSet:     /_skipWriteInit\s*=\s*true/.test(fnStr),
+        hasSkipFillTrue:    /checkMonthDeadline\(\s*true\s*\)/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasSkippedInitCall)
+      throw new Error('editJournal() 第一次呼叫 initWriteForm() 沒有傳入 true，內部結尾的背景 checkMonthDeadline() 會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容');
+    if (!result.hasSkipFlagSet)
+      throw new Error('editJournal() 呼叫 showPage(\'s-write\') 前沒有設定 _skipWriteInit 旗標，showPage 觸發的第二次 initWriteForm() 仍會非同步重新填表蓋掉編輯內容');
+    if (!result.hasSkipFillTrue)
+      throw new Error('editJournal() 找不到 checkMonthDeadline(true) 呼叫，截止日狀態可能無法正確更新（這次修正不應動到這一行）');
+  });
+
+  await test('S-SEC-20 showPage()／initWriteForm() 仍支援 _skipWriteInit／skipDeadlineCheck 跳過機制', async () => {
+    const result = await page.evaluate(() => {
+      const showPageStr = (typeof showPage === 'function') ? showPage.toString() : '';
+      const initFormStr = (typeof initWriteForm === 'function') ? initWriteForm.toString() : '';
+      if (!showPageStr && !initFormStr) return { skip: true };
+      return {
+        skip: false,
+        showPageChecksFlag: showPageStr.includes('_skipWriteInit'),
+        showPageResetsFlag: /_skipWriteInit\s*=\s*false/.test(showPageStr),
+        initFormHasParam:   /initWriteForm\s*\(\s*skipDeadlineCheck/.test(initFormStr),
+        initFormUsesParam:  /if\s*\(\s*!skipDeadlineCheck\s*\)/.test(initFormStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.showPageChecksFlag)
+      throw new Error('showPage() 沒有檢查 _skipWriteInit 旗標，editJournal() 設的旗標不會有任何效果，第二次 initWriteForm() 還是會跑');
+    if (!result.showPageResetsFlag)
+      throw new Error('showPage() 沒有把 _skipWriteInit 重設為 false，旗標消費後沒清掉，可能讓下一次正常進入寫作頁也被跳過初始化');
+    if (!result.initFormHasParam)
+      throw new Error('initWriteForm() 找不到 skipDeadlineCheck 參數，editJournal() 傳的 true 沒有地方接收');
+    if (!result.initFormUsesParam)
+      throw new Error('initWriteForm() 沒有依 skipDeadlineCheck 決定是否呼叫 checkMonthDeadline()，背景覆蓋表單的問題仍然存在');
   });
 
   await test('S-15 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
