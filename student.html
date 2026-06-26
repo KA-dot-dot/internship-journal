@@ -1283,7 +1283,7 @@ function renderCommentBadgeHtml(j) {
   if (state === 'unread') return '<span class="journal-unread-badge">● 有新評語</span>';
   if (state === 'updated_unread') return '<span class="journal-updated-badge">● 評語已更新</span>';
   if (state === 'reviewed') return '<span class="journal-reviewed-badge">✅ 已審閱</span>';
-  if (state === 'updated_read') return '<span class="journal-updated-read-badge">🔄 評語已更新</span>';
+  if (state === 'updated_read') return '<span class="journal-updated-read-badge">📖 評語已閱讀</span>';
   return '';
 }
 function hasCommentBadge(j) { return !!getCommentBadgeState(j); }
@@ -1302,7 +1302,7 @@ function renderTeacherStatusDetail(list) {
     unread: '<span class="journal-unread-badge">● 有新評語</span>',
     updated_unread: '<span class="journal-updated-badge">● 評語已更新</span>',
     reviewed: '<span class="journal-reviewed-badge">✅ 已審閱</span>',
-    updated_read: '<span class="journal-updated-read-badge">🔄 評語已更新</span>'
+    updated_read: '<span class="journal-updated-read-badge">📖 評語已閱讀</span>'
   };
   return list.map(j => {
     const label = escapeHtml(semMonthToLabel(j.semester, j.month));
