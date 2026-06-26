@@ -214,11 +214,18 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .thread-input-field { font-size: 16px; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, auto); gap: 10px; margin-bottom: 16px; align-items: stretch; }
-  .stat-card { height: 100%; min-height: 96px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
+  .stats-grid { grid-template-columns: 1fr; grid-template-rows: auto; gap: 10px; margin-bottom: 16px; align-items: stretch; }
+  .stat-card { height: auto !important; min-height: 72px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
   .stat-card .stat-label { font-size: 11px; line-height: 1.3; margin-bottom: 6px; }
   .stat-value { font-size: 22px; }
-  .stat-card-detail { max-height: 160px; overflow-y: auto; }
+  .stat-card-detail { max-height: none; overflow-y: hidden; overflow-x: auto; display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; padding-bottom: 2px; scrollbar-width: none; -ms-overflow-style: none; }
+  .stat-card-detail::-webkit-scrollbar { display: none; }
+  .stat-card-detail .stat-detail-row { flex-shrink: 0; background: var(--bg3); border-radius: 20px; padding: 4px 10px; white-space: nowrap; margin: 0; }
+  .stat-card-detail .stat-detail-row.clickable { padding: 4px 10px; margin: 0; }
+  .stat-card-detail .stat-detail-row .journal-unread-badge,
+  .stat-card-detail .stat-detail-row .journal-reviewed-badge,
+  .stat-card-detail .stat-detail-row .journal-updated-badge,
+  .stat-card-detail .stat-detail-row .journal-updated-read-badge { min-width: auto; margin-right: 4px !important; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   .entry-item { padding: 10px; }
@@ -234,7 +241,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 .stat-card-clickable { cursor: pointer; user-select: none; }
-.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
+.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; overflow-x: hidden; }
 .stat-card-detail.hidden { display: none; }
 .stat-detail-row { display: flex; align-items: center; gap: 8px; border-radius: 6px; transition: background 0.15s; }
 .stat-detail-row.clickable { cursor: pointer; padding: 2px 4px; margin: 0 -4px; }
@@ -1244,32 +1251,10 @@ function semMonthToLabel(semester, month) {
 }
 
 function syncStatCardHeights() {
-  // 只在手機版（≤768px）同步高度，電腦版不動
-  if (window.innerWidth > 768) return;
+  // 手機版改為4列單欄，每張卡片各自 auto 高度，不需要等高對齊。
+  // 電腦版同樣不操作 inline style，讓 CSS grid 自然處理。
   const cards = document.querySelectorAll('#page-s-dashboard .stat-card');
-  cards.forEach(c => c.style.height = '');          // 先清除，讓內容自然撐開
-  requestAnimationFrame(() => {
-    // 有展開 detail 的卡片高度保持 auto，避免內容被截斷；
-    // 沒有展開 detail 的卡片才彼此等高對齊
-    const expandedCards = [];
-    const collapsedCards = [];
-    cards.forEach(c => {
-      const detail = c.querySelector('.stat-card-detail');
-      if (detail && !detail.classList.contains('hidden')) {
-        expandedCards.push(c);
-      } else {
-        collapsedCards.push(c);
-      }
-    });
-    // 展開的卡片高度 auto（不限制，讓內容完整顯示）
-    expandedCards.forEach(c => { c.style.height = 'auto'; });
-    // 沒展開的卡片彼此等高（對齊這組裡面最高的那張）
-    if (collapsedCards.length > 1) {
-      let max = 0;
-      collapsedCards.forEach(c => { max = Math.max(max, c.offsetHeight); });
-      collapsedCards.forEach(c => { c.style.height = max + 'px'; });
-    }
-  });
+  cards.forEach(c => { c.style.height = ''; });
 }
 
 function toggleStatDetail(key) {
