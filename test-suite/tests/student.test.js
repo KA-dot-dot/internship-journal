@@ -1,7 +1,14 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v9
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-23）
+ * 學生端自動化測試 v10
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
+ *
+ * v10 修正（2026-06-26）：
+ *   S-SEC-08  badge 渲染邏輯已抽成共用函式 getCommentBadgeState() /
+ *             renderCommentBadgeHtml()，不再直接出現在
+ *             renderJournalCardSelectable 本體，改為：
+ *             ① 確認共用函式本身含 teacherComment / teacherCommentUnread
+ *             ② 確認 renderJournalCardSelectable 有呼叫 renderCommentBadgeHtml()
  *
  * v9 新增（2026-06-23）：
  *   S-SEC-19  editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標
@@ -676,10 +683,24 @@ async function runStudentTests(page, browserContext, log) {
     const result = await page.evaluate(() => {
       if (typeof renderJournalCardSelectable !== 'function')
         return 'renderJournalCardSelectable 函式不可存取';
-      const src = renderJournalCardSelectable.toString();
-      if (!src.includes('teacherReviewed'))      return '缺少 teacherReviewed 渲染邏輯';
-      if (!src.includes('teacherComment'))       return '缺少 teacherComment 渲染邏輯';
-      if (!src.includes('teacherCommentUnread')) return '缺少 teacherCommentUnread 紅點渲染邏輯';
+      const cardSrc = renderJournalCardSelectable.toString();
+      if (!cardSrc.includes('teacherReviewed')) return '缺少 teacherReviewed 渲染邏輯';
+
+      // teacherComment / teacherCommentUnread 的徽章渲染邏輯已抽成共用函式
+      // getCommentBadgeState()/renderCommentBadgeHtml()/hasCommentBadge()，
+      // 不會逐字出現在 renderJournalCardSelectable 本體裡，改檢查這些共用函式本身。
+      if (typeof renderCommentBadgeHtml !== 'function')
+        return 'renderCommentBadgeHtml 函式不可存取';
+      if (typeof getCommentBadgeState !== 'function')
+        return 'getCommentBadgeState 函式不可存取';
+
+      const badgeSrc = renderCommentBadgeHtml.toString() + getCommentBadgeState.toString();
+      if (!badgeSrc.includes('teacherComment'))       return '缺少 teacherComment 渲染邏輯';
+      if (!badgeSrc.includes('teacherCommentUnread')) return '缺少 teacherCommentUnread 紅點渲染邏輯';
+
+      // 確認 renderJournalCardSelectable 真的有接到共用的徽章渲染函式（沒有漏接）
+      if (!cardSrc.includes('renderCommentBadgeHtml'))
+        return 'renderJournalCardSelectable 未呼叫 renderCommentBadgeHtml()';
       return 'ok';
     });
     if (result !== 'ok') throw new Error(result);
