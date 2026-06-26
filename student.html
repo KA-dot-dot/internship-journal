@@ -1249,9 +1249,26 @@ function syncStatCardHeights() {
   const cards = document.querySelectorAll('#page-s-dashboard .stat-card');
   cards.forEach(c => c.style.height = '');          // 先清除，讓內容自然撐開
   requestAnimationFrame(() => {
-    let max = 0;
-    cards.forEach(c => { max = Math.max(max, c.offsetHeight); });
-    cards.forEach(c => { c.style.height = max + 'px'; });
+    // 有展開 detail 的卡片高度保持 auto，避免內容被截斷；
+    // 沒有展開 detail 的卡片才彼此等高對齊
+    const expandedCards = [];
+    const collapsedCards = [];
+    cards.forEach(c => {
+      const detail = c.querySelector('.stat-card-detail');
+      if (detail && !detail.classList.contains('hidden')) {
+        expandedCards.push(c);
+      } else {
+        collapsedCards.push(c);
+      }
+    });
+    // 展開的卡片高度 auto（不限制，讓內容完整顯示）
+    expandedCards.forEach(c => { c.style.height = 'auto'; });
+    // 沒展開的卡片彼此等高（對齊這組裡面最高的那張）
+    if (collapsedCards.length > 1) {
+      let max = 0;
+      collapsedCards.forEach(c => { max = Math.max(max, c.offsetHeight); });
+      collapsedCards.forEach(c => { c.style.height = max + 'px'; });
+    }
   });
 }
 
