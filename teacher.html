@@ -534,6 +534,8 @@ tr:last-child td { border-bottom: none; }
 .thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 .badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+.badge-comment-updated  { background:rgba(249,115,22,0.12);color:#f97316;border:1px solid rgba(249,115,22,0.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
+.badge-reviewed-updated { background:rgba(59,130,246,0.12);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
 /* ===== 老師端批次刪除 ===== */
 #t-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
@@ -3743,7 +3745,6 @@ async function exportAllStatsExcel() {
     月份: `${j.month}月`,
     繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
     最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
-    老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
 
@@ -3754,7 +3755,7 @@ async function exportAllStatsExcel() {
   const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
-  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
+  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
 
@@ -4685,6 +4686,24 @@ function resolveImgSrc(src) {
   return 'data:image/jpeg;base64,' + src;
 }
 
+// ── 評語狀態 badge 共用判斷（紅/橘/綠/藍 4 種狀態，與 student.html 對稱維護）──
+// 'unread'：有新評語（第一次，未讀）；'updated_unread'：評語已更新（再次留言，未讀）
+// 'reviewed'：已審閱（無評語或評語已讀完且非更新）；'updated_read'：評語已更新（已讀完）
+function getCommentBadgeState(j) {
+  const hasUnreadComment = !!(j.teacherCommentUnread && j.teacherComment);
+  if (hasUnreadComment) return j.teacherCommentUpdated ? 'updated_unread' : 'unread';
+  if (j.teacherReviewed) return j.teacherCommentUpdated ? 'updated_read' : 'reviewed';
+  return null;
+}
+function renderCommentBadgeHtml(j) {
+  const state = getCommentBadgeState(j);
+  if (state === 'unread') return '<span class="badge-comment">● 有新評語</span>';
+  if (state === 'updated_unread') return '<span class="badge-comment-updated">● 評語已更新</span>';
+  if (state === 'reviewed') return '<span class="badge-reviewed">✅ 已審閱</span>';
+  if (state === 'updated_read') return '<span class="badge-reviewed-updated">🔄 評語已更新</span>';
+  return '';
+}
+
 function renderJournalCard(j, isTeacher) {
   if (isTeacher && j.isDeletedStudent) {
     const safeMonth = safeNumber(j.month);
@@ -4725,10 +4744,7 @@ function renderJournalCard(j, isTeacher) {
   }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
-  const isReviewed = !!(j.teacherReviewed);
-  const reviewedBadge = hasComment
-    ? `<span class="badge-comment">● 有新評語</span>`
-    : (isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '');
+  const reviewedBadge = renderCommentBadgeHtml(j);
   const commentBtn = isTeacher ? (
     hasComment
       ? `<button class="btn-circ gray-circ" title="編輯評語" onclick="openCommentModal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
@@ -5042,24 +5058,6 @@ function pdfJournalBlock(j, idx) {
     },
     margin: [0, 0, 0, 7]
   });
-  if (j.teacherReviewed || j.teacherComment) {
-    content.push({
-      table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
-        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
-      ] }]] },
-      layout: {
-        fillColor: () => '#f0fdf4',
-        hLineColor: () => '#86efac',
-        vLineColor: () => '#86efac',
-        paddingLeft: () => 8,
-        paddingRight: () => 8,
-        paddingTop: () => 7,
-        paddingBottom: () => 7
-      },
-      margin: [0, 0, 0, 8]
-    });
-  }
   return content;
 }
 
@@ -5167,6 +5165,11 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   const { doc, getDoc } = firebase_funcs;
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
+    // 記住「儲存前的舊評語」，saveTeacherComment() 用來判斷這次是否為再次留言
+    // 加上身分核對，避免快速切換不同月記時，較慢的舊請求覆蓋到新請求的 _currentCommentJournal
+    if (_currentCommentJournal && _currentCommentJournal.seatNo === seatNo && _currentCommentJournal.semester === semester && _currentCommentJournal.month === month) {
+      _currentCommentJournal.oldComment = data.teacherComment || '';
+    }
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
@@ -5183,6 +5186,10 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
     }
     openModal('comment-modal');
   }).catch(() => {
+    // 讀取失敗：保守視為「沒有舊評語」，避免誤判成再次留言
+    if (_currentCommentJournal && _currentCommentJournal.seatNo === seatNo && _currentCommentJournal.semester === semester && _currentCommentJournal.month === month) {
+      _currentCommentJournal.oldComment = '';
+    }
     document.getElementById('comment-modal-textarea').value = '';
     const replyBlock = document.getElementById('comment-modal-student-reply');
     if (replyBlock) replyBlock.style.display = 'none';
@@ -5192,9 +5199,12 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
 
 async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
-  const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
+  const { seatNo, semester, month, ownerUid, oldComment } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
   // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
+  // 再次留言判斷：舊評語非空 且 這次存的新評語也非空，才算「更新」；
+  // 清空評語（從有變沒有）一律視為單純審閱，不標記為更新
+  const isCommentUpdate = !!(oldComment && comment.length > 0);
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
@@ -5202,6 +5212,8 @@ async function saveTeacherComment() {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
       teacherCommentUnread: comment.length > 0,
+      // 是否為「再次留言」（學生看完後會顯示「評語已更新」而非單純「已審閱」）
+      teacherCommentUpdated: isCommentUpdate,
       // 老師儲存評語時，同步清除學生回覆的未讀旗標
       studentReplyUnread: false
     });
