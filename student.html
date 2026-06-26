@@ -3630,8 +3630,10 @@ function renderStudentReplyArea(j) {
   const seatNo = escapeHtml(j.seatNo || '');
   const sem    = escapeHtml(j.semester || '');
   const month  = Number(j.month) || 0;
-  // 鎖定條件：有回覆且老師尚未讀取（studentReplyUnread === true）
-  const locked = !!(j.studentReply && j.studentReplyUnread);
+  // 2026-06-26 更新：移除「老師讀取前鎖定」限制——只要老師還沒讀取（studentReplyUnread===true），
+  // 學生一樣可以繼續編輯／重新送出回覆內容；老師讀取後（studentReplyUnread===false）也能再送出新的回覆。
+  // hasUnreadReply 只用來決定顯示文字（⏳/✅、按鈕文字），不再用來隱藏輸入框。
+  const hasUnreadReply = !!(j.studentReply && j.studentReplyUnread);
   const replyText = j.studentReply || '';
   const charCount = replyText.length;
 
@@ -3657,19 +3659,15 @@ function renderStudentReplyArea(j) {
     ? `<div class="thread-bubble">
         <div class="thread-bubble-label label-me">我${replyTimeStr ? `<span class="thread-bubble-time">${escapeHtml(replyTimeStr)}</span>` : ''}</div>
         <div class="thread-bubble-body">${escapeHtml(replyText)}</div>
-        ${locked
-          ? '<div class="thread-waiting">⏳ 等待老師閱讀</div>'
+        ${hasUnreadReply
+          ? '<div class="thread-waiting">⏳ 等待老師閱讀（仍可修改）</div>'
           : '<div class="thread-read-confirm">✅ 老師已閱讀</div>'}
       </div>`
     : '';
 
-  // 輸入區（textarea 可換行，50字上限）
-  let inputSection = '';
-  if (locked) {
-    inputSection = `<div class="thread-locked-hint">老師讀取後即可再次回覆</div>`;
-  } else {
-    inputSection = `<div class="thread-input-row">
-      <div class="thread-input-label">我的回覆</div>
+  // 輸入區（textarea 可換行，50字上限）—— 不論老師是否已讀取，一律可編輯／重新送出
+  const inputSection = `<div class="thread-input-row">
+      <div class="thread-input-label">${hasUnreadReply ? '修改我的回覆' : '我的回覆'}</div>
       <textarea class="thread-input-field" maxlength="50"
         placeholder="回覆老師評語（最多 50 字）…"
         id="reply-ta-${seatNo}-${sem}-${month}"
@@ -3677,10 +3675,9 @@ function renderStudentReplyArea(j) {
         rows="2">${escapeHtml(replyText)}</textarea>
       <div class="thread-input-bottom">
         <span class="thread-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
-        <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">送出</button>
+        <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">${hasUnreadReply ? '更新回覆' : '送出'}</button>
       </div>
     </div>`;
-  }
 
   return `<div class="journal-thread">
     <div class="journal-thread-title">評語與回覆</div>
