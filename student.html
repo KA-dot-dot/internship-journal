@@ -3163,6 +3163,25 @@ async function loadStudentHistory() {
       ? journals.map(j => renderJournalCardSelectable(j)).join('')
       : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
     updateHistoryBatchBar();
+    // ── 自動標記已讀：學生進入歷史月記頁面即視為已讀取老師評語 ──
+    // 只要 teacherCommentUnread=true（且確實有評語文字），一律於背景靜默清除，
+    // 同時立即更新 DOM badge，讓狀態1(🔴)→🟢，狀態2(🟠)→🔵，
+    // 再等所有 Firestore 寫入完成後刷新首頁審閱紀錄。
+    const _unreadOnView = journals.filter(j => j.teacherCommentUnread && j.teacherComment);
+    if (_unreadOnView.length > 0) {
+      const { doc: _doc, updateDoc: _upd } = firebase_funcs;
+      const _updatePs = _unreadOnView.map(j => {
+        const _sm = safeNumber(j.month);
+        j.teacherCommentUnread = false;
+        const _card = document.getElementById(`jcard-${j.semester||''}-${_sm}`);
+        if (_card) {
+          const _ob = _card.querySelector('.journal-unread-badge, .journal-updated-badge');
+          if (_ob) _ob.outerHTML = renderCommentBadgeHtml(j);
+        }
+        return _upd(_doc(db, 'users', currentUser.uid, 'journals', `${j.seatNo}-${j.semester}-${_sm}`), { teacherCommentUnread: false }).catch(() => {});
+      });
+      Promise.all(_updatePs).then(() => loadStudentDashboard()).catch(() => {});
+    }
     // 從首頁點擊跳轉：捲動到目標卡片並短暫高亮
     if (window._pendingScrollToJournal) {
       const { sem, month } = window._pendingScrollToJournal;
