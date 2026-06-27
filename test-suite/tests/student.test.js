@@ -3,6 +3,14 @@
  * 學生端自動化測試 v10
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
  *
+ * v12 新增（2026-06-27 第二次）：
+ *   S-RULES-09  journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）
+ *   S-RULES-10  journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）
+ *               對應 rule.txt 同日第二次補修：create/update 第一分支補上 seatNo 驗證／鎖定，
+ *               防止偽造 seatNo 把月記算到別的座號名下（污染老師端繳交/審閱/薪資統計）。
+ *               同時 _makeJournalDoc() 加入第三個參數 seatNo（改用 _getTestSeatNo() 動態讀取
+ *               studentBindings 真實值），所有既有呼叫點同步更新，否則會被新規則誤擋。
+ *
  * v11 新增（2026-06-27）：
  *   S-RULES-06  journals UPDATE 安全性：一般編輯路徑（第一分支）夾帶超長 studentReply
  *               ＋偽造 studentReplyUnread:false 應被拒（403）
@@ -368,20 +376,42 @@ async function runStudentTests(page, browserContext, log) {
               headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
               body: body ? JSON.stringify(body) : undefined,
             });
-            return { status: res.status };
+            // 2026-06-27 補修：額外回傳解析後的 body（既有呼叫只取 .status，不受影響；
+            // 新增的 _getTestSeatNo() 需要讀取 GET 回應內容）
+            let json = null;
+            try { json = await res.json(); } catch (_) {}
+            return { status: res.status, body: json };
           } catch (e) { return { status: -1, err: e.message }; }
         },
         { method, url, body, token: _fsToken }
       );
     };
 
-    const _makeJournalDoc = (uid, email) => ({
+    // 2026-06-27 新增：rule.txt create 規則補上 seatNo 必須等於 studentBindings 紀錄座號的驗證，
+    // 所有合成測試文件都要帶正確的 seatNo，否則會被新規則正確擋下（而不是被測項本來想驗證的原因擋下）。
+    // 直接讀 studentBindings/{emailKey} 真實值，不寫死任何座號，跟正式 saveJournal() 取值方式一致。
+    let _fsSeatNo = null;
+    const _getTestSeatNo = async () => {
+      if (_fsSeatNo) return _fsSeatNo;
+      await _captureFsCtx();
+      const emailKey = _fsUser.email.replace(/[@.]/g, '_');
+      const r = await _fsRequest('GET', '/studentBindings/' + emailKey);
+      const seatNo = r.body?.fields?.seatNo?.stringValue;
+      if (r.status !== 200 || !seatNo) {
+        throw new Error('[Rules測試前置失敗] 無法取得測試學生座號（studentBindings/' + emailKey + ' 讀取失敗或缺少 seatNo 欄位）');
+      }
+      _fsSeatNo = seatNo;
+      return _fsSeatNo;
+    };
+
+    const _makeJournalDoc = (uid, email, seatNo) => ({
       fields: {
         ownerUid:             { stringValue: uid },
         ownerEmail:           { stringValue: email },
         storagePath:          { stringValue: 'user' },
         semester:             { stringValue: 'test' },
         month:                { integerValue: 0 },
+        seatNo:               { stringValue: seatNo },
         teacherComment:       { nullValue: null },
         teacherReviewed:      { booleanValue: false },
         reviewedAt:           { nullValue: null },
@@ -392,9 +422,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-WRITE-REAL Firestore CREATE 規則驗證（學生身份 REST 直接寫入）', async () => {
       requireStudentSession();
       await _captureFsCtx(); // 失敗會 throw，不再靜默通過
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-create-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (r.status === 200) {
         await _fsRequest('DELETE', path + '/' + docId);
       }
@@ -429,9 +460,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-02 journals UPDATE 正常路徑（學生修改已有月記）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-update-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email);
+      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo);
       const cr = await _fsRequest('POST', path + '?documentId=' + docId, doc);
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），可能是 rule 問題導致無法建立測試文件，請先確認 S-WRITE-REAL');
@@ -450,6 +482,7 @@ async function runStudentTests(page, browserContext, log) {
       await _captureFsCtx();
       const docId = 'test-fake-teacher-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
+      const seatNo = await _getTestSeatNo();
       const fakeDoc = {
         fields: {
           ownerUid:        { stringValue: _fsUser.uid },
@@ -457,6 +490,7 @@ async function runStudentTests(page, browserContext, log) {
           storagePath:     { stringValue: 'user' },
           semester:        { stringValue: 'test' },
           month:           { integerValue: 0 },
+          seatNo:          { stringValue: seatNo },
           teacherComment:  { stringValue: 'FAKE TEACHER REVIEW' },
           teacherReviewed: { booleanValue: false },
           reviewedAt:      { nullValue: null },
@@ -480,14 +514,15 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-04 journals UPDATE 安全性：teacherReviewed 偽造應被拒（403）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-fake-review-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
         fields: {
-          ..._makeJournalDoc(_fsUser.uid, _fsUser.email).fields,
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo).fields,
           teacherReviewed: { booleanValue: true },
         }
       };
@@ -503,9 +538,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-05 journals DELETE 權限（學生可刪除自己的月記）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-delete-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const dr = await _fsRequest('DELETE', path + '/' + docId);
@@ -524,9 +560,10 @@ async function runStudentTests(page, browserContext, log) {
       // 修正後第一分支要求這三個欄位必須維持原值不變，此測試驗證繞過已被擋下。
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-reply-lock-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
@@ -557,9 +594,10 @@ async function runStudentTests(page, browserContext, log) {
       // 學生可送出內容為空字串的回覆。修正後加入 size()>=1，此測試驗證空字串回覆會被擋下。
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-reply-empty-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const replyUpdate = {
@@ -584,9 +622,10 @@ async function runStudentTests(page, browserContext, log) {
       // 修正後加入型別檢查（必須為 null 或字串），此測試驗證塞入數字會被擋下。
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-reply-badtype-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const replyUpdate = {
@@ -604,6 +643,51 @@ async function runStudentTests(page, browserContext, log) {
       );
       if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (ur.status !== 403) throw new Error('journals UPDATE studentReplyAt 型別測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則沒有驗證 seatNo，學生可在自己的 uid 路徑下建立月記，
+      // 但把 seatNo 欄位填成別的座號——老師端 collectionGroup('journals') 查詢直接信任這個欄位
+      // 來歸戶統計（本月已繳/已審閱/薪資統計皆是），會把這份月記誤算到別的座號名下。
+      // 修正後 create 規則要求 seatNo 必須等於 studentBindings 記錄的真實座號，此測試驗證偽造會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const forgedSeatNo = seatNo + '_FORGED';
+      const docId = 'test-seatno-forge-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, forgedSeatNo));
+      if (r.status === 200) {
+        await _fsRequest('DELETE', path + '/' + docId);
+        throw new Error('journals CREATE 安全漏洞：偽造 seatNo 未被拒絕（HTTP 200）！');
+      }
+      if (r.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (r.status !== 403) throw new Error('journals CREATE 偽造 seatNo 測試回應異常（HTTP ' + r.status + '，預期 403）');
+    });
+
+    await test('S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：第一分支（一般編輯）原本沒有鎖住 seatNo，建立時驗證過一次之後，
+      // 編輯時仍可被偽造改成別的座號。修正後第一分支要求 seatNo 必須維持原值不變，此測試驗證繞過已被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-seatno-change-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const fakeUpdate = {
+        fields: {
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo + '_CHANGED').fields,
+        }
+      };
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeUpdate);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：一般編輯路徑偽造變更 seatNo 未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 偽造 seatNo 測試回應異常（HTTP ' + ur.status + '，預期 403）');
     });
 
     await test('S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）', async () => {
@@ -650,6 +734,8 @@ async function runStudentTests(page, browserContext, log) {
       'S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）',
       'S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）',
       'S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）',
+      'S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）',
+      'S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）',
       'S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）',
     ];
     skipped.forEach(name => {
