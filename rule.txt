@@ -95,6 +95,10 @@ service cloud.firestore {
             && request.resource.data.get('teacherReviewed', false) == false
             && request.resource.data.get('reviewedAt', null) == null
             && request.resource.data.get('teacherCommentUnread', false) == false
+            && request.resource.data.get('teacherCommentUpdated', false) == false
+            // 學生不得在建立時寫入回覆欄位
+            && request.resource.data.get('studentReply', null) == null
+            && request.resource.data.get('studentReplyUnread', false) == false
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -107,6 +111,12 @@ service cloud.firestore {
             && request.resource.data.get('teacherReviewed', false) == false
             && request.resource.data.get('reviewedAt', null) == null
             && request.resource.data.get('teacherCommentUnread', false) == false
+            && request.resource.data.get('teacherCommentUpdated', false) == false
+            // 2026-06-27 補修：一般內容編輯不可夾帶變更回覆欄位
+            // （防止繞過下方第三分支的50字限制／偽造studentReplyUnread已讀狀態）
+            && request.resource.data.get('studentReply', null) == resource.data.get('studentReply', null)
+            && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
+            && request.resource.data.get('studentReplyAt', null) == resource.data.get('studentReplyAt', null)
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()
@@ -114,6 +124,22 @@ service cloud.firestore {
             && resource.data.ownerUid == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherCommentUnread'])
             && request.resource.data.teacherCommentUnread == false
+          ) || (
+            // 學生回覆評語（允許 studentReply + studentReplyUnread + studentReplyAt 三個欄位）
+            // 2026-06-26 更新：拿掉「舊回覆必須已被老師讀過才能再送出」的限制，
+            // 改為只要老師還沒讀取（studentReplyUnread 仍是 true），學生也能持續編輯／覆蓋同一則回覆，
+            // 直到老師實際讀取（saveTeacherComment 寫回 studentReplyUnread:false）為止才會換成「新一則」回覆。
+            schoolUser()
+            && request.auth.uid == userId
+            && resource.data.ownerUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentReply', 'studentReplyUnread', 'studentReplyAt'])
+            && request.resource.data.studentReply is string
+            // 2026-06-27 補修：禁止空字串回覆（原規則 size()<=50 沒有下限，size()==0 也會通過）
+            && request.resource.data.studentReply.size() >= 1
+            && request.resource.data.studentReply.size() <= 50
+            && request.resource.data.studentReplyUnread == true
+            // 2026-06-27 補修：studentReplyAt 型別驗證（只允許 null 或字串，避免寫入任意型別的值）
+            && (request.resource.data.get('studentReplyAt', null) == null || request.resource.data.studentReplyAt is string)
           ) || isAdmin();
         allow delete: if (
             schoolUser()
