@@ -534,8 +534,6 @@ tr:last-child td { border-bottom: none; }
 .thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 .badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
-.badge-comment-updated  { background:rgba(249,115,22,0.12);color:#f97316;border:1px solid rgba(249,115,22,0.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
-.badge-reviewed-updated { background:rgba(59,130,246,0.12);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
 /* ===== 老師端批次刪除 ===== */
 #t-batch-toolbar { display:none; align-items:center; gap:10px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
@@ -798,6 +796,7 @@ tr:last-child td { border-bottom: none; }
               <div style="font-size:13px;font-weight:700;color:var(--accent-red)">📋 本月未繳名單</div>
               <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
             </div>
+            <div id="stat-missing-warn-bars" style="margin-bottom:8px"></div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
@@ -1028,6 +1027,7 @@ tr:last-child td { border-bottom: none; }
               <button class="stats-tab active" id="stats-tab-submit" onclick="switchStatsTab('submit')">✅ 繳交狀況</button>
               <button class="stats-tab" id="stats-tab-location" onclick="switchStatsTab('location')">📍 地點統計</button>
               <button class="stats-tab" id="stats-tab-salary" onclick="switchStatsTab('salary')">💰 薪資統計</button>
+              <button class="stats-tab" id="stats-tab-worktype" onclick="switchStatsTab('worktype')">🗂️ 工作類型</button>
             </div>
             <div id="stats-panel-submit"><div class="card"><div id="submit-stats-content"><div class="empty-state"><div class="icon">📊</div><p>請輸入日期區間後按查詢</p></div></div></div></div>
             <div id="stats-panel-location" class="hidden">
@@ -1147,6 +1147,22 @@ tr:last-child td { border-bottom: none; }
                 </div>
               </div>
             </div>
+
+            <div id="stats-panel-worktype" class="hidden">
+              <div class="card" style="margin-bottom:16px">
+                <div style="font-size:15px;font-weight:700;margin-bottom:4px">🗂️ 工作類型分佈</div>
+                <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各類工作在篩選期間內的記錄次數（「其他（補充說明）」統一歸入「其他」）；點擊橫條查看做過該類工作的學生名單</div>
+                <div id="worktype-summary" style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:6px">查詢後顯示</div>
+                <div id="worktype-chart" class="chart-bar-wrap"><div class="empty-state"><div class="icon">🗂️</div><p>查詢後顯示</p></div></div>
+              </div>
+              <div id="worktype-detail-panel" style="display:none">
+                <div class="card">
+                  <div style="font-size:14px;font-weight:700;margin-bottom:10px" id="worktype-detail-title">做過這類工作的學生</div>
+                  <div id="worktype-detail-names" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -2393,8 +2409,25 @@ async function loadTeacherDashboard() {
     const sno = d.data().seatNo || d.id.slice(semPrefix.length);
     return !submittedSeats.has(sno);
   });
+  // 計算每位未繳學生本學期累計缺繳月數（含本月）
+  const semMonths = getSemesterMonths(sem);
+  const thisMonthIdx = semMonths.indexOf(thisMonth);
+  // 本學期到目前為止（含本月）已有 journal 的月份，依座號建 Map
+  const semJournalsBySeq = {};
+  userJournalData(jSnap).filter(j => j.semester === sem).forEach(j => {
+    if (!semJournalsBySeq[j.seatNo]) semJournalsBySeq[j.seatNo] = new Set();
+    semJournalsBySeq[j.seatNo].add(j.month);
+  });
+  const monthsToCheck = thisMonthIdx >= 0 ? semMonths.slice(0, thisMonthIdx + 1) : [thisMonth];
+  window._missingWithCount = missingStudents.map(d => {
+    const sno = d.data().seatNo || d.id.slice(semPrefix.length);
+    const name = d.data().name || sno;
+    const submitted = semJournalsBySeq[sno] || new Set();
+    const missCount = monthsToCheck.filter(m => !submitted.has(m)).length;
+    return { label: `${sno} ${name}`, sno, name, missCount };
+  });
   window._statLists = {
-    missing:    missingStudents.map(d => { const sno = d.data().seatNo || d.id.slice(semPrefix.length); return `${sno} ${d.data().name || sno}`; }),
+    missing:    window._missingWithCount.map(s => s.label),
     submitted:  activeJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
@@ -2488,7 +2521,13 @@ async function copyMissingList() {
   const deadlineLine = deadlineStr
     ? `請於 ${deadlineStr} 前完成：`
     : '請盡快完成：';
-  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
+  const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
+  const lines = data.map(s => {
+    if (s.missCount >= 3) return `${s.label}　🔴 本學期已缺${s.missCount}月`;
+    if (s.missCount === 2) return `${s.label}　⚠ 本學期已缺2月`;
+    return s.label;
+  });
+  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
   const btn = document.getElementById('copy-missing-btn');
   navigator.clipboard.writeText(text).then(() => {
     if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
@@ -2543,6 +2582,29 @@ function toggleStatList(key) {
       const list = (window._statLists || {})[key] || [];
       if (list.length === 0) {
         namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+        const warnEl = document.getElementById('stat-missing-warn-bars');
+        if (key === 'missing' && warnEl) warnEl.innerHTML = '';
+      } else if (key === 'missing') {
+        // 未繳名單：用 _missingWithCount 渲染，有徽章的帶缺繳月數
+        const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
+        const high = data.filter(s => s.missCount >= 3).length;
+        const mid  = data.filter(s => s.missCount === 2).length;
+        const warnEl = document.getElementById('stat-missing-warn-bars');
+        if (warnEl) {
+          let bars = '';
+          if (high > 0) bars += `<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--accent-red);margin-bottom:4px">🔴 ${high} 位學生本學期已缺繳 3 個月以上，建議優先聯繫</div>`;
+          if (mid  > 0) bars += `<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--accent-yellow);margin-bottom:4px">🟠 ${mid} 位學生本學期已缺繳 2 個月</div>`;
+          warnEl.innerHTML = bars;
+        }
+        namesEl.innerHTML = data.map(s => {
+          let badge = '';
+          if (s.missCount >= 3) {
+            badge = `<span style="background:rgba(239,68,68,0.15);color:var(--accent-red);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺${s.missCount}月</span>`;
+          } else if (s.missCount === 2) {
+            badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2月</span>`;
+          }
+          return `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
+        }).join('');
       } else {
         namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
       }
@@ -3483,14 +3545,14 @@ function statusSymbolForJournal(j, deadlineMap) {
 }
 
 function switchStatsTab(tab) {
-  ['submit','location','salary'].forEach(t => {
+  ['submit','location','salary','worktype'].forEach(t => {
     document.getElementById(`stats-tab-${t}`).classList.toggle('active', t===tab);
     document.getElementById(`stats-panel-${t}`).classList.toggle('hidden', t!==tab);
   });
 }
 
 async function loadAllStats() {
-  await Promise.all([loadSubmitStats(), loadLocationStats(), loadSalaryStats()]);
+  await Promise.all([loadSubmitStats(), loadLocationStats(), loadSalaryStats(), loadWorkTypeStats()]);
 }
 
 let _statsCompanyLoading = false;
@@ -3745,6 +3807,7 @@ async function exportAllStatsExcel() {
     月份: `${j.month}月`,
     繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
     最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
+    老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
 
@@ -3755,7 +3818,7 @@ async function exportAllStatsExcel() {
   const stuSalaryWs = XLSX.utils.json_to_sheet(stuSalaryRows.length ? stuSalaryRows : [{ 座號:'', 姓名:'', 公司:'', 月數:'', '平均薪資(元)':'' }]);
   const companyWs2 = XLSX.utils.json_to_sheet(companyRows2.length ? companyRows2 : [{ 公司名稱:'', 學生數:'', '平均薪資(元)':'' }]);
   const salaryWs = XLSX.utils.json_to_sheet(salaryRows.length ? salaryRows : [{ 座號:'', 姓名:'', 公司:'', 月份:'', '薪資(元)':'', '師傅/學長姐':'' }]);
-  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 已審閱:'' }]);
+  const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
 
@@ -4143,6 +4206,118 @@ function renderSalaryStatsFromCache(cache) {
   renderSalaryBarChart(journals, stuCompanyMap);
   switchSalaryDetailTab('student');
 }
+
+// 工作類型統計
+async function loadWorkTypeStats() {
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
+  const { start, end } = getStatsDateRange('worktype-stats');
+  showLoading();
+  try {
+    const [snap, stuSnap] = await Promise.all([
+      getDocs(collectionGroup(db, 'journals')),
+      getDocs(collection(db, 'students'))
+    ]);
+    const studentMap = {};
+    stuSnap.docs.forEach(d => {
+      const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+      studentMap[sno] = d.data();
+    });
+    let journals = userJournalData(snap).map(j => ({
+      ...j,
+      studentName: j.studentName || studentMap[j.seatNo]?.name || '',
+      company: j.company || studentMap[j.seatNo]?.company || ''
+    }));
+    if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
+    const selectedCompanies = getSelectedCompanies();
+    renderWorkTypeStats(journals, selectedCompanies);
+  } catch(e) {
+    toast('工作類型統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function normalizeWorkType(rawType) {
+  const t = (rawType || '').trim();
+  // 「其他（補充說明）」格式 → 統一歸「其他」
+  if (/^其他（.*）$/.test(t)) return '其他';
+  return t || '未填寫';
+}
+
+function renderWorkTypeStats(journals, selectedCompanies) {
+  const chartEl   = document.getElementById('worktype-chart');
+  const summaryEl = document.getElementById('worktype-summary');
+  const detailPanel = document.getElementById('worktype-detail-panel');
+  if (!chartEl) return;
+  if (detailPanel) detailPanel.style.display = 'none';
+
+  // 統計：typeMap[typeName] = { count(人次), students: Set(seatNo), studentList: [{seatNo,name}] }
+  const typeMap = {};
+  journals.forEach(j => {
+    if (!isCompanySelected(j.company, selectedCompanies)) return;
+    (j.entries || []).forEach(e => {
+      const type = normalizeWorkType(e.type);
+      if (!typeMap[type]) typeMap[type] = { count: 0, students: new Set(), studentList: [] };
+      typeMap[type].count++;
+      if (!typeMap[type].students.has(j.seatNo)) {
+        typeMap[type].students.add(j.seatNo);
+        typeMap[type].studentList.push({ seatNo: j.seatNo, name: j.studentName || j.seatNo });
+      }
+    });
+  });
+
+  const sorted = Object.entries(typeMap).sort((a, b) => b[1].count - a[1].count);
+  const totalCount = sorted.reduce((s, x) => s + x[1].count, 0);
+  // 儲存供 toggleWorktypeDetail 使用
+  window._worktypeMap = typeMap;
+
+  if (summaryEl) summaryEl.textContent = sorted.length
+    ? `共 ${totalCount} 筆工作記錄，${sorted.length} 種類型；點擊橫條查看學生名單`
+    : '篩選範圍內無工作記錄';
+
+  const WORKTYPE_COLORS = ['#378ADD','#1D9E75','#BA7517','#D4537E','#7F77DD','#888780','#D85A30','#639922','#E24B4A','#0F6E56'];
+
+  if (!sorted.length) {
+    chartEl.innerHTML = '<div class="empty-state"><div class="icon">🗂️</div><p>篩選範圍內無資料</p></div>';
+    return;
+  }
+  chartEl.innerHTML = sorted.map(([type, d], i) => {
+    const pct  = totalCount ? Math.round(d.count / totalCount * 100) : 0;
+    const color = WORKTYPE_COLORS[i % WORKTYPE_COLORS.length];
+    const safeType = escapeHtml(type);
+    return `<div class="chart-bar-item" onclick="toggleWorktypeDetail(${jsArg(type)})" style="cursor:pointer;padding:4px 0" title="點擊查看${safeType}的學生名單">
+      <div class="chart-bar-label" style="width:88px;font-size:12px">${safeType}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="chart-bar-pct">${pct}%</div>
+      <div style="font-size:11px;color:var(--text2);white-space:nowrap;min-width:72px;text-align:right">${d.count}次・${d.students.size}人</div>
+    </div>`;
+  }).join('');
+}
+
+window.toggleWorktypeDetail = function(typeName) {
+  const panel  = document.getElementById('worktype-detail-panel');
+  const title  = document.getElementById('worktype-detail-title');
+  const names  = document.getElementById('worktype-detail-names');
+  const typeMap = window._worktypeMap || {};
+  if (!panel || !typeMap[typeName]) return;
+  // 點同一個再按一次就收起
+  if (panel.style.display !== 'none' && panel.dataset.openType === typeName) {
+    panel.style.display = 'none';
+    panel.dataset.openType = '';
+    return;
+  }
+  const d = typeMap[typeName];
+  if (title) title.textContent = `「${typeName}」— ${d.students.size} 位學生做過這類工作`;
+  if (names) {
+    names.innerHTML = d.studentList
+      .sort((a, b) => a.seatNo.localeCompare(b.seatNo))
+      .map(s => `<span style="background:rgba(0,0,0,0.08);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.seatNo + ' ' + s.name)}</span>`)
+      .join('');
+  }
+  panel.style.display = 'block';
+  panel.dataset.openType = typeName;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
 
 // 薪資統計
 async function loadSalaryStats() {
@@ -4686,24 +4861,6 @@ function resolveImgSrc(src) {
   return 'data:image/jpeg;base64,' + src;
 }
 
-// ── 評語狀態 badge 共用判斷（紅/橘/綠/藍 4 種狀態，與 student.html 對稱維護）──
-// 'unread'：有新評語（第一次，未讀）；'updated_unread'：評語已更新（再次留言，未讀）
-// 'reviewed'：已審閱（無評語或評語已讀完且非更新）；'updated_read'：評語已更新（已讀完）
-function getCommentBadgeState(j) {
-  const hasUnreadComment = !!(j.teacherCommentUnread && j.teacherComment);
-  if (hasUnreadComment) return j.teacherCommentUpdated ? 'updated_unread' : 'unread';
-  if (j.teacherReviewed) return j.teacherCommentUpdated ? 'updated_read' : 'reviewed';
-  return null;
-}
-function renderCommentBadgeHtml(j) {
-  const state = getCommentBadgeState(j);
-  if (state === 'unread') return '<span class="badge-comment">● 有新評語</span>';
-  if (state === 'updated_unread') return '<span class="badge-comment-updated">● 評語已更新</span>';
-  if (state === 'reviewed') return '<span class="badge-reviewed">✅ 已審閱</span>';
-  if (state === 'updated_read') return '<span class="badge-reviewed-updated">📖 評語已閱讀</span>';
-  return '';
-}
-
 function renderJournalCard(j, isTeacher) {
   if (isTeacher && j.isDeletedStudent) {
     const safeMonth = safeNumber(j.month);
@@ -4744,7 +4901,10 @@ function renderJournalCard(j, isTeacher) {
   }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
-  const reviewedBadge = renderCommentBadgeHtml(j);
+  const isReviewed = !!(j.teacherReviewed);
+  const reviewedBadge = hasComment
+    ? `<span class="badge-comment">● 有新評語</span>`
+    : (isReviewed ? `<span class="badge-reviewed">✅ 已審閱</span>` : '');
   const commentBtn = isTeacher ? (
     hasComment
       ? `<button class="btn-circ gray-circ" title="編輯評語" onclick="openCommentModal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
@@ -5058,6 +5218,24 @@ function pdfJournalBlock(j, idx) {
     },
     margin: [0, 0, 0, 7]
   });
+  if (j.teacherReviewed || j.teacherComment) {
+    content.push({
+      table: { widths: ['*'], body: [[{ stack: [
+        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
+        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
+      ] }]] },
+      layout: {
+        fillColor: () => '#f0fdf4',
+        hLineColor: () => '#86efac',
+        vLineColor: () => '#86efac',
+        paddingLeft: () => 8,
+        paddingRight: () => 8,
+        paddingTop: () => 7,
+        paddingBottom: () => 7
+      },
+      margin: [0, 0, 0, 8]
+    });
+  }
   return content;
 }
 
@@ -5165,11 +5343,6 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   const { doc, getDoc } = firebase_funcs;
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
-    // 記住「儲存前的舊評語」，saveTeacherComment() 用來判斷這次是否為再次留言
-    // 加上身分核對，避免快速切換不同月記時，較慢的舊請求覆蓋到新請求的 _currentCommentJournal
-    if (_currentCommentJournal && _currentCommentJournal.seatNo === seatNo && _currentCommentJournal.semester === semester && _currentCommentJournal.month === month) {
-      _currentCommentJournal.oldComment = data.teacherComment || '';
-    }
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
@@ -5186,10 +5359,6 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
     }
     openModal('comment-modal');
   }).catch(() => {
-    // 讀取失敗：保守視為「沒有舊評語」，避免誤判成再次留言
-    if (_currentCommentJournal && _currentCommentJournal.seatNo === seatNo && _currentCommentJournal.semester === semester && _currentCommentJournal.month === month) {
-      _currentCommentJournal.oldComment = '';
-    }
     document.getElementById('comment-modal-textarea').value = '';
     const replyBlock = document.getElementById('comment-modal-student-reply');
     if (replyBlock) replyBlock.style.display = 'none';
@@ -5199,12 +5368,9 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
 
 async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
-  const { seatNo, semester, month, ownerUid, oldComment } = _currentCommentJournal;
+  const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
   // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
-  // 再次留言判斷：舊評語非空 且 這次存的新評語也非空，才算「更新」；
-  // 清空評語（從有變沒有）一律視為單純審閱，不標記為更新
-  const isCommentUpdate = !!(oldComment && comment.length > 0);
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
@@ -5212,8 +5378,6 @@ async function saveTeacherComment() {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
       teacherCommentUnread: comment.length > 0,
-      // 是否為「再次留言」（學生看完後會顯示「評語已更新」而非單純「已審閱」）
-      teacherCommentUpdated: isCommentUpdate,
       // 老師儲存評語時，同步清除學生回覆的未讀旗標
       studentReplyUnread: false
     });
