@@ -2413,12 +2413,19 @@ async function loadTeacherDashboard() {
   const semMonths = getSemesterMonths(sem);
   const thisMonthIdx = semMonths.indexOf(thisMonth);
   // 本學期到目前為止（含本月）已有 journal 的月份，依座號建 Map
+  // 限定 activeSeatNos（本班在籍名單）避免跨班舊資料干擾
   const semJournalsBySeq = {};
-  userJournalData(jSnap).filter(j => j.semester === sem).forEach(j => {
+  const openedMonthsInSem = new Set();
+  userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem).forEach(j => {
     if (!semJournalsBySeq[j.seatNo]) semJournalsBySeq[j.seatNo] = new Set();
     semJournalsBySeq[j.seatNo].add(j.month);
+    openedMonthsInSem.add(j.month);
   });
-  const monthsToCheck = thisMonthIdx >= 0 ? semMonths.slice(0, thisMonthIdx + 1) : [thisMonth];
+  // 只計「班上有人繳交（老師實際開放過）」且「不晚於當月」的月份
+  // 一律包含本月（本月未繳名單的來源），避免本月無人繳交時誤判為未開放
+  const monthsToCheck = thisMonthIdx >= 0
+    ? semMonths.filter((m, i) => i <= thisMonthIdx && (m === thisMonth || openedMonthsInSem.has(m)))
+    : [thisMonth];
   window._missingWithCount = missingStudents.map(d => {
     const sno = d.data().seatNo || d.id.slice(semPrefix.length);
     const name = d.data().name || sno;
@@ -2523,8 +2530,8 @@ async function copyMissingList() {
     : '請盡快完成：';
   const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
   const lines = data.map(s => {
-    if (s.missCount >= 3) return `${s.label}　🔴 本學期已缺${s.missCount}月`;
-    if (s.missCount === 2) return `${s.label}　⚠ 本學期已缺2月`;
+    if (s.missCount >= 3) return `${s.label}　🔴 本學期已缺${s.missCount}個月`;
+    if (s.missCount === 2) return `${s.label}　⚠ 本學期已缺2個月`;
     return s.label;
   });
   const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
@@ -2599,9 +2606,9 @@ function toggleStatList(key) {
         namesEl.innerHTML = data.map(s => {
           let badge = '';
           if (s.missCount >= 3) {
-            badge = `<span style="background:rgba(239,68,68,0.15);color:var(--accent-red);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺${s.missCount}月</span>`;
+            badge = `<span style="background:rgba(239,68,68,0.15);color:var(--accent-red);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺${s.missCount}個月</span>`;
           } else if (s.missCount === 2) {
-            badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2月</span>`;
+            badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2個月</span>`;
           }
           return `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
         }).join('');
@@ -3811,6 +3818,28 @@ async function exportAllStatsExcel() {
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
 
+  // ── 公司 × 工作類型統計 ──
+  const companyWorktypeMap = {};
+  journals.forEach(j => {
+    const company = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
+    (j.entries || []).forEach(e => {
+      const raw = (e.type || '').trim();
+      const type = /^其他（.*）$/.test(raw) ? '其他' : (raw || '未填寫');
+      if (!companyWorktypeMap[company]) companyWorktypeMap[company] = {};
+      companyWorktypeMap[company][type] = (companyWorktypeMap[company][type] || 0) + 1;
+    });
+  });
+  const allWorkTypes = [...new Set(
+    Object.values(companyWorktypeMap).flatMap(t => Object.keys(t))
+  )].sort((a, b) => a.localeCompare(b, 'zh-TW'));
+  const companyWorktypeRows = Object.entries(companyWorktypeMap)
+    .sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'))
+    .map(([company, typeMap]) => {
+      const row = { 公司名稱: company };
+      allWorkTypes.forEach(t => { row[t] = typeMap[t] || 0; });
+      return row;
+    });
+
   const wb = XLSX.utils.book_new();
   const submitWs = XLSX.utils.aoa_to_sheet(submitAoA);
   const salarySummaryWs = XLSX.utils.json_to_sheet(salarySummaryRows);
@@ -3821,6 +3850,7 @@ async function exportAllStatsExcel() {
   const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
+  const companyWorktypeWs = XLSX.utils.json_to_sheet(companyWorktypeRows.length ? companyWorktypeRows : [{ 公司名稱:'', 說明:'無工作類型資料' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
   salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
@@ -3831,6 +3861,7 @@ async function exportAllStatsExcel() {
   journalWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 40 }, { wch: 8 }];
   locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
   companyDistWs['!cols'] = [{ wch: 24 }, { wch: 10 }, { wch: 20 }];
+  companyWorktypeWs['!cols'] = [{ wch: 24 }, ...allWorkTypes.map(() => ({ wch: 12 }))];
 
   XLSX.utils.book_append_sheet(wb, submitWs, '繳交狀況');
   XLSX.utils.book_append_sheet(wb, salarySummaryWs, '薪資摘要');
@@ -3841,10 +3872,11 @@ async function exportAllStatsExcel() {
   XLSX.utils.book_append_sheet(wb, journalWs, '月記清單');
   XLSX.utils.book_append_sheet(wb, locationWs, '出勤地點');
   XLSX.utils.book_append_sheet(wb, companyDistWs, '各公司平均距離');
+  XLSX.utils.book_append_sheet(wb, companyWorktypeWs, '各公司工作類型');
 
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
-  toast('✅ 已下載 Excel（9 張工作表，含薪資摘要、異常提醒與各公司平均距離）', 'success');
+  toast('✅ 已下載 Excel（10 張工作表，含公司工作類型分佈）', 'success');
   } catch(e) {
     console.error('匯出 Excel 失敗', e);
     toast('Excel 匯出失敗：' + (e.message || '請確認網路或重試') + '。可重新整理頁面後再試', 'error');
