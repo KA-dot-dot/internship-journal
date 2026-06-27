@@ -78,6 +78,16 @@ function authCtx(uid, email) {
   return testEnv.authenticatedContext(uid, { email });
 }
 
+// 2026-06-27 補修：rule.txt create/update 規則補上 seatNo 必須等於 studentBindings
+// 紀錄座號的驗證（防止偽造 seatNo 污染老師端統計）。journalDoc() 預設依 uid
+// 自動帶對應的座號，所有既有呼叫點不用逐個改，否則會被新規則正確擋下（而不是
+// 被測項本來想驗證的原因擋下）——這正是這次 3 個假失敗的根本原因。
+function seatNoFor(uid) {
+  if (uid === STUDENT_UID) return STUDENT_SEAT;
+  if (uid === OTHER_UID) return OTHER_SEAT;
+  return null;
+}
+
 function journalDoc(uid, email, overrides = {}) {
   return {
     ownerUid: uid,
@@ -85,6 +95,7 @@ function journalDoc(uid, email, overrides = {}) {
     storagePath: 'user',
     semester: 'test',
     month: 0,
+    seatNo: seatNoFor(uid),
     teacherComment: null,
     teacherReviewed: false,
     reviewedAt: null,
@@ -181,7 +192,9 @@ async function main() {
     await assertSucceeds(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
         .doc(`users/${STUDENT_UID}/journals/new-02`)
-        .set({ ownerUid: STUDENT_UID, ownerEmail: STUDENT_EMAIL, storagePath: 'user', content: '無 teacher 欄位' })
+        // 2026-06-27 補修：補上 seatNo（不影響本測試「不帶 teacher 欄位」的測試意圖，
+        // 這裡只是滿足新增的 seatNo 必填驗證，不是本測試要驗證的對象）
+        .set({ ownerUid: STUDENT_UID, ownerEmail: STUDENT_EMAIL, storagePath: 'user', seatNo: STUDENT_SEAT, content: '無 teacher 欄位' })
     );
   });
 
