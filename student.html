@@ -1782,8 +1782,11 @@ async function checkMonthDeadline(skipFill = false) {
   if (skipFill) return;
   const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
   // 快取查詢結果供 saveJournal 直接使用，避免儲存時重複 Firestore 讀取
+  // 2026-06-28 補修：補上 studentReply（跟 editJournal() 的快取對齊，原本只有那條路徑有），
+  // 讓 saveJournal() 的覆蓋確認對話框也能在這條路徑（一般填寫頁覆蓋當月既有月記）
+  // 正確判斷「有回覆會暫時看不見」並顯示對應警告。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null }
     : { exists: false };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -3102,8 +3105,14 @@ async function saveJournal() {
       const reviewWarning = wasReviewed
         ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
         : '';
+      // 2026-06-28 補修：覆蓋會把 teacherComment 歸零，但 studentReply 因 merge:true 原樣保留，
+      // 變成「有回覆、評語卻已消失」的孤兒狀態（見 AI_CONTEXT.md）。只在 wasReviewed 為真時才提示，
+      // 因為這正是即將觸發孤兒狀態的那次覆蓋；若評語已經被清過（已是孤兒），這裡不會誤判重複提示。
+      const replyWarning = (wasReviewed && cached.studentReply)
+        ? '\n\n📩 你已回覆過老師評語，重新儲存後回覆仍會保留，但在老師重新批閱前會暫時看不到對應的評語內容。'
+        : '';
       hideLoading();
-      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
+      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}${replyWarning}\n\n確定要覆蓋原本的資料嗎？`);
       if (!confirmed) {
         toast('已取消，原本月記保留', 'info');
         return;
