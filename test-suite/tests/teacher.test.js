@@ -1,7 +1,23 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v7
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-23）
+ * 老師端自動化測試 v8
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
+ *
+ * v9 新增（2026-06-27）：
+ *   T-SEC-19  renderJournalCard() 孤兒回覆顯示警示而非整段隱藏
+ *             （修正：學生重新儲存月記會把 teacherComment 歸零，但 studentReply 因
+ *             merge:true 原樣保留，造成孤兒回覆完全不可見；改用
+ *             (isTeacher && (hasComment || j.studentReply)) 取代原本只看
+ *             hasComment 的顯示條件，並加上警示文字。對應 AI_CONTEXT.md
+ *             「studentReply 孤兒狀態」決策：選擇方向 A（最小改動、保留資料），
+ *             不選方向 B（resave 時清空回覆欄位）。)
+ *
+ * v8 修正（2026-06-26）：
+ *   T-SEC-04  函式名稱修正：confirmBatchReview → openBatchReviewModal
+ *             （AI_CONTEXT.md 2026-06-20 記錄「confirmBatchReview 已拆成
+ *             openBatchReviewModal + executeBatchReview 兩個函式」，
+ *             startVal/endVal/escapeHtml 邏輯在 openBatchReviewModal 本體，
+ *             confirmBatchReview 已不存在，typeof 永遠回傳 skip 造成假通過）
  *
  * v7 新增（2026-06-23）：
  *   T-SEC-17  printJournalsPDF() 將 pdfMake getBlob() 包進 await new Promise
@@ -285,8 +301,10 @@ async function runTeacherTests(page, log) {
   });
 
   await test('T-SEC-04 confirmBatchReview() 日期值插入 innerHTML 前有 escapeHtml', async () => {
+    // 2026-06-20 重構：confirmBatchReview 已拆成 openBatchReviewModal（顯示確認 Modal）
+    // + executeBatchReview（實際執行），startVal/endVal/escapeHtml 在 openBatchReviewModal 本體。
     const result = await page.evaluate(() => {
-      const fnStr = (typeof confirmBatchReview === 'function') ? confirmBatchReview.toString() : '';
+      const fnStr = (typeof openBatchReviewModal === 'function') ? openBatchReviewModal.toString() : '';
       if (!fnStr) return { skip: true };
       return {
         skip: false,
@@ -295,8 +313,8 @@ async function runTeacherTests(page, log) {
       };
     });
     if (result.skip) return;
-    if (!result.hasEscapeStart) throw new Error('confirmBatchReview() 的 startVal 未使用 escapeHtml()');
-    if (!result.hasEscapeEnd)   throw new Error('confirmBatchReview() 的 endVal 未使用 escapeHtml()');
+    if (!result.hasEscapeStart) throw new Error('openBatchReviewModal() 的 startVal 未使用 escapeHtml()');
+    if (!result.hasEscapeEnd)   throw new Error('openBatchReviewModal() 的 endVal 未使用 escapeHtml()');
   });
 
   await test('T-SEC-05 學期 select 的 key 和 label 有 escapeHtml', async () => {
@@ -639,6 +657,40 @@ async function runTeacherTests(page, log) {
       throw new Error('exportSemesterPDF() 呼叫 printJournalsPDF() 時沒有 await，finally{ hideLoading() } 仍會在 PDF 產生完成前提早執行');
     if (result.stuHasCall && !result.stuHasAwait)
       throw new Error('exportStudentPDF() 呼叫 printJournalsPDF() 時沒有 await，finally{ hideLoading() } 仍會在 PDF 產生完成前提早執行');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-19  renderJournalCard() 孤兒回覆不再整段隱藏（2026-06-27）
+  // 對應本次修正：學生重新儲存月記會把 teacherComment 歸零，但 studentReply 因
+  //   saveJournal() 的 merge:true 原樣保留，造成「有回覆、評語卻已消失」的孤兒狀態
+  //   （已知邊界案例，見 AI_CONTEXT.md）。舊版用 (isTeacher && hasComment) 當作整個
+  //   對話串區塊的顯示條件，hasComment 為 false 時會連帶把孤兒回覆一起藏起來，
+  //   老師端完全看不到、主頁紅點點進去也找不到上下文。
+  //   修法：改用 (isTeacher && (hasComment || j.studentReply))，且在 !hasComment 時
+  //   額外顯示一行警示文字，說明評語已被清除、回覆已失去原始上下文。
+  // 以下為靜態分析（檢查原始碼字串），無法重現實際渲染結果，只能確認程式碼特徵
+  // 仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-19 renderJournalCard() 孤兒回覆顯示警示而非整段隱藏', async () => {
+    const result = await page.evaluate(() => {
+      const fn = window['renderJournalCard'];
+      const fnStr = (typeof fn === 'function') ? fn.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasOrGate:      /hasComment\s*\|\|\s*j\.studentReply/.test(fnStr),
+        hasOrphanFlag:  fnStr.includes('orphanReply'),
+        hasWarningText: fnStr.includes('評語已被清除'),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasOrGate)
+      throw new Error('renderJournalCard() 對話串區塊顯示條件未包含 (hasComment || j.studentReply)，孤兒回覆仍會被整段隱藏');
+    if (!result.hasOrphanFlag)
+      throw new Error('renderJournalCard() 找不到 orphanReply 判斷邏輯，可能已被改寫，需重新確認孤兒回覆是否仍會顯示');
+    if (!result.hasWarningText)
+      throw new Error('renderJournalCard() 缺少孤兒回覆的警示文字，老師看到回覆但仍會不知道評語已被清空');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
