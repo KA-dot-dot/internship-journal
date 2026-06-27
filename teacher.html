@@ -4955,7 +4955,7 @@ function renderJournalCard(j, isTeacher) {
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
-    ${(isTeacher && hasComment)
+    ${(isTeacher && (hasComment || j.studentReply))
       ? (() => {
           function fmtTime(iso) {
             if (!iso) return '';
@@ -4966,12 +4966,18 @@ function renderJournalCard(j, isTeacher) {
           }
           const tTime = fmtTime(j.reviewedAt);
           const sTime = fmtTime(j.studentReplyAt);
+          // 2026-06-27 補修：學生重新儲存月記會把 teacherComment 歸零，但 studentReply 因 merge:true
+          // 原樣保留，變成「有回覆、評語卻已消失」的孤兒狀態（已知邊界案例，見 AI_CONTEXT.md）。
+          // 不再用 hasComment 單獨決定整個對話串區塊要不要顯示，避免孤兒回覆完全不可見、
+          // 老師主頁紅點點進去卻找不到任何上下文。
+          const orphanReply = !hasComment && j.studentReply;
           return `<div class="journal-thread">
           <div class="journal-thread-title">評語與回覆</div>
-          <div class="thread-bubble">
+          ${orphanReply ? `<div style="font-size:12px;color:var(--accent-yellow);margin-bottom:8px">⚠️ 學生有回覆，但對應評語已被清除（月記重新儲存後評語會歸零，這則回覆已失去原始上下文）</div>` : ''}
+          ${hasComment ? `<div class="thread-bubble">
             <div class="thread-bubble-label label-teacher">老師${tTime ? `<span class="thread-bubble-time">${escapeHtml(tTime)}</span>` : ''}</div>
             <div class="thread-bubble-body">${escapeHtml(j.teacherComment)}</div>
-          </div>
+          </div>` : ''}
           ${j.studentReply
             ? `<div class="thread-bubble">
                 <div class="thread-bubble-label ${j.studentReplyUnread ? 'label-student' : 'label-student-read'}">${j.studentReplyUnread ? '🔴 學生（未讀）' : '學生'}${sTime ? `<span class="thread-bubble-time">${escapeHtml(sTime)}</span>` : ''}</div>

@@ -90,6 +90,9 @@ service cloud.firestore {
             && request.resource.data.ownerUid == request.auth.uid
             && request.resource.data.ownerEmail == request.auth.token.email
             && request.resource.data.storagePath == 'user'
+            // 2026-06-27 補修：seatNo 必須等於該學生在 studentBindings 裡記錄的座號，
+            // 防止偽造 seatNo 把月記算到別的座號名下（污染老師端繳交/審閱/薪資統計）
+            && request.resource.data.seatNo == get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo
             // 學生不得在建立時寫入老師評語欄位（值必須為初始空值）
             && request.resource.data.get('teacherComment', null) == null
             && request.resource.data.get('teacherReviewed', false) == false
@@ -107,6 +110,9 @@ service cloud.firestore {
             && request.resource.data.ownerUid == resource.data.ownerUid
             && request.resource.data.ownerEmail == resource.data.ownerEmail
             && request.resource.data.storagePath == 'user'
+            // 2026-06-27 補修：一般編輯不可變更 seatNo（建立時已驗證過，編輯時維持不變即可，
+            // 不重新查 studentBindings——避免老師重新分配座號這種正常操作意外鎖死舊月記的編輯權）
+            && request.resource.data.seatNo == resource.data.seatNo
             && request.resource.data.get('teacherComment', null) == null
             && request.resource.data.get('teacherReviewed', false) == false
             && request.resource.data.get('reviewedAt', null) == null
