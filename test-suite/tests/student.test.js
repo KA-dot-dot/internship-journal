@@ -3,6 +3,12 @@
  * 學生端自動化測試 v10
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
  *
+ * v13 新增（2026-06-28）：
+ *   S-SEC-21  checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告
+ *             對應修正：checkMonthDeadline() 的 _currentJournalCache 原本沒有 studentReply
+ *             （跟 editJournal() 那條路徑不一致），導致一般填寫頁覆蓋當月月記時，
+ *             saveJournal() 的確認對話框無法提示「回覆會暫時看不到對應評語」。
+ *
  * v12 新增（2026-06-27 第二次）：
  *   S-RULES-09  journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）
  *   S-RULES-10  journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）
@@ -1136,6 +1142,39 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('initWriteForm() 找不到 skipDeadlineCheck 參數，editJournal() 傳的 true 沒有地方接收');
     if (!result.initFormUsesParam)
       throw new Error('initWriteForm() 沒有依 skipDeadlineCheck 決定是否呼叫 checkMonthDeadline()，背景覆蓋表單的問題仍然存在');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-21  checkMonthDeadline() 快取補上 studentReply（2026-06-28）
+  // 對應修正：checkMonthDeadline() 設定 _currentJournalCache 時原本沒有 studentReply
+  //   （editJournal() 那條路徑早就有，兩邊不一致），導致 saveJournal() 的覆蓋確認對話框
+  //   在「一般填寫頁覆蓋當月既有月記」這條最常見的路徑上，沒辦法提示學生「重新儲存後
+  //   回覆會暫時看不到對應評語」（studentReply 因 merge:true 原樣保留，但 teacherComment
+  //   會被歸零，變成孤兒狀態，見 AI_CONTEXT.md「studentReply 孤兒狀態」決策）。
+  // 修法：① checkMonthDeadline() 快取補上 studentReply；
+  //       ② saveJournal() 新增 replyWarning 變數，條件 wasReviewed && cached.studentReply，
+  //         只在即將觸發孤兒狀態的那次覆蓋才提示，已經是孤兒狀態的後續編輯不會重複提示。
+  // 以下為靜態分析（檢查原始碼字串），無法重現「確認對話框實際彈出的文字」這個
+  // runtime 結果（需要一筆「老師已審閱且學生已回覆」的月記資料才能人工驗證），
+  // 只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-21 checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告', async () => {
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const saveFnStr   = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!checkFnStr && !saveFnStr) return { skip: true };
+      return {
+        skip: false,
+        cacheHasStudentReply: /studentReply\s*:\s*journalSnap\.data\(\)\.studentReply/.test(checkFnStr),
+        saveHasReplyWarning:  /replyWarning/.test(saveFnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.cacheHasStudentReply)
+      throw new Error('checkMonthDeadline() 的 _currentJournalCache 找不到 studentReply 欄位，saveJournal() 的覆蓋確認對話框在這條路徑上無法判斷是否該提示回覆警告');
+    if (!result.saveHasReplyWarning)
+      throw new Error('saveJournal() 找不到 replyWarning 變數，覆蓋確認對話框不會提示學生「回覆會暫時看不到對應評語」');
   });
 
   await test('S-15 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
