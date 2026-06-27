@@ -1268,7 +1268,7 @@ function toggleStatDetail(key) {
 function renderSubmittedMonthsDetail(journals) {
   if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
   const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
-  return sorted.map(j => `<div class="stat-detail-row">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
+  return sorted.map(j => `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
 }
 
 // ── 評語狀態 badge 共用判斷（紅/橘/綠/藍 4 種狀態，與 teacher.html 對稱維護）──
@@ -1364,7 +1364,7 @@ async function loadStudentDashboard() {
     const overdueMonths = await getOverdueMonths(sem, journals);
     document.getElementById('s-overdue-count').textContent = overdueMonths.length;
     document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
-      ? overdueMonths.map(m => `<div class="stat-detail-row">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
+      ? overdueMonths.map(m => `<div class="stat-detail-row clickable" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
       : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
     syncStatCardHeights();
   } catch (e) {
@@ -3133,6 +3133,19 @@ function goToJournalCard(sem, month) {
   if (startEl) startEl.value = '';
   if (endEl)   endEl.value   = '';
   showPage('s-history');
+}
+
+// 逾期未繳：跳到填寫頁並預選對應學期和月份
+async function goToWriteMonth(sem, month) {
+  _skipWriteInit = true;
+  showPage('s-write');
+  await initWriteForm(true);
+  const semEl = document.getElementById('write-semester');
+  if (semEl) { semEl.value = String(sem); }
+  initWriteMonths();
+  const mEl = document.getElementById('write-month');
+  if (mEl) { mEl.value = Number(month); }
+  checkMonthDeadline();
 }
 
 async function loadStudentHistory() {
