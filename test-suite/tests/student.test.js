@@ -3,6 +3,16 @@
  * 學生端自動化測試 v10
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
  *
+ * v11 新增（2026-06-27）：
+ *   S-RULES-06  journals UPDATE 安全性：一般編輯路徑（第一分支）夾帶超長 studentReply
+ *               ＋偽造 studentReplyUnread:false 應被拒（403）
+ *   S-RULES-07  journals UPDATE 安全性：回覆內容為空字串應被拒（403）
+ *   S-RULES-08  journals UPDATE 安全性：studentReplyAt 塞入非字串型別應被拒（403）
+ *               對應 rule.txt 2026-06-27 三項補修（review 報告 #1/#4/#9）：
+ *               ① 第一分支補上 studentReply/studentReplyUnread/studentReplyAt 鎖定
+ *               ② 第三分支補 studentReply.size()>=1（禁空字串）
+ *               ③ 第三分支補 studentReplyAt 型別驗證
+ *
  * v10 修正（2026-06-26）：
  *   S-SEC-08  badge 渲染邏輯已抽成共用函式 getCommentBadgeState() /
  *             renderCommentBadgeHtml()，不再直接出現在
@@ -506,6 +516,96 @@ async function runStudentTests(page, browserContext, log) {
       if (dr.status >= 400) throw new Error('journals DELETE 異常（HTTP ' + dr.status + '）');
     });
 
+    await test('S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：rule.txt 修正前，第一分支（學生一般編輯月記）完全沒有限制
+      // studentReply / studentReplyUnread / studentReplyAt，只要其餘 teacher 欄位歸零、
+      // ownerUid/ownerEmail/storagePath 不變，這個分支就會放行——可在同一次寫入夾帶任意長度
+      // 的 studentReply，並把 studentReplyUnread 直接設為 false（偽造老師已讀）。
+      // 修正後第一分支要求這三個欄位必須維持原值不變，此測試驗證繞過已被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const docId = 'test-reply-lock-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const fakeUpdate = {
+        fields: {
+          ownerUid:             { stringValue: _fsUser.uid },
+          ownerEmail:           { stringValue: _fsUser.email },
+          storagePath:          { stringValue: 'user' },
+          teacherComment:       { nullValue: null },
+          teacherReviewed:      { booleanValue: false },
+          reviewedAt:           { nullValue: null },
+          teacherCommentUnread: { booleanValue: false },
+          studentReply:         { stringValue: 'A'.repeat(500) },
+          studentReplyUnread:   { booleanValue: false },
+        }
+      };
+      const mask = ['ownerUid','ownerEmail','storagePath','teacherComment','teacherReviewed','reviewedAt','teacherCommentUnread','studentReply','studentReplyUnread'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：一般編輯路徑夾帶超長 studentReply＋偽造已讀未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 偽造回覆測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則 studentReply.size()<=50 沒有下限，size()==0 也會通過，
+      // 學生可送出內容為空字串的回覆。修正後加入 size()>=1，此測試驗證空字串回覆會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const docId = 'test-reply-empty-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const replyUpdate = {
+        fields: {
+          studentReply:       { stringValue: '' },
+          studentReplyUnread: { booleanValue: true },
+          studentReplyAt:     { stringValue: new Date().toISOString() },
+        }
+      };
+      const mask = ['studentReply', 'studentReplyUnread', 'studentReplyAt'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, replyUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：空字串回覆未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 空字串回覆測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則沒有驗證 studentReplyAt 型別，可塞入任意型別的值。
+      // 修正後加入型別檢查（必須為 null 或字串），此測試驗證塞入數字會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const docId = 'test-reply-badtype-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const replyUpdate = {
+        fields: {
+          studentReply:       { stringValue: '測試回覆內容' },
+          studentReplyUnread: { booleanValue: true },
+          studentReplyAt:     { integerValue: 12345 },
+        }
+      };
+      const mask = ['studentReply', 'studentReplyUnread', 'studentReplyAt'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, replyUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：studentReplyAt 塞入數字型別未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE studentReplyAt 型別測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
     await test('S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）', async () => {
       requireStudentSession();
       await studentPage.evaluate(() => { if (typeof showPage === 'function') showPage('s-dashboard'); });
@@ -547,6 +647,9 @@ async function runStudentTests(page, browserContext, log) {
       'S-RULES-03 journals CREATE 安全性：teacherComment 偽造應被拒（403）',
       'S-RULES-04 journals UPDATE 安全性：teacherReviewed 偽造應被拒（403）',
       'S-RULES-05 journals DELETE 權限（學生可刪除自己的月記）',
+      'S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）',
+      'S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）',
+      'S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）',
       'S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）',
     ];
     skipped.forEach(name => {
