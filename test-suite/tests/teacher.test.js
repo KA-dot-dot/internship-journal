@@ -1,7 +1,16 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v8
+ * 老師端自動化測試 v11
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-28）
+ *
+ * v11 新增（2026-06-28）：
+ *   T-SEC-23  saveTeacherComment() 評語未改時 teacherCommentUnread 不重新觸發（State 3→2 防護）
+ *             驗證：`commentChanged = comment !== oldComment` 變數存在，且
+ *             `teacherCommentUnread`／`teacherCommentUpdated` 的寫入均受 commentChanged 控制
+ *             （spread 條件：`...(commentChanged ? { ... } : {})`），確保老師只讀取學生回覆後
+ *             直接按儲存，不會把這兩欄重新寫入 Firestore、誤觸發學生端 State 3→2 倒退
+ *             （✅ 已審閱 錯誤變回 🟠 評語已更新）。同時 T-SEC-20 補上第 4 項特徵檢查
+ *             （`commentChanged` 變數存在）。
  *
  * v10 新增（2026-06-28）：
  *   T-SEC-20  saveTeacherComment() isCommentUpdate 邏輯正確（STEP 2 vs STEP 4）
