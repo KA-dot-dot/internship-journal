@@ -1,7 +1,25 @@
 /**
  * tests/student.test.js
  * 學生端自動化測試 v10
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-28）
+ *
+ * v14 新增（2026-06-28）：
+ *   S-SEC-22  getCommentBadgeState() 四狀態邏輯（State 1～4 + 無徽章）
+ *             驗證 getCommentBadgeState() 對每種 {teacherCommentUnread, teacherCommentUpdated,
+ *             teacherReviewed, teacherComment} 組合回傳正確的 state 值。
+ *             對應「評語測試系統」STEP 1～5 的狀態轉換總覽。
+ *   S-SEC-23  renderCommentBadgeHtml() 輸出對應正確的徽章文字與顏色
+ *             驗證 state 1→🔴、state 2→🟠、state 3→✅、state 4→📖、state 0→無徽章。
+ *   S-SEC-24  loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）
+ *             對應：切到歷史月記頁面時，凡 teacherCommentUnread===true 的月記，
+ *             應自動呼叫 updateDoc 把 teacherCommentUnread 設回 false。
+ *   S-SEC-25  saveTeacherComment() isCommentUpdate 邏輯（STEP 2 vs STEP 4）
+ *             （老師端靜態分析移至 T-SEC-20；此處從學生側驗證 Firestore Rules
+ *             第二分支：學生只能把 teacherCommentUnread 改為 false，不能自己設 true）
+ *   S-SEC-26  Firestore Rules：學生不能自行把 teacherCommentUpdated 設為 true（403）
+ *             對應 rule.txt 第二分支（teacherCommentUnread 已讀標記），
+ *             updateDoc 只允許 affectedKeys().hasOnly(['teacherCommentUnread'])，
+ *             夾帶 teacherCommentUpdated 欄位應被拒。
  *
  * v13 新增（2026-06-28）：
  *   S-SEC-21  checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告
@@ -717,6 +735,44 @@ async function runStudentTests(page, browserContext, log) {
       if (loadingStuck) throw new Error('Firestore 失敗後 loading 遮罩殘留，finally 未執行 hideLoading()');
     });
 
+    await test('S-SEC-26 Firestore Rules：學生不能把 teacherCommentUpdated 設為 true（第二分支）', async () => {
+      // 對應 rule.txt 第二分支（學生標記已讀）：
+      //   affectedKeys().hasOnly(['teacherCommentUnread'])
+      //   && teacherCommentUnread == false
+      // 學生在第二分支只能修改 teacherCommentUnread 這一欄，且只能設為 false。
+      // 此測試驗證：夾帶 teacherCommentUpdated:true 的更新應被 Firestore 拒絕（403）。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-badge-forge-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+
+      // 先建立一筆正常月記（teacherCommentUnread:false, teacherCommentUpdated:false）
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+
+      // 嘗試用「已讀清除」第二分支夾帶 teacherCommentUpdated:true
+      const fakeMarkRead = {
+        fields: {
+          teacherCommentUnread:  { booleanValue: false },
+          teacherCommentUpdated: { booleanValue: true },   // ← 學生不應能寫入 true
+        }
+      };
+      const mask = ['teacherCommentUnread', 'teacherCommentUpdated'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeMarkRead, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+
+      if (ur.status === 200) throw new Error(
+        'Firestore Rules 漏洞：學生成功把 teacherCommentUpdated 設為 true（HTTP 200），' +
+        '應被第二分支 affectedKeys().hasOnly([\'teacherCommentUnread\']) 擋下'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error(
+        'Firestore Rules 測試回應異常（HTTP ' + ur.status + '，預期 403）'
+      );
+    });
+
     await studentPage.close();
     await studentContext.close();
 
@@ -743,6 +799,7 @@ async function runStudentTests(page, browserContext, log) {
       'S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）',
       'S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）',
       'S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）',
+      'S-SEC-26 Firestore Rules：學生不能把 teacherCommentUpdated 設為 true（第二分支）',
     ];
     skipped.forEach(name => {
       results.push({ name, pass: true, skipped: true });
@@ -1176,6 +1233,181 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.saveHasReplyWarning)
       throw new Error('saveJournal() 找不到 replyWarning 變數，覆蓋確認對話框不會提示學生「回覆會暫時看不到對應評語」');
   });
+
+  // ════════════════════════════════════════
+  // S-SEC-22 ～ S-SEC-26  評語徽章系統（2026-06-28）
+  // 對應「評語測試系統」STEP 1～5 及狀態轉換總覽：
+  //
+  //   State 0  無徽章    （初始：尚未審閱）
+  //   State 1  🔴 有新評語    Unread=true,  Updated=false
+  //   State 2  🟠 評語已更新  Unread=true,  Updated=true
+  //   State 3  ✅ 已審閱     Unread=false, Updated=false
+  //   State 4  📖 評語已閱讀  Unread=false, Updated=true
+  //
+  // S-SEC-22/23 為純邏輯靜態分析（不需學生 session，老師帳號即可）；
+  // S-SEC-24 為靜態分析（確認 updateDoc teacherCommentUnread:false 邏輯存在）；
+  // S-SEC-25 為靜態分析（確認學生只能把 teacherCommentUnread 設為 false）；
+  // S-SEC-26 為 Firestore Rules 端對端測試（需學生 session）。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-22 getCommentBadgeState() 四狀態 + 無徽章邏輯正確', async () => {
+    // 驗證 getCommentBadgeState() 對每種旗標組合回傳正確的 state 值。
+    // 對應 STEP 1～5 所有狀態轉換節點。
+    const result = await page.evaluate(() => {
+      if (typeof getCommentBadgeState !== 'function') return { skip: true };
+
+      // 測試矩陣：[teacherCommentUnread, teacherCommentUpdated, teacherReviewed, teacherComment, expectedState]
+      // State 1：🔴 有新評語  Unread=true,  Updated=false
+      // State 2：🟠 評語已更新 Unread=true,  Updated=true
+      // State 3：✅ 已審閱    Reviewed=true, Unread=false, Updated=false（comment 可空或非空）
+      // State 4：📖 評語已閱讀 Unread=false, Updated=true
+      // State 0：無徽章       未審閱且 Unread=false
+      const cases = [
+        // STEP 2：老師第一次存有文字評語 → 🔴 有新評語（State 1）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, expected: 1 },
+        // STEP 4：老師第二次改評語 → 🟠 評語已更新（State 2）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, expected: 2 },
+        // STEP 1：老師存空評語審閱 → ✅ 已審閱（State 3）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: ''           }, expected: 3 },
+        // STEP 3：學生進歷史頁後 → ✅ 已審閱（State 3，Updated 仍 false）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, expected: 3 },
+        // STEP 5：學生再次進歷史頁後 → 📖 評語已閱讀（State 4）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, expected: 4 },
+        // 初始：建立月記但尚未審閱 → 無徽章（State 0）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: false, teacherComment: null        }, expected: 0 },
+      ];
+
+      const failures = [];
+      for (const { j, expected } of cases) {
+        const actual = getCommentBadgeState(j);
+        if (actual !== expected) {
+          failures.push(
+            `Unread=${j.teacherCommentUnread} Updated=${j.teacherCommentUpdated} ` +
+            `Reviewed=${j.teacherReviewed} Comment="${j.teacherComment ?? 'null'}" ` +
+            `→ 期望 State ${expected}，實際 State ${actual}`
+          );
+        }
+      }
+      return { skip: false, failures };
+    });
+    if (result.skip) return;
+    if (result.failures.length > 0)
+      throw new Error('getCommentBadgeState() 邏輯錯誤：\n' + result.failures.join('\n'));
+  });
+
+  await test('S-SEC-23 renderCommentBadgeHtml() 各 state 輸出正確徽章', async () => {
+    // 驗證每個 state 對應到正確的 emoji／文字，
+    // 且 state 0（無徽章）輸出空字串或空 HTML。
+    const result = await page.evaluate(() => {
+      if (typeof renderCommentBadgeHtml !== 'function') return { skip: true };
+
+      const expectations = [
+        { state: 1, containsAny: ['🔴', '有新評語', 'new-comment', 'state-1'] },
+        { state: 2, containsAny: ['🟠', '評語已更新', 'updated', 'state-2'] },
+        { state: 3, containsAny: ['✅', '已審閱', 'reviewed', 'state-3'] },
+        { state: 4, containsAny: ['📖', '評語已閱讀', 'read', 'state-4'] },
+      ];
+
+      // state 0 必須輸出空（無徽章）
+      const html0 = renderCommentBadgeHtml(0) || '';
+      // 允許回傳空字串、空元素、或完全不含可見文字的 HTML
+      const stripped0 = html0.replace(/<[^>]*>/g, '').trim();
+      if (stripped0.length > 0) {
+        return { skip: false, failures: [`State 0 應無徽章，但輸出：「${html0.slice(0, 80)}」`] };
+      }
+
+      const failures = [];
+      for (const { state, containsAny } of expectations) {
+        const html = renderCommentBadgeHtml(state) || '';
+        const hit = containsAny.some(kw => html.includes(kw));
+        if (!hit) {
+          failures.push(
+            `State ${state}：輸出「${html.slice(0, 80)}」不含預期關鍵字 [${containsAny.join('/')}]`
+          );
+        }
+      }
+      return { skip: false, failures };
+    });
+    if (result.skip) return;
+    if (result.failures.length > 0)
+      throw new Error('renderCommentBadgeHtml() 輸出錯誤：\n' + result.failures.join('\n'));
+  });
+
+  await test('S-SEC-24 loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）', async () => {
+    // 驗證 loadStudentHistory() 在遍歷歷史月記時，
+    // 若該筆月記 teacherCommentUnread===true，會自動呼叫 updateDoc 把它清為 false。
+    // 對應 STEP 3（學生進歷史頁 → ✅ 已審閱）與 STEP 5（再次進歷史頁 → 📖 評語已閱讀）。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof loadStudentHistory === 'function') ? loadStudentHistory.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：有讀取 teacherCommentUnread（判斷是否需要清除）
+      const checksUnread = fnStr.includes('teacherCommentUnread');
+
+      // 特徵 2：有對 journals 路徑呼叫 updateDoc（或 setDoc/doc）
+      const callsUpdateDoc = fnStr.includes('updateDoc') || fnStr.includes('setDoc');
+
+      // 特徵 3：有把 teacherCommentUnread 寫回 false（清除旗標）
+      const writesUnreadFalse =
+        /teacherCommentUnread\s*:\s*false/.test(fnStr) ||
+        /['"]teacherCommentUnread['"]\s*:\s*false/.test(fnStr);
+
+      return { skip: false, checksUnread, callsUpdateDoc, writesUnreadFalse };
+    });
+    if (result.skip) return;
+    if (!result.checksUnread)
+      throw new Error('loadStudentHistory() 未讀取 teacherCommentUnread 欄位，無法判斷是否需要自動清除');
+    if (!result.callsUpdateDoc)
+      throw new Error('loadStudentHistory() 找不到 updateDoc / setDoc 呼叫，teacherCommentUnread 自動清除機制可能已移除');
+    if (!result.writesUnreadFalse)
+      throw new Error('loadStudentHistory() 找不到 teacherCommentUnread: false 寫入，清除旗標邏輯可能已被改寫');
+  });
+
+  await test('S-SEC-25 學生標記已讀只能把 teacherCommentUnread 設為 false（第二分支靜態分析）', async () => {
+    // 對應 rule.txt 第二分支：
+    //   affectedKeys().hasOnly(['teacherCommentUnread'])
+    //   && teacherCommentUnread == false
+    // 驗證 loadStudentHistory()（或其呼叫的輔助函式）送出的 updateDoc
+    // 只包含 teacherCommentUnread:false，不夾帶其他老師評語欄位。
+    const result = await page.evaluate(() => {
+      // 檢查 loadStudentHistory 本體與可能的輔助函式
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      // 特徵：不應在「已讀清除」的 updateDoc 中包含 teacherCommentUpdated:true
+      // （只有老師端 saveTeacherComment 才能寫 true）
+      // 粗略檢查：teacherCommentUpdated:true 不應出現在學生已讀清除的區塊附近
+      // （精確界定困難，改檢查 loadStudentHistory 函式本體）
+      const fnStr = (typeof loadStudentHistory === 'function') ? loadStudentHistory.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 已讀清除 updateDoc 中不應寫入 teacherCommentUpdated（老師端專用欄位）
+      // 簡單起見：若 fnStr 中同時含有 teacherCommentUpdated 與 updateDoc，發出警告
+      const writesUpdatedFlag = /teacherCommentUpdated/.test(fnStr);
+
+      // 應只寫 teacherCommentUnread:false（單欄位更新）
+      const writesOnlyUnread =
+        /teacherCommentUnread\s*:\s*false/.test(fnStr) &&
+        !writesUpdatedFlag;
+
+      return { skip: false, writesOnlyUnread, writesUpdatedFlag };
+    });
+    if (result.skip) return;
+    if (result.writesUpdatedFlag)
+      throw new Error(
+        'loadStudentHistory() 的已讀清除 updateDoc 含有 teacherCommentUpdated，' +
+        '只有老師端 saveTeacherComment() 才能寫這個欄位，學生端混入可能造成狀態污染'
+      );
+    if (!result.writesOnlyUnread)
+      throw new Error(
+        'loadStudentHistory() 找不到「只寫 teacherCommentUnread:false」的已讀清除邏輯，' +
+        'STEP 3／STEP 5 的自動清除可能已被改寫或移除'
+      );
+  });
+
+  // S-SEC-26 需要學生 session（Firestore Rules 端對端）
+  // 放在 else 分支之後的 skipped 清單前，以學生 session context 執行
+  // → 此處僅確認老師帳號靜態邏輯；Rules 端對端驗證在 _studentRulesCommentTests() 執行
 
   await test('S-15 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
     const errors = page._testErrors || [];

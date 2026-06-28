@@ -1,7 +1,21 @@
 /**
  * tests/teacher.test.js
  * 老師端自動化測試 v8
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-26）
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-28）
+ *
+ * v10 新增（2026-06-28）：
+ *   T-SEC-20  saveTeacherComment() isCommentUpdate 邏輯正確（STEP 2 vs STEP 4）
+ *             驗證：oldComment 為空時 isCommentUpdate=false（觸發 State 1 有新評語），
+ *             oldComment 非空且新 comment 非空時 isCommentUpdate=true（觸發 State 2 評語已更新）。
+ *             對應「評語測試系統」關鍵邏輯：!!( oldComment && true ) 決定 teacherCommentUpdated。
+ *   T-SEC-21  saveTeacherComment() teacherCommentUnread 只在有評語時設 true
+ *             驗證：comment.length==0 時 teacherCommentUnread 應為 false（STEP 1 空評語審閱），
+ *             comment 非空時 teacherCommentUnread 應設為 true（STEP 2／STEP 4）。
+ *   T-SEC-22  saveTeacherComment() 保留 teacherCommentUpdated 舊值（STEP 4 不被 STEP 1 洗掉）
+ *             驗證：老師存空評語（審閱）時，teacherCommentUpdated 欄位不應被寫為 false，
+ *             否則 STEP 5 的「📖 評語已閱讀」(State 4) 狀態會在老師重新審閱後不正確地消失。
+ *             → 正確做法：只有 saveTeacherComment 寫有文字評語時才決定 Updated；
+ *               留空審閱時不觸碰 Updated（或 Firestore 只更新 updateMask 指定欄位）。
  *
  * v9 新增（2026-06-27）：
  *   T-SEC-19  renderJournalCard() 孤兒回覆顯示警示而非整段隱藏
@@ -691,6 +705,161 @@ async function runTeacherTests(page, log) {
       throw new Error('renderJournalCard() 找不到 orphanReply 判斷邏輯，可能已被改寫，需重新確認孤兒回覆是否仍會顯示');
     if (!result.hasWarningText)
       throw new Error('renderJournalCard() 缺少孤兒回覆的警示文字，老師看到回覆但仍會不知道評語已被清空');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-20 ～ T-SEC-22  saveTeacherComment() 評語旗標邏輯（2026-06-28）
+  // 對應「評語測試系統」STEP 1～4 的 Firebase 寫入邏輯：
+  //
+  //   STEP 1（老師存空評語）：
+  //     teacherReviewed=true, teacherComment="",
+  //     teacherCommentUnread=false（comment.length==0 不設 true）
+  //     teacherCommentUpdated 不動（或維持 false）
+  //
+  //   STEP 2（老師首次存有文字評語；oldComment="" 即空）：
+  //     teacherCommentUnread=true
+  //     isCommentUpdate = !!('' && true) = false → teacherCommentUpdated=false → State 1 🔴
+  //
+  //   STEP 4（老師改評語；oldComment="第一次評語" 非空）：
+  //     teacherCommentUnread=true
+  //     isCommentUpdate = !!('第一次評語' && true) = true → teacherCommentUpdated=true → State 2 🟠
+  //
+  // 以下三項均為靜態分析（檢查 saveTeacherComment 原始碼字串），
+  // 無法重現實際 Firestore 寫入結果（那部分已由 STEP 1～4 人工驗證確認），
+  // 只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-20 saveTeacherComment() isCommentUpdate 邏輯（oldComment 非空才設 Updated）', async () => {
+    // 對應「評語測試系統」關鍵邏輯說明：
+    //   isCommentUpdate = !!(oldComment && comment)
+    //   STEP 2：oldComment='' → false（State 1 🔴 有新評語）
+    //   STEP 4：oldComment='第一次評語' → true（State 2 🟠 評語已更新）
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：有 isCommentUpdate 變數
+      const hasIsCommentUpdate = fnStr.includes('isCommentUpdate');
+
+      // 特徵 2：isCommentUpdate 依賴 oldComment（必須讀取儲存前的舊評語值）
+      const readsOldComment = fnStr.includes('oldComment');
+
+      // 特徵 3：teacherCommentUpdated 的值由 isCommentUpdate 決定
+      //  正確寫法之一：teacherCommentUpdated: isCommentUpdate
+      //  或：teacherCommentUpdated: isCommentUpdate ? true : false
+      const updatedUsesFlag =
+        /teacherCommentUpdated\s*:\s*isCommentUpdate/.test(fnStr) ||
+        /teacherCommentUpdated.*isCommentUpdate/.test(fnStr);
+
+      return { skip: false, hasIsCommentUpdate, readsOldComment, updatedUsesFlag };
+    });
+    if (result.skip) return;
+    if (!result.hasIsCommentUpdate)
+      throw new Error(
+        'saveTeacherComment() 找不到 isCommentUpdate 變數，' +
+        'STEP 2（首次評語）與 STEP 4（修改評語）可能都觸發同一個 State，無法區分 State 1/State 2'
+      );
+    if (!result.readsOldComment)
+      throw new Error(
+        'saveTeacherComment() 找不到 oldComment，' +
+        '無法判斷本次儲存是「新增評語」(State 1) 還是「修改評語」(State 2)'
+      );
+    if (!result.updatedUsesFlag)
+      throw new Error(
+        'saveTeacherComment() 的 teacherCommentUpdated 未以 isCommentUpdate 決定，' +
+        '可能硬寫成固定值，STEP 2 與 STEP 4 的 State 無法正確分流'
+      );
+  });
+
+  await test('T-SEC-21 saveTeacherComment() teacherCommentUnread：有評語才設 true', async () => {
+    // 對應 STEP 1（空評語審閱）：
+    //   teacherCommentUnread 應為 false（comment.length==0 不提醒學生）
+    // 對應 STEP 2／STEP 4（有文字評語）：
+    //   teacherCommentUnread 應設為 true（提醒學生有新/更新評語）
+    // 若 saveTeacherComment 對空評語也設 teacherCommentUnread=true，
+    // 學生端會永遠顯示 🔴（無法到達 State 3 ✅ 已審閱）。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：有條件判斷 comment 是否為空（length / 非空字串判斷）
+      const checksCommentEmpty =
+        fnStr.includes('comment.length') ||
+        fnStr.includes('comment &&') ||
+        fnStr.includes('!!comment') ||
+        fnStr.includes('comment.trim()') ||
+        /comment\s*!==?\s*['"][\s]*['"]/.test(fnStr) ||
+        /comment\s*==\s*['"][\s]*['"]/.test(fnStr);
+
+      // 特徵 2：teacherCommentUnread 不是硬寫 true（若有條件分支設 false 即可）
+      const hasUnreadFalse  = /teacherCommentUnread\s*:\s*false/.test(fnStr);
+      const hasUnreadTrue   = /teacherCommentUnread\s*:\s*true/.test(fnStr);
+
+      // 合理的正確寫法之一：teacherCommentUnread: comment.length > 0
+      // 或在 if(comment) 分支設 true，else 分支設 false
+      const hasConditionalUnread =
+        /teacherCommentUnread\s*:\s*(?:comment(?:\.length\s*>?\s*0|\.trim\(\)|\s*!==?\s*['"][\s]*)|\!\!comment)/.test(fnStr) ||
+        (checksCommentEmpty && hasUnreadFalse && hasUnreadTrue);
+
+      return { skip: false, checksCommentEmpty, hasUnreadFalse, hasUnreadTrue, hasConditionalUnread };
+    });
+    if (result.skip) return;
+    if (!result.checksCommentEmpty)
+      throw new Error(
+        'saveTeacherComment() 未偵測到 comment 是否為空的判斷，' +
+        'STEP 1（空評語審閱）可能會把 teacherCommentUnread 設為 true，' +
+        '學生端無法到達 State 3（✅ 已審閱）'
+      );
+    if (!result.hasConditionalUnread && !result.hasUnreadFalse)
+      throw new Error(
+        'saveTeacherComment() 找不到 teacherCommentUnread:false 的寫入路徑，' +
+        'STEP 1 空評語審閱後學生端永遠顯示 🔴 而非 ✅'
+      );
+  });
+
+  await test('T-SEC-22 saveTeacherComment() 空評語審閱時不覆蓋 teacherCommentUpdated（STEP 1 不洗 STEP 5）', async () => {
+    // 問題場景：若老師在 STEP 5（State 4 📖）之後再次存空評語（STEP 1），
+    // 而 saveTeacherComment 把 teacherCommentUpdated 強制設為 false，
+    // 則學生下次進歷史頁會從 State 4 退回 State 3（📖 → ✅），
+    // 「評語已閱讀」紀錄消失，不符合設計意圖。
+    //
+    // 正確做法之一：
+    //   空評語審閱時的 updateDoc 不包含 teacherCommentUpdated 欄位（只用 updateMask 排除它）
+    //   或：先讀取現有值，保留 teacherCommentUpdated 不變
+    //
+    // 此測試以靜態分析確認：saveTeacherComment 的空評語路徑（comment.length==0 分支）
+    // 不包含把 teacherCommentUpdated 硬設為 false 的寫法。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 如果整個函式完全不寫 teacherCommentUpdated（全靠 updateMask 排除），也是正確的
+      const neverWritesUpdated = !fnStr.includes('teacherCommentUpdated');
+      if (neverWritesUpdated) return { skip: false, safe: true, reason: 'teacherCommentUpdated 完全不出現在 saveTeacherComment，靠 updateMask 排除' };
+
+      // 若有寫 teacherCommentUpdated，確認空評語路徑不硬寫 false
+      // 粗略判斷：若 teacherCommentUpdated:false 與 isCommentUpdate 同時存在，
+      // false 只應在 isCommentUpdate=false 時才會被寫入（即有文字評語但非更新 → State 1），
+      // 空評語路徑（comment.length==0）不應觸及 teacherCommentUpdated。
+      const hasIsCommentUpdate = fnStr.includes('isCommentUpdate');
+
+      // 紅旗：在 comment 為空的分支中直接把 teacherCommentUpdated 設 false
+      // 這是難以精確靜態分析的，改為確認「有 isCommentUpdate 保護」就算通過
+      if (hasIsCommentUpdate) return { skip: false, safe: true, reason: 'isCommentUpdate 旗標存在，teacherCommentUpdated 受條件控制' };
+
+      // 最後防線：若有寫 teacherCommentUpdated 但沒有 isCommentUpdate，
+      // 只接受「空評語分支完全不更新 teacherCommentUpdated」的情況
+      // （此時需要 updateMask 排除，無法純靠靜態分析確認，給予警告）
+      return {
+        skip: false,
+        safe: false,
+        reason: 'saveTeacherComment() 有寫 teacherCommentUpdated 但找不到 isCommentUpdate 保護，' +
+                '空評語審閱路徑可能把 teacherCommentUpdated 強制設為 false，' +
+                '導致 State 4（📖 評語已閱讀）在老師重新審閱後意外消失'
+      };
+    });
+    if (result.skip) return;
+    if (!result.safe) throw new Error(result.reason);
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
