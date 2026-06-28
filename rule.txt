@@ -99,9 +99,12 @@ service cloud.firestore {
             && request.resource.data.get('reviewedAt', null) == null
             && request.resource.data.get('teacherCommentUnread', false) == false
             && request.resource.data.get('teacherCommentUpdated', false) == false
-            // 學生不得在建立時寫入回覆欄位
+            // 學生不得在建立時寫入回覆欄位（studentReply / studentReplyUnread / studentReplyAt 三欄皆須為初始空值）
             && request.resource.data.get('studentReply', null) == null
             && request.resource.data.get('studentReplyUnread', false) == false
+            // 2026-06-28 補修：studentReplyAt 與 studentReply／studentReplyUnread 同屬回覆欄位，
+            // 建立時一律限制為 null，避免夾帶孤立時間戳記（功能上無害，但維持資料乾淨度與意圖一致性）
+            && request.resource.data.get('studentReplyAt', null) == null
           ) || isAdmin();
         allow update: if (
             schoolUser()
