@@ -751,7 +751,7 @@ async function runTeacherTests(page, log) {
         /teacherCommentUpdated\s*:\s*isCommentUpdate/.test(fnStr) ||
         /teacherCommentUpdated.*isCommentUpdate/.test(fnStr);
 
-      // 特徵 4（2026-07-XX 新增）：commentChanged 變數存在
+      // 特徵 4（2026-06-28 新增）：commentChanged 變數存在
       // 修正前只靠「舊值是否存在」，改為用字串等值比對才算真的更新
       const hasCommentChanged = fnStr.includes('commentChanged');
 
