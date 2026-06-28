@@ -262,6 +262,24 @@ async function main() {
     );
   });
 
+  // 2026-06-27 補修：CREATE 規則新增 seatNo 驗證
+  await test('【2026-06-27】學生 CREATE 月記：seatNo 與 studentBindings 不符 → 應被拒（防止偽造座號污染老師端統計）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-seatno-01`)
+        // STUDENT 的 binding 是 '01'，這裡故意填 '99' 模擬偽造
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { seatNo: '99' }))
+    );
+  });
+
+  await test('【2026-06-27】學生 CREATE 月記：夾帶 studentReply 欄位 → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-reply-create-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReply: '建立時偷塞回覆' }))
+    );
+  });
+
   // ════════════════════════════════════════════════════════════
   // UPDATE
   // ════════════════════════════════════════════════════════════
@@ -326,6 +344,68 @@ async function main() {
       authCtx(ADMIN_UID, ADMIN_EMAIL).firestore()
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .update({ teacherComment: '老師評語', teacherReviewed: true, teacherCommentUnread: true })
+    );
+  });
+
+  // 2026-06-27 補修：UPDATE 一般編輯分支新增 seatNo 不可變 + reply 三欄鎖定
+  await test('【2026-06-27】學生 UPDATE 月記（一般編輯）：嘗試更改 seatNo → 應被拒', async () => {
+    // 先把文件恢復成乾淨初始狀態（前面的測試可能改過 teacher 欄位）
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        // seatNo 從 '01' 改成 '99'，其餘欄位皆合法
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { seatNo: '99' }))
+    );
+  });
+
+  await test('【2026-06-27】學生 UPDATE 月記（一般編輯）：嘗試帶入 studentReply → 應被拒（防止繞過 50 字限制）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        // 走一般編輯路徑但夾帶 studentReply，應被第一分支的鎖定規則擋下
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReply: '想走一般編輯路徑偷塞回覆' }))
+    );
+  });
+
+  // 2026-06-27 補修：UPDATE 回覆分支新增 size() >= 1 與 studentReplyAt 型別驗證
+  await test('【2026-06-27】學生 UPDATE 回覆：studentReply 為空字串 → 應被拒（size() >= 1 下限）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '',           // 空字串，size() == 0，應被拒
+          studentReplyUnread: true,
+          studentReplyAt: new Date().toISOString(),
+        })
+    );
+  });
+
+  await test('【2026-06-27】學生 UPDATE 回覆：studentReplyAt 寫入數字（非 string/null）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '正常回覆內容',
+          studentReplyUnread: true,
+          studentReplyAt: 12345678,   // 數字型別，應被型別驗證擋下
+        })
+    );
+  });
+
+  await test('【2026-06-27】學生 UPDATE 回覆：studentReply 正常字串、studentReplyAt 為 null → 應成功（null 為合法值）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '正常回覆內容',
+          studentReplyUnread: true,
+          studentReplyAt: null,       // null 為允許值
+        })
     );
   });
 
