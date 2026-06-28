@@ -5381,6 +5381,8 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   const { doc, getDoc } = firebase_funcs;
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
+    // 補存舊評語值，供 saveTeacherComment() 計算 teacherCommentUpdated
+    if (_currentCommentJournal) _currentCommentJournal.oldComment = data.teacherComment || '';
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
@@ -5409,6 +5411,9 @@ async function saveTeacherComment() {
   const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
   // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
+  // 計算 teacherCommentUpdated：只有「之前已有評語、且本次仍有新評語文字」才視為「再次留言/更新評語」
+  const oldComment = _currentCommentJournal.oldComment ?? '';
+  const isCommentUpdate = !!(oldComment && comment.length > 0);
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
@@ -5416,6 +5421,8 @@ async function saveTeacherComment() {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
       teacherCommentUnread: comment.length > 0,
+      // 老師第一次留言 → false；覆蓋舊評語（兩者皆非空）→ true；清空評語 → false
+      teacherCommentUpdated: isCommentUpdate,
       // 老師儲存評語時，同步清除學生回覆的未讀旗標
       studentReplyUnread: false
     });
