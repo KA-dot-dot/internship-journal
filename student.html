@@ -940,7 +940,7 @@ function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;
   const sems = getSemesters();
-  el.innerHTML = sems.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  el.innerHTML = sems.map(s => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.label)}</option>`).join('');
   const cur = getCurrentSemester();
   if (sems.find(s => s.key === cur)) el.value = cur;
 }

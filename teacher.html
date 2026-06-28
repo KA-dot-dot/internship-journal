@@ -5413,7 +5413,7 @@ async function saveTeacherComment() {
   // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
   // 計算 teacherCommentUpdated：只有「之前已有評語、且本次仍有新評語文字」才視為「再次留言/更新評語」
   const oldComment = _currentCommentJournal.oldComment ?? '';
-  // 2026-07-XX 修正：比對新舊內容是否真正不同，
+  // 2026-06-28 補修：比對新舊內容是否真正不同，
   // 避免「只讀取回覆後直接儲存」誤判為已更新（State 3→2 錯誤轉換）
   const commentChanged = comment !== oldComment;
   const isCommentUpdate = !!(oldComment && comment.length > 0 && commentChanged);
