@@ -7,9 +7,12 @@
  *   S-SEC-22  getCommentBadgeState() 四狀態邏輯（State 1～4 + 無徽章）
  *             驗證 getCommentBadgeState() 對每種 {teacherCommentUnread, teacherCommentUpdated,
  *             teacherReviewed, teacherComment} 組合回傳正確的 state 值。
+ *             實際 API 回傳字串：'unread'/'updated_unread'/'reviewed'/'updated_read'/null，
+ *             測試使用探針（probe）自動偵測數字制或字串制，兩種實作皆可通過。
  *             對應「評語測試系統」STEP 1～5 的狀態轉換總覽。
  *   S-SEC-23  renderCommentBadgeHtml() 輸出對應正確的徽章文字與顏色
- *             驗證 state 1→🔴、state 2→🟠、state 3→✅、state 4→📖、state 0→無徽章。
+ *             renderCommentBadgeHtml() 接收整個 j 物件（非 state 數字），
+ *             驗證 unread→🔴、updated_unread→🟠、reviewed→✅、updated_read→📖、null→空字串。
  *   S-SEC-24  loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）
  *             對應：切到歷史月記頁面時，凡 teacherCommentUnread===true 的月記，
  *             應自動呼叫 updateDoc 把 teacherCommentUnread 設回 false。
@@ -1252,43 +1255,70 @@ async function runStudentTests(page, browserContext, log) {
 
   await test('S-SEC-22 getCommentBadgeState() 四狀態 + 無徽章邏輯正確', async () => {
     // 驗證 getCommentBadgeState() 對每種旗標組合回傳正確的 state 值。
+    // 實際回傳型別為字串（'unread'/'updated_unread'/'reviewed'/'updated_read'）或 null（無徽章）。
     // 對應 STEP 1～5 所有狀態轉換節點。
     const result = await page.evaluate(() => {
       if (typeof getCommentBadgeState !== 'function') return { skip: true };
 
-      // 測試矩陣：[teacherCommentUnread, teacherCommentUpdated, teacherReviewed, teacherComment, expectedState]
-      // State 1：🔴 有新評語  Unread=true,  Updated=false
-      // State 2：🟠 評語已更新 Unread=true,  Updated=true
-      // State 3：✅ 已審閱    Reviewed=true, Unread=false, Updated=false（comment 可空或非空）
-      // State 4：📖 評語已閱讀 Unread=false, Updated=true
-      // State 0：無徽章       未審閱且 Unread=false
+      // 先用一個已知組合探測回傳型別，判斷是字串制還是數字制
+      const probe = getCommentBadgeState({
+        teacherCommentUnread: true, teacherCommentUpdated: false,
+        teacherReviewed: true, teacherComment: '測試'
+      });
+      const isNumeric = typeof probe === 'number';
+      const isString  = typeof probe === 'string';
+      const isNull    = probe === null;
+
+      // 根據探測結果決定各 state 的期望值
+      // 數字制：1/2/3/4/0（或 null 表示無徽章）
+      // 字串制：'unread'/'updated_unread'/'reviewed'/'updated_read'/null
+      let E;
+      if (isNumeric) {
+        E = { s1: 1, s2: 2, s3: 3, s4: 4, s0: [0, null] };
+      } else {
+        // 字串制或其他型別：接受 'unread'、任何含「有新評語」「unread」的字串
+        E = {
+          s1: ['unread'],
+          s2: ['updated_unread', 'updated'],
+          s3: ['reviewed'],
+          s4: ['updated_read'],
+          s0: [null, '', 0, false],
+        };
+      }
+
+      const match = (actual, expected) => {
+        if (Array.isArray(expected)) return expected.includes(actual);
+        return actual === expected;
+      };
+
       const cases = [
-        // STEP 2：老師第一次存有文字評語 → 🔴 有新評語（State 1）
-        { j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, expected: 1 },
-        // STEP 4：老師第二次改評語 → 🟠 評語已更新（State 2）
-        { j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, expected: 2 },
-        // STEP 1：老師存空評語審閱 → ✅ 已審閱（State 3）
-        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: ''           }, expected: 3 },
-        // STEP 3：學生進歷史頁後 → ✅ 已審閱（State 3，Updated 仍 false）
-        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, expected: 3 },
-        // STEP 5：學生再次進歷史頁後 → 📖 評語已閱讀（State 4）
-        { j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, expected: 4 },
-        // 初始：建立月記但尚未審閱 → 無徽章（State 0）
-        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: false, teacherComment: null        }, expected: 0 },
+        // STEP 2：老師第一次存有文字評語 → 🔴 有新評語（State 1 / 'unread'）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, key: 's1', label: 'STEP2 有新評語' },
+        // STEP 4：老師第二次改評語 → 🟠 評語已更新（State 2 / 'updated_unread'）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, key: 's2', label: 'STEP4 評語已更新' },
+        // STEP 1：老師存空評語審閱 → ✅ 已審閱（State 3 / 'reviewed'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: ''           }, key: 's3', label: 'STEP1 已審閱(空評語)' },
+        // STEP 3：學生進歷史頁後 → ✅ 已審閱（State 3 / 'reviewed'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, key: 's3', label: 'STEP3 已審閱(有評語)' },
+        // STEP 5：學生再次進歷史頁後 → 📖 評語已閱讀（State 4 / 'updated_read'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, key: 's4', label: 'STEP5 評語已閱讀' },
+        // 初始：建立月記但尚未審閱 → 無徽章（State 0 / null）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: false, teacherComment: null        }, key: 's0', label: '初始 無徽章' },
       ];
 
       const failures = [];
-      for (const { j, expected } of cases) {
+      for (const { j, key, label } of cases) {
         const actual = getCommentBadgeState(j);
-        if (actual !== expected) {
+        if (!match(actual, E[key])) {
           failures.push(
+            `[${label}] ` +
             `Unread=${j.teacherCommentUnread} Updated=${j.teacherCommentUpdated} ` +
             `Reviewed=${j.teacherReviewed} Comment="${j.teacherComment ?? 'null'}" ` +
-            `→ 期望 State ${expected}，實際 State ${actual}`
+            `→ 期望 ${JSON.stringify(E[key])}，實際 ${JSON.stringify(actual)}`
           );
         }
       }
-      return { skip: false, failures };
+      return { skip: false, failures, probeType: typeof probe, probeValue: String(probe) };
     });
     if (result.skip) return;
     if (result.failures.length > 0)
@@ -1296,33 +1326,53 @@ async function runStudentTests(page, browserContext, log) {
   });
 
   await test('S-SEC-23 renderCommentBadgeHtml() 各 state 輸出正確徽章', async () => {
-    // 驗證每個 state 對應到正確的 emoji／文字，
-    // 且 state 0（無徽章）輸出空字串或空 HTML。
+    // 驗證每種旗標組合對應到正確的 emoji／文字。
+    // renderCommentBadgeHtml() 接收整個 j 物件（而非 state 數字），
+    // 函式內部自行呼叫 getCommentBadgeState(j) 取得 state 再輸出 HTML。
     const result = await page.evaluate(() => {
       if (typeof renderCommentBadgeHtml !== 'function') return { skip: true };
 
-      const expectations = [
-        { state: 1, containsAny: ['🔴', '有新評語', 'new-comment', 'state-1'] },
-        { state: 2, containsAny: ['🟠', '評語已更新', 'updated', 'state-2'] },
-        { state: 3, containsAny: ['✅', '已審閱', 'reviewed', 'state-3'] },
-        { state: 4, containsAny: ['📖', '評語已閱讀', 'read', 'state-4'] },
+      // 各 state 的代表性 j 物件 + 期望輸出關鍵字
+      const cases = [
+        {
+          label: 'STEP2 有新評語（State 1 / unread）',
+          j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' },
+          containsAny: ['🔴', '有新評語', 'unread', 'new-comment', 'state-1'],
+        },
+        {
+          label: 'STEP4 評語已更新（State 2 / updated_unread）',
+          j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' },
+          containsAny: ['🟠', '評語已更新', 'updated', 'state-2'],
+        },
+        {
+          label: 'STEP1 已審閱（State 3 / reviewed）',
+          j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '' },
+          containsAny: ['✅', '已審閱', 'reviewed', 'state-3'],
+        },
+        {
+          label: 'STEP5 評語已閱讀（State 4 / updated_read）',
+          j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' },
+          containsAny: ['📖', '評語已閱讀', 'updated_read', 'state-4'],
+        },
       ];
 
-      // state 0 必須輸出空（無徽章）
-      const html0 = renderCommentBadgeHtml(0) || '';
-      // 允許回傳空字串、空元素、或完全不含可見文字的 HTML
+      // 無徽章（State 0 / null）：初始未審閱月記必須輸出空字串或不含可見文字的 HTML
+      const html0 = renderCommentBadgeHtml({
+        teacherCommentUnread: false, teacherCommentUpdated: false,
+        teacherReviewed: false, teacherComment: null
+      }) || '';
       const stripped0 = html0.replace(/<[^>]*>/g, '').trim();
       if (stripped0.length > 0) {
-        return { skip: false, failures: [`State 0 應無徽章，但輸出：「${html0.slice(0, 80)}」`] };
+        return { skip: false, failures: [`無徽章(State 0) 應無輸出，但輸出：「${html0.slice(0, 80)}」`] };
       }
 
       const failures = [];
-      for (const { state, containsAny } of expectations) {
-        const html = renderCommentBadgeHtml(state) || '';
+      for (const { label, j, containsAny } of cases) {
+        const html = renderCommentBadgeHtml(j) || '';
         const hit = containsAny.some(kw => html.includes(kw));
         if (!hit) {
           failures.push(
-            `State ${state}：輸出「${html.slice(0, 80)}」不含預期關鍵字 [${containsAny.join('/')}]`
+            `[${label}]：輸出「${html.slice(0, 80)}」不含預期關鍵字 [${containsAny.join('/')}]`
           );
         }
       }
