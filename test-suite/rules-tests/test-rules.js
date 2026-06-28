@@ -280,6 +280,14 @@ async function main() {
     );
   });
 
+  await test('【2026-06-28】學生 CREATE 月記：夾帶 studentReplyAt 欄位 → 應被拒（回覆欄位在建立時三欄皆須為初始空值）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-reply-create-02`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReplyAt: '2026-06-28T00:00:00+08:00' }))
+    );
+  });
+
   // ════════════════════════════════════════════════════════════
   // UPDATE
   // ════════════════════════════════════════════════════════════
