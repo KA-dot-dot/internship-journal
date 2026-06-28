@@ -751,7 +751,11 @@ async function runTeacherTests(page, log) {
         /teacherCommentUpdated\s*:\s*isCommentUpdate/.test(fnStr) ||
         /teacherCommentUpdated.*isCommentUpdate/.test(fnStr);
 
-      return { skip: false, hasIsCommentUpdate, readsOldComment, updatedUsesFlag };
+      // 特徵 4（2026-07-XX 新增）：commentChanged 變數存在
+      // 修正前只靠「舊值是否存在」，改為用字串等值比對才算真的更新
+      const hasCommentChanged = fnStr.includes('commentChanged');
+
+      return { skip: false, hasIsCommentUpdate, readsOldComment, updatedUsesFlag, hasCommentChanged };
     });
     if (result.skip) return;
     if (!result.hasIsCommentUpdate)
@@ -768,6 +772,12 @@ async function runTeacherTests(page, log) {
       throw new Error(
         'saveTeacherComment() 的 teacherCommentUpdated 未以 isCommentUpdate 決定，' +
         '可能硬寫成固定值，STEP 2 與 STEP 4 的 State 無法正確分流'
+      );
+    if (!result.hasCommentChanged)
+      throw new Error(
+        'saveTeacherComment() 找不到 commentChanged，' +
+        '「評語未改直接儲存」仍會把 isCommentUpdate 誤判為 true，' +
+        '觸發 State 3→2 錯誤轉換'
       );
   });
 
@@ -860,6 +870,50 @@ async function runTeacherTests(page, log) {
     });
     if (result.skip) return;
     if (!result.safe) throw new Error(result.reason);
+  });
+
+
+  await test('T-SEC-23 saveTeacherComment() 評語未改時 teacherCommentUnread 不重新觸發（State 3→2 防護）', async () => {
+    // 修正「老師只讀取回覆後直接儲存」導致學生誤看到 🟠 的問題。
+    // 正確做法：teacherCommentUnread 與 teacherCommentUpdated 只在
+    // commentChanged=true（評語內容真正改變）時才寫入 updateDoc payload；
+    // 未改時兩欄均不出現在 payload，Firestore 原值不受影響。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：commentChanged 變數存在
+      const hasCommentChanged = fnStr.includes('commentChanged');
+
+      // 特徵 2：teacherCommentUnread 的寫入受 commentChanged 控制
+      //   spread 寫法範例：...(commentChanged ? { teacherCommentUnread: ... } : {})
+      const unreadGatedByChanged =
+        /commentChanged\s*\?[\s\S]{0,200}teacherCommentUnread/.test(fnStr) ||
+        /if\s*\(\s*commentChanged\s*\)[\s\S]{0,200}teacherCommentUnread/.test(fnStr);
+
+      // 特徵 3：teacherCommentUpdated 的寫入也受 commentChanged 控制（同一區塊）
+      const updatedGatedByChanged =
+        /commentChanged\s*\?[\s\S]{0,400}teacherCommentUpdated/.test(fnStr) ||
+        /if\s*\(\s*commentChanged\s*\)[\s\S]{0,400}teacherCommentUpdated/.test(fnStr);
+
+      return { skip: false, hasCommentChanged, unreadGatedByChanged, updatedGatedByChanged };
+    });
+    if (result.skip) return;
+    if (!result.hasCommentChanged)
+      throw new Error(
+        'saveTeacherComment() 找不到 commentChanged，' +
+        '評語未改時仍會重新觸發 teacherCommentUnread，State 3→2 誤轉換未修正'
+      );
+    if (!result.unreadGatedByChanged)
+      throw new Error(
+        'teacherCommentUnread 的寫入未受 commentChanged 控制，' +
+        '老師只讀取回覆後直接儲存，學生 badge 仍會被錯誤推到 🟠 State 2'
+      );
+    if (!result.updatedGatedByChanged)
+      throw new Error(
+        'teacherCommentUpdated 的寫入未受 commentChanged 控制，' +
+        '評語未改時仍可能誤改此旗標，造成 State 2→1 或 State 4→3 退化'
+      );
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
