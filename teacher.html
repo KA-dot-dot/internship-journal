@@ -2307,7 +2307,8 @@ async function bindStudent() {
       studentName: stuSnap.data().name || '',
       boundAt: localISOStr(),
       boundBy: currentUser.email
-    });
+    }, { merge: true }); // 2026-06-29 補修：保留學生已登入時寫入的 uid 欄位，
+                          // 與 syncActiveRootFromRoster() 的 merge:true 行為對齊
     hideLoading();
     document.getElementById('bind-email').value = '';
     document.getElementById('bind-seat').value = '';
