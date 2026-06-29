@@ -1,7 +1,16 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v14
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-28）
+ * 學生端自動化測試 v15
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-29）
+ *
+ * v15 新增（2026-06-29）：
+ *   S-SEC-27  完成度進度條／單筆摘要收合判斷的地址檢查補上格式驗證
+ *             背景：地址欄缺門牌「號」時，畫面顯示「完成度4/4可儲存」與單筆「✓完成」，
+ *             但按下「儲存月記」仍被 saveJournal() 的格式驗證正確擋下（資料完整性無虞），
+ *             純粹是 WORK_FIELD_CHECKS 與 isEntryComplete() 的地址檢查原本只查非空字串，
+ *             沒有套用 validateCompleteTaiwanAddress()，造成顯示跟實際存檔判斷不一致。
+ *             修法：兩處皆補上 && !validateCompleteTaiwanAddress(...)，與 saveJournal()
+ *             用同一套規則，地址格式不完整時進度條／收合徽章會正確顯示未完成。
  *
  * v14 新增（2026-06-28）：
  *   S-SEC-22  getCommentBadgeState() 四狀態邏輯（State 1～4 + 無徽章）
@@ -1618,6 +1627,54 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.hasAddressError) throw new Error('calcDistance() 找不到 addressError 變數（函式結構已變更？）');
     if (!result.hasInnerHTML)    throw new Error('calcDistance() 找不到 innerHTML 賦值');
     if (!result.hasEscapeHtml)   throw new Error('calcDistance() 的 addressError 插入 innerHTML 前未使用 escapeHtml()');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-27  完成度進度條／單筆摘要收合判斷的地址檢查補上格式驗證（2026-06-29）
+  // 背景：教師（00號測試帳號）回報一個案例——地址欄填了「…公益路二段783」
+  //   （缺門牌「號」字），畫面上「完成度 4/4 可儲存」與單筆摘要「✓完成」皆顯示正常，
+  //   但按下「儲存月記」時被擋下（跳出「尚有欄位未填寫，請點此查看」）。
+  //   追查發現 saveJournal() 真正存檔時呼叫的 validateCompleteTaiwanAddress()
+  //   （要求地址需含縣市＋路名＋門牌號碼，不可只填地標）從未接到以下兩處：
+  //     ① WORK_FIELD_CHECKS 的 address.test()：原本只檢查 !!e.address（非空）
+  //     ② isEntryComplete() 的 addrOk：原本只檢查 !!addr（非空）
+  //   兩者皆只看「有沒有填字」，造成「完成度」顯示跟「真正存檔判斷」不一致——
+  //   畫面顯示可儲存，按下卻被擋，使用者體驗上像是規則消失了，但實際上
+  //   saveJournal() 的格式驗證從頭到尾都還在，純粹是進度顯示沒跟著做格式檢查。
+  // 修法：兩處都補上 && !validateCompleteTaiwanAddress(...)，與 saveJournal()
+  //   用同一個函式判斷，地址格式不完整時，進度條「地址」文字與單則收合徽章
+  //   都會正確顯示為未完成（紅字／橘字），不再只看是否為空字串。
+  // 以下為靜態分析（檢查原始碼字串），確認程式碼特徵存在，避免日後改動
+  // 不小心把這兩處退回成只檢查非空、重新跟 saveJournal() 的判斷脫節。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-27 完成度進度條／單筆摘要收合判斷的地址檢查已套用 validateCompleteTaiwanAddress() 格式驗證', async () => {
+    const result = await page.evaluate(() => {
+      const hasValidateFn = (typeof validateCompleteTaiwanAddress === 'function');
+      if (!hasValidateFn) return { skip: true };
+
+      // ① isEntryComplete()：addrOk 是否呼叫 validateCompleteTaiwanAddress
+      const entryFnStr = (typeof isEntryComplete === 'function') ? isEntryComplete.toString() : '';
+
+      // ② WORK_FIELD_CHECKS 裡 key==='address' 那筆的 test 函式是否呼叫 validateCompleteTaiwanAddress
+      const wfc = (typeof WORK_FIELD_CHECKS !== 'undefined' && Array.isArray(WORK_FIELD_CHECKS))
+        ? WORK_FIELD_CHECKS : null;
+      const addrCheck = wfc ? wfc.find(fc => fc.key === 'address') : null;
+      const addrTestStr = addrCheck ? addrCheck.test.toString() : '';
+
+      if (!entryFnStr || !wfc) return { skip: true };
+
+      return {
+        skip: false,
+        entryUsesValidate: /validateCompleteTaiwanAddress/.test(entryFnStr),
+        fieldCheckUsesValidate: /validateCompleteTaiwanAddress/.test(addrTestStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.entryUsesValidate)
+      throw new Error('isEntryComplete() 的地址檢查（addrOk）沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會跟 saveJournal() 的真正存檔判斷不一致（地址格式不完整時誤顯示「✓完成」）');
+    if (!result.fieldCheckUsesValidate)
+      throw new Error('WORK_FIELD_CHECKS 的 address 檢查沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會讓「完成度 X/4」進度條誤顯示地址為綠字／可儲存，跟按下儲存時的實際判斷不一致');
   });
 
   return results;
