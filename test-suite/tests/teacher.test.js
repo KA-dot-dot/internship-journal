@@ -934,6 +934,46 @@ async function runTeacherTests(page, log) {
       );
   });
 
+  await test('T-SEC-24 _openCommentModalWithUid() oldComment 設定前做身份比對（防快速切換導致 commentChanged 基準錯誤）', async () => {
+    // 2026-06-29 補修的回歸測試。
+    // 若老師在前一個 getDoc 尚未完成時快速點開另一筆月記的評語按鈕，
+    // _currentCommentJournal 會被覆寫成新月記，但較早的 .then() 若不先比對
+    // seatNo/semester/month 三欄，會對「已是新月記的 _currentCommentJournal」
+    // 設定舊的 oldComment，使 commentChanged 計算基準錯誤，
+    // 造成 teacherCommentUpdated 旗標誤判（State 1/2 顯示錯誤）。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof _openCommentModalWithUid === 'function')
+        ? _openCommentModalWithUid.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：設定 oldComment 前有 seatNo 身份比對
+      const hasSeatNoCheck  = fnStr.includes('_currentCommentJournal.seatNo === seatNo');
+      // 特徵 2：設定 oldComment 前有 semester 身份比對
+      const hasSemesterCheck = fnStr.includes('_currentCommentJournal.semester === semester');
+      // 特徵 3：設定 oldComment 前有 month 身份比對
+      const hasMonthCheck   = fnStr.includes('_currentCommentJournal.month === month');
+
+      return { skip: false, hasSeatNoCheck, hasSemesterCheck, hasMonthCheck };
+    });
+
+    if (result.skip) return;
+    if (!result.hasSeatNoCheck)
+      throw new Error(
+        '_openCommentModalWithUid() 缺少 _currentCommentJournal.seatNo === seatNo 比對，' +
+        '快速切換月記時 oldComment 可能被設成錯誤月記的舊評語，commentChanged 計算基準錯誤'
+      );
+    if (!result.hasSemesterCheck)
+      throw new Error(
+        '_openCommentModalWithUid() 缺少 _currentCommentJournal.semester === semester 比對，' +
+        'oldComment 身份比對不完整，不同學期的月記切換時有 commentChanged 錯誤風險'
+      );
+    if (!result.hasMonthCheck)
+      throw new Error(
+        '_openCommentModalWithUid() 缺少 _currentCommentJournal.month === month 比對，' +
+        'oldComment 身份比對不完整，同學期不同月份切換時有 commentChanged 錯誤風險'
+      );
+  });
+
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
     const errors = page._testErrors || [];
     const serious = errors.filter(e =>
