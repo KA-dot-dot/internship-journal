@@ -2447,7 +2447,9 @@ async function loadTeacherDashboard() {
   window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
     seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
   }));
-  // 跨月待複審：非本月、teacherReviewed 為 false 的月記（不限學期格式，userJournalData 已過濾本班）
+  // 跨月待複審：非本月、teacherReviewed 為 false 的月記
+  // （userJournalData 只過濾路徑結構為 users/ 的文件，不限本班；
+  //  實際影響有限，因刪除學生時其月記一併刪除，不會長期殘留非本班資料）
   const crossMonthJournals = userJournalData(jSnap).filter(j =>
     !j.teacherReviewed &&
     !(j.semester === sem && j.month === thisMonth)
@@ -5382,7 +5384,15 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
     // 補存舊評語值，供 saveTeacherComment() 計算 teacherCommentUpdated
-    if (_currentCommentJournal) _currentCommentJournal.oldComment = data.teacherComment || '';
+    // 2026-06-29 補修：加入身份比對，防止老師快速切換不同月記時，
+    // 較早的 getDoc .then() 仍對「已被覆寫成新月記的 _currentCommentJournal」設定 oldComment，
+    // 導致 commentChanged 計算基準錯誤（影響 teacherCommentUpdated 旗標）。
+    if (_currentCommentJournal &&
+        _currentCommentJournal.seatNo === seatNo &&
+        _currentCommentJournal.semester === semester &&
+        _currentCommentJournal.month === month) {
+      _currentCommentJournal.oldComment = data.teacherComment || '';
+    }
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;

@@ -1786,7 +1786,7 @@ async function checkMonthDeadline(skipFill = false) {
   // 讓 saveJournal() 的覆蓋確認對話框也能在這條路徑（一般填寫頁覆蓋當月既有月記）
   // 正確判斷「有回覆會暫時看不見」並顯示對應警告。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null }
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
     : { exists: false };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
