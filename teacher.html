@@ -5259,24 +5259,6 @@ function pdfJournalBlock(j, idx) {
     },
     margin: [0, 0, 0, 7]
   });
-  if (j.teacherReviewed || j.teacherComment) {
-    content.push({
-      table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
-        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
-      ] }]] },
-      layout: {
-        fillColor: () => '#f0fdf4',
-        hLineColor: () => '#86efac',
-        vLineColor: () => '#86efac',
-        paddingLeft: () => 8,
-        paddingRight: () => 8,
-        paddingTop: () => 7,
-        paddingBottom: () => 7
-      },
-      margin: [0, 0, 0, 8]
-    });
-  }
   return content;
 }
 
