@@ -2069,7 +2069,7 @@ function isEntryComplete(id) {
   const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
   const photoCount = document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`).length;
   const typeOk  = !!type && (type !== '其他' || !!other);
-  const addrOk  = !!addr;
+  const addrOk  = !!addr && !validateCompleteTaiwanAddress(addr);
   const distOk  = !!dist && !isNaN(parseFloat(dist));
   const contOk  = cont.length >= 10;
   const photoOk = noPhoto || photoCount > 0;
@@ -2520,7 +2520,7 @@ function initWriteDraftAutoSave() {
 // 工作摘要的 4 個檢查項目，順序固定供逐筆/逐欄位判斷與顯示共用
 const WORK_FIELD_CHECKS = [
   { key: 'type', label: '類型', test: e => !!e.type && (e.type !== '其他' || !!e.other) },
-  { key: 'address', label: '地址', test: e => !!e.address },
+  { key: 'address', label: '地址', test: e => !!e.address && !validateCompleteTaiwanAddress(e.address) },
   { key: 'distance', label: '距離', test: e => !!e.distance },
   { key: 'content', label: '內容10字+', test: e => e.content.length >= 10 }
 ];
