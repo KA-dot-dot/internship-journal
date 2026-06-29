@@ -2969,7 +2969,7 @@ async function saveStudent() {
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
-  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將會刪除該學生所有學期的月記資料，此操作無法復原。`)) return;
+  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將刪除該學生在本學期綁定信箱下的月記資料（其他學期若已重新分配座號則不受影響），此操作無法復原。`)) return;
   const { collectionGroup, getDocs, deleteDoc, doc } = firebase_funcs;
   showLoading();
   try {
@@ -5399,6 +5399,9 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
     }
     openModal('comment-modal');
   }).catch(() => {
+    // getDoc 失敗時：oldComment 設為空字串（視同「第一次留言」），
+    // saveTeacherComment 的 ?? '' 會做相同處理，此行僅作明確化記錄。
+    if (_currentCommentJournal) _currentCommentJournal.oldComment = '';
     document.getElementById('comment-modal-textarea').value = '';
     const replyBlock = document.getElementById('comment-modal-student-reply');
     if (replyBlock) replyBlock.style.display = 'none';

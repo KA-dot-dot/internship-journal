@@ -1714,8 +1714,8 @@ async function initWriteForm(skipDeadlineCheck = false) {
   writeDeadlineDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   snap.docs.forEach(d => {
     const dd = d.data();
-    const openDate = new Date(dd.openDate);
-    const closeDate = new Date(dd.closeDate);
+    const openDate = new Date(dd.openDate + 'T00:00:00+08:00');   // 補台灣時區，與 checkMonthDeadline() 一致
+    const closeDate = new Date(dd.closeDate + 'T23:59:59+08:00'); // 補台灣時區
     if (dd.semester && dd.month) {
       // 收錄所有有截止日設定的學期（含未開放），未開放月份由 checkMonthDeadline() 鎖定儲存
       if (!semMap[dd.semester]) semMap[dd.semester] = { label: dd.semesterLabel || dd.semester, latestOpen: openDate };
