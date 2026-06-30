@@ -3702,7 +3702,7 @@ async function exportAllStatsExcel() {
         姓名: s.name || j.studentName || '',
         日期: e.date || '',
         縣市: city,
-        工作地址: address,
+        工作地址: sanitizeExcelCell(address),
         '距學校(km)': e.distance ?? ''
       });
     });
@@ -3736,7 +3736,7 @@ async function exportAllStatsExcel() {
         公司: s.company || j.company || '',
         月份: `${j.month}月`,
         '薪資(元)': Number(j.salary) || 0,
-        '師傅/學長姐': j.mentor || ''
+        '師傅/學長姐': sanitizeExcelCell(j.mentor || '')
       };
     });
 
@@ -4002,6 +4002,17 @@ function safeDomIdPart(v) {
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// 2026-06-30 新增：Excel/CSV 公式注入防護。
+// 學生自由輸入文字（工作地址 entries[].address、師傅/學長姐 mentor）會原樣寫入
+// XLSX.utils.json_to_sheet() 產生的儲存格，若字串開頭為 =、+、-、@，部分 Excel
+// 版本（尤其是舊版、或資料被二次轉存成 CSV 後再開啟）有機率將其當成公式執行
+// （OWASP「CSV/Excel 公式注入」）。比照 calcDistance() escapeHtml() 防禦性加固的
+// 同等標準，補上前置單引號讓字串強制以純文字顯示。
+function sanitizeExcelCell(v) {
+  const s = String(v ?? '');
+  return /^[=+\-@]/.test(s) ? `'${s}` : s;
 }
 
 function renderLocationDetailTable(journals, selectedCompanies) {
