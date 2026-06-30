@@ -1,7 +1,18 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v15
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-29）
+ * 學生端自動化測試 v16
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-01）
+ *
+ * v16 新增（2026-07-01）：
+ *   S-SEC-28  executeDeleteJournal() 補上 showLoading()/hideLoading()（2026-06-30）
+ *             背景：單筆月記刪除函式原本完全沒有 loading 遮罩，與結構幾乎相同的姊妹函式
+ *             executeBatchDeleteHistory()（批次刪除，同樣呼叫 deleteDoc()）行為不一致；
+ *             且不符合本專案 Checklist「是否有 try/catch/finally 確保 hideLoading() 執行」。
+ *             loading 遮罩（position:fixed;inset:0;z-index:9998，無 pointer-events:none）
+ *             會實際阻擋使用者在網路延遲期間重複點擊確認按鈕，不只是視覺回饋問題。
+ *             修法：try 開頭加 showLoading()，成功與失敗路徑各自呼叫 hideLoading()。
+ *             驗證：確認函式原始碼含 showLoading()、try 區塊含 hideLoading()、
+ *             catch 區塊也含 hideLoading()（三項特徵缺一即退化）。
  *
  * v15 新增（2026-06-29）：
  *   S-SEC-27  完成度進度條／單筆摘要收合判斷的地址檢查補上格式驗證
@@ -1675,6 +1686,60 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('isEntryComplete() 的地址檢查（addrOk）沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會跟 saveJournal() 的真正存檔判斷不一致（地址格式不完整時誤顯示「✓完成」）');
     if (!result.fieldCheckUsesValidate)
       throw new Error('WORK_FIELD_CHECKS 的 address 檢查沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會讓「完成度 X/4」進度條誤顯示地址為綠字／可儲存，跟按下儲存時的實際判斷不一致');
+  });
+
+  // S-SEC-28  executeDeleteJournal() 補上 showLoading()/hideLoading()（2026-06-30）
+  await test('S-SEC-28 executeDeleteJournal() 有 showLoading()，且成功與失敗路徑皆有 hideLoading()', async () => {
+    // 2026-07-01 新增。
+    // executeDeleteJournal() 原本完全沒有呼叫 showLoading()/hideLoading()，與結構幾乎相同的
+    // 姊妹函式 executeBatchDeleteHistory()（批次刪除，同樣呼叫 deleteDoc()）行為不一致，
+    // 也不符合本專案安全性 Checklist「是否有 try/catch 確保 hideLoading() 一定執行」。
+    //
+    // 驗證三項特徵（缺一即退化）：
+    //   1. 函式本體含 showLoading() ── 刪除中有 loading 遮罩
+    //   2. try 區塊含 hideLoading()  ── 成功路徑會關閉遮罩
+    //   3. catch 區塊含 hideLoading() ── 失敗路徑也會關閉遮罩（不會卡住）
+    //
+    // 注意：executeDeleteJournal() 採「try/catch 各自呼叫 hideLoading()」寫法（不用 finally），
+    // 這與姊妹函式 executeBatchDeleteHistory() 的 showLoading()/hideLoading() 括在 try/catch
+    // 外部的寫法不同，但兩種都能確保任何路徑都會關閉遮罩，驗證邏輯對此保持彈性。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof executeDeleteJournal === 'function')
+        ? executeDeleteJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 是否有 showLoading()
+      const hasShowLoading = fnStr.includes('showLoading()');
+
+      // 把 try 區塊和 catch 區塊分開比對
+      // 找到 catch( 的位置，之前算 try 區塊，之後算 catch 區塊
+      const catchIdx = fnStr.indexOf('catch(');
+      const tryPart   = catchIdx > -1 ? fnStr.slice(0, catchIdx) : fnStr;
+      const catchPart = catchIdx > -1 ? fnStr.slice(catchIdx)    : '';
+
+      const tryHasHideLoading   = tryPart.includes('hideLoading()');
+      const catchHasHideLoading = catchPart.includes('hideLoading()');
+
+      return { skip: false, hasShowLoading, tryHasHideLoading, catchHasHideLoading };
+    });
+
+    if (result.skip) return;
+    if (!result.hasShowLoading)
+      throw new Error(
+        'executeDeleteJournal() 缺少 showLoading()，' +
+        '網路延遲時沒有 loading 遮罩，使用者可能重複點擊觸發多次刪除；' +
+        '且與姊妹函式 executeBatchDeleteHistory() 行為不一致'
+      );
+    if (!result.tryHasHideLoading)
+      throw new Error(
+        'executeDeleteJournal() 的成功路徑（try 區塊）缺少 hideLoading()，' +
+        '刪除成功後 loading 遮罩不會關閉'
+      );
+    if (!result.catchHasHideLoading)
+      throw new Error(
+        'executeDeleteJournal() 的失敗路徑（catch 區塊）缺少 hideLoading()，' +
+        '刪除失敗後 loading 遮罩會卡住'
+      );
   });
 
   return results;
