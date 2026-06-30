@@ -1,7 +1,25 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v11
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-28）
+ * 老師端自動化測試 v14
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-30）
+ *
+ * v14 新增（2026-06-30）：
+ *   T-SEC-25  executeBatchReview() 批次審閱同時清除學生回覆未讀旗標
+ *             （修正：原本 updateDoc 只寫 { teacherReviewed: true, reviewedAt: now }，
+ *             未包含 studentReplyUnread: false，導致月記若有學生回覆，
+ *             老師做完批次審閱後主頁「學生有新回覆」紅點永遠不歸零，
+ *             須逐一手動開評語 Modal 才能清除，使批次功能失去效用。
+ *             已補上 studentReplyUnread: false，與 saveTeacherComment() 行為一致。）
+ *
+ * v13 新增（2026-06-29）：
+ *   T-SEC-24  _openCommentModalWithUid() oldComment 設定前有 seatNo／semester／month
+ *             三重身份比對，防快速切換月記導致 commentChanged 計算基準錯誤
+ *
+ * v12 修正（2026-06-29）：
+ *   T-SEC-11  標題更正為「弱效 sanity check」，精確驗證指向 T-SEC-21
+ *   T-SEC-22  標題從「STEP 1 不洗 STEP 5」更正為「由 isCommentUpdate 控制（代理 sanity check）」，
+ *             如實反映清空評語 State 4→3 為語意合理的接受行為、非 bug
+ *             （外部稽核指出原描述與現行行為脫鉤）
  *
  * v11 新增（2026-06-28）：
  *   T-SEC-23  saveTeacherComment() 評語未改時 teacherCommentUnread 不重新觸發（State 3→2 防護）
@@ -851,7 +869,7 @@ async function runTeacherTests(page, log) {
   });
 
   await test('T-SEC-22 saveTeacherComment() teacherCommentUpdated 由 isCommentUpdate 控制（代理 sanity check）', async () => {
-    // ⚠️  標題已從「STEP 1 不洗 STEP 5」更正（2026-07-XX），因原描述與現行行為不符。
+    // ⚠️  標題已從「STEP 1 不洗 STEP 5」更正（2026-06-29），因原描述與現行行為不符。
     //
     // 現行行為（commentChanged 守衛 + spread 條件寫入）：
     //   ‧ 清空評語（oldComment 非空 → comment=""）→ commentChanged=true
@@ -971,6 +989,38 @@ async function runTeacherTests(page, log) {
       throw new Error(
         '_openCommentModalWithUid() 缺少 _currentCommentJournal.month === month 比對，' +
         'oldComment 身份比對不完整，同學期不同月份切換時有 commentChanged 錯誤風險'
+      );
+  });
+
+  await test('T-SEC-25 executeBatchReview() 批次審閱同時清除學生回覆未讀旗標（studentReplyUnread: false）', async () => {
+    // 2026-06-30 補修的回歸測試。
+    // 原本 executeBatchReview() 的 updateDoc 只寫：
+    //   { teacherReviewed: true, reviewedAt: now }
+    // 未包含 studentReplyUnread: false，造成以下問題：
+    //   若月記已有學生回覆（studentReplyUnread=true），批次審閱完成後
+    //   老師主頁「學生有新回覆」紅點數字永遠不歸零；
+    //   老師必須逐一手動開啟評語 Modal 才能清除，批次功能形同失效。
+    // 修正：補上 studentReplyUnread: false，與 saveTeacherComment() 行為一致
+    //   （saveTeacherComment() 每次儲存評語都會把 studentReplyUnread 一併設為 false，
+    //   標記學生回覆已讀，不論這次是否真的寫了新評語）。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof executeBatchReview === 'function')
+        ? executeBatchReview.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasStudentReplyUnread =
+        fnStr.includes('studentReplyUnread: false') ||
+        fnStr.includes('studentReplyUnread:false');
+
+      return { skip: false, hasStudentReplyUnread };
+    });
+
+    if (result.skip) return;
+    if (!result.hasStudentReplyUnread)
+      throw new Error(
+        'executeBatchReview() 的 updateDoc 缺少 studentReplyUnread: false，' +
+        '批次審閱後「學生有新回覆」紅點數字不會歸零，' +
+        '老師須逐一開評語 Modal 才能清除，使批次功能失去效用'
       );
   });
 
