@@ -5467,7 +5467,7 @@ async function executeBatchReview() {
   try {
     const now = localISOStr();
     await Promise.all(_batchReviewJournals.map(j =>
-      updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now })
+      updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now, studentReplyUnread: false })
     ));
     hideLoading();
     closeModal('batch-review-modal');
