@@ -73,7 +73,7 @@ function printSummary(label, results) {
   log('═'.repeat(50));
   log('產學班實習月記系統 自動化測試');
   log(`執行時間：${now}`);
-  log(`對應 AI_CONTEXT.md 版本：2026-06-28`);
+  log(`對應 AI_CONTEXT.md 版本：2026-06-30`);
   log('═'.repeat(50));
 
   // ── .env 讀取（一次，後面共用）────────────────────────
