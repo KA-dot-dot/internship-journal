@@ -3756,13 +3756,16 @@ function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
 async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能刪除自己的月記', 'error');
   const { doc, deleteDoc } = firebase_funcs;
+  showLoading();
   try {
     await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${semester}-${month}`));
+    hideLoading();
     closeModal('delete-journal-modal');
     toast('✅ 月記已刪除', 'success');
     loadStudentHistory();
     loadStudentDashboard();
   } catch(e) {
+    hideLoading();
     toast('刪除失敗：' + (e.message || '請重試'), 'error');
     closeModal('delete-journal-modal');
   }
