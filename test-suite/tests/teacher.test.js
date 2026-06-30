@@ -1,7 +1,19 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v14
+ * 老師端自動化測試 v15
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-30）
+ *
+ * v15 新增（2026-06-30）：
+ *   T-SEC-26  exportAllStatsExcel() Excel 公式注入防護（sanitizeExcelCell()）
+ *             （新發現：locationWs「工作地址」(entries[].address) 與 salaryWs
+ *             「師傅/學長姐」(j.mentor) 兩個欄位皆為學生在 student.html 自由輸入文字，
+ *             原本直接塞進 XLSX.utils.json_to_sheet() 產生的儲存格，字串若以
+ *             =／+／-／@ 開頭，部分 Excel（尤其舊版、或資料被轉存 CSV 後再開啟）
+ *             有機率被當成公式執行（OWASP CSV/Excel Formula Injection）。比照
+ *             calcDistance() escapeHtml() 防禦性加固的同等標準，新增
+ *             sanitizeExcelCell()：字串開頭符合上述四字元之一時補上前置單引號
+ *             強制純文字。公司／姓名／老師評語等欄位來自老師/管理端輸入，
+ *             信任邊界不同，本次不在範圍內。）
  *
  * v14 新增（2026-06-30）：
  *   T-SEC-25  executeBatchReview() 批次審閱同時清除學生回覆未讀旗標
@@ -1022,6 +1034,54 @@ async function runTeacherTests(page, log) {
         '批次審閱後「學生有新回覆」紅點數字不會歸零，' +
         '老師須逐一開評語 Modal 才能清除，使批次功能失去效用'
       );
+  });
+
+  await test('T-SEC-26 exportAllStatsExcel() Excel 公式注入防護（sanitizeExcelCell() 套用於工作地址／師傅姓名）', async () => {
+    // 2026-06-30 新增。
+    // locationWs「工作地址」(entries[].address) 與 salaryWs「師傅/學長姐」(j.mentor)
+    // 兩個欄位皆為學生在 student.html 自由輸入的文字，原本未經任何處理直接寫入
+    // XLSX.utils.json_to_sheet() 產生的儲存格。若學生填入以 =／+／-／@ 開頭的字串
+    // （例如 =HYPERLINK("http://evil.com","點我")），部分 Excel 版本（尤其舊版、
+    // 或匯出檔被二次轉存成 CSV 後再開啟）有機率將其當成公式執行
+    // （OWASP「CSV/Excel 公式注入」）。
+    //
+    // 驗證三項特徵：
+    //   1. sanitizeExcelCell() 函式本體存在，且邏輯正確（開頭為 =/+/-/@ 時補前置單引號）
+    //   2. locationRows 的「工作地址」欄位有呼叫 sanitizeExcelCell()
+    //   3. salaryRows 的「師傅/學長姐」欄位有呼叫 sanitizeExcelCell()
+    const result = await page.evaluate(() => {
+      if (typeof sanitizeExcelCell !== 'function') return { missingFn: true };
+
+      // 邏輯正確性：攻擊樣態應被加前置單引號，一般文字不受影響
+      const logicOk =
+        sanitizeExcelCell('=HYPERLINK("x","y")').startsWith("'=") &&
+        sanitizeExcelCell('+1+1').startsWith("'+") &&
+        sanitizeExcelCell('-9999').startsWith("'-") &&
+        sanitizeExcelCell('@SUM(A1)').startsWith("'@") &&
+        sanitizeExcelCell('403臺中市西區三民路一段199號') === '403臺中市西區三民路一段199號' &&
+        sanitizeExcelCell('王師傅') === '王師傅' &&
+        sanitizeExcelCell('') === '' &&
+        sanitizeExcelCell(null) === '' &&
+        sanitizeExcelCell(undefined) === '';
+
+      const fnStr = (typeof exportAllStatsExcel === 'function')
+        ? exportAllStatsExcel.toString() : '';
+
+      const addressCalled = /工作地址\s*:\s*sanitizeExcelCell\(/.test(fnStr);
+      const mentorCalled  = /['"]?師傅\/學長姐['"]?\s*:\s*sanitizeExcelCell\(/.test(fnStr);
+
+      return { missingFn: false, logicOk, addressCalled, mentorCalled, hasExportFn: !!fnStr };
+    });
+
+    if (result.missingFn)
+      throw new Error('sanitizeExcelCell() 函式不存在，Excel 公式注入防護已遺失');
+    if (!result.logicOk)
+      throw new Error('sanitizeExcelCell() 邏輯不正確（攻擊樣態未加前置單引號，或一般文字被誤改）');
+    if (!result.hasExportFn) return; // exportAllStatsExcel 未定義於全域作用域時略過字串比對
+    if (!result.addressCalled)
+      throw new Error('locationRows 的「工作地址」欄位未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (!result.mentorCalled)
+      throw new Error('salaryRows 的「師傅/學長姐」欄位未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
