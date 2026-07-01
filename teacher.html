@@ -3709,11 +3709,14 @@ async function exportAllStatsExcel() {
       const distNum = Number(distRaw);
       const distanceCell = (distRaw === null || distRaw === undefined || distRaw === '')
         ? '' : (Number.isFinite(distNum) ? distNum : '');
+      // 2026-07-01 補修（同批次，根因與上方 distance 相同）：
+      // 姓名 fallback 到 j.studentName、日期(entries[].date) 皆為未經 rule.txt 驗證的欄位，
+      // 技術使用者可直接 API 寫入任意字串繞過正常路徑，補上 sanitizeExcelCell() 防護。
       locationRows.push({
         公司: s.company || j.company || '',
         座號: j.seatNo || '',
-        姓名: s.name || j.studentName || '',
-        日期: e.date || '',
+        姓名: sanitizeExcelCell(s.name || j.studentName || ''),
+        日期: sanitizeExcelCell(e.date || ''),
         縣市: city,
         工作地址: sanitizeExcelCell(address),
         '距學校(km)': distanceCell
@@ -3743,11 +3746,12 @@ async function exportAllStatsExcel() {
     .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
     .map(j => {
       const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
+      // 2026-07-01 補修（同批次）：姓名 fallback、月份同樣未經 rule.txt 驗證，補上防護
       return {
         座號: j.seatNo || '',
-        姓名: s.name || j.studentName || '',
+        姓名: sanitizeExcelCell(s.name || j.studentName || ''),
         公司: s.company || j.company || '',
-        月份: `${j.month}月`,
+        月份: sanitizeExcelCell(`${j.month}月`),
         '薪資(元)': Number(j.salary) || 0,
         '師傅/學長姐': sanitizeExcelCell(j.mentor || '')
       };
@@ -3808,7 +3812,9 @@ async function exportAllStatsExcel() {
   });
   journals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))).forEach(j => {
     const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
-    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:s.name || j.studentName || '', 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白` });
+    // 2026-07-01 補修（同批次）：姓名 fallback 同上；說明欄內嵌 j.semester 且無任何前置字元，
+    // 是四項裡風險最直接的一處，整串套 sanitizeExcelCell() 防護
+    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
   });
   salaryCompanyList.map(c => {
     const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
@@ -3823,13 +3829,16 @@ async function exportAllStatsExcel() {
   // ── 工作表 4：月記清單（含評語、已審閱）──
   let journalListSource = userJournalData(jSnap);
   if (start && end) journalListSource = journalListSource.filter(j => journalMonthInRange(j, start, end));
+  // 2026-07-01 補修（同批次）：姓名/學期/月份/繳交時間/最後更新皆源自月記頂層欄位，
+  // rule.txt 未驗證格式，補上 sanitizeExcelCell() 防護。老師評語/已審閱來自老師端輸入，
+  // 信任邊界不同，不在本次範圍內（沿用既有判斷）。
   const journalListRows = journalListSource.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
     座號: j.seatNo || '',
-    姓名: (studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || '',
-    學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
-    月份: `${j.month}月`,
-    繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
-    最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
+    姓名: sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || ''),
+    學期: sanitizeExcelCell((j.semester || '').replace('-1','第1學期').replace('-2','第2學期')),
+    月份: sanitizeExcelCell(`${j.month}月`),
+    繳交時間: sanitizeExcelCell(j.submittedAt ? j.submittedAt.slice(0,10) : ''),
+    最後更新: sanitizeExcelCell((j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : ''),
     老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
