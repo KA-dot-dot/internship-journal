@@ -1,7 +1,21 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v15
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-30）
+ * 老師端自動化測試 v16
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-01）
+ *
+ * v16 新增（2026-07-01 第二次）：
+ *   T-SEC-27  exportAllStatsExcel() distance/type 兩欄位 Excel 公式注入防護
+ *             （補齊 T-SEC-26 未涵蓋範圍：外部稽核複查指出根本原因——rule.txt 對
+ *             entries[] 陣列元素完全沒有型別/格式驗證（Firestore Rules 無法對
+ *             變動長度陣列逐項驗證）——並未處理，entries[].distance／entries[].type
+ *             兩欄位若透過直接 API 呼叫繞過 UI 前端限制仍可寫入任意字串。distance
+ *             改用 Number() 強制轉型（語意上是數字欄位，比字串跳脫更根本，寫入
+ *             Excel 時型別必為 number 或空字串）；type 套用既有 sanitizeExcelCell()
+ *             （會變成 companyWorktypeRows 的欄位標題，語意是文字）。修正過程中
+ *             發現並修正一個真實迴歸——直接對 e.distance 做 Number() 轉型會讓
+ *             Number(null)===0 且 Number.isFinite(0)===true，把「未填距離」的合法
+ *             null 值誤顯示成「距離0km」；T-SEC-27 第三項特徵專門驗證此迴歸防護
+ *             （轉型前是否先明確排除 null/undefined/空字串）仍然存在。）
  *
  * v15 新增（2026-06-30）：
  *   T-SEC-26  exportAllStatsExcel() Excel 公式注入防護（sanitizeExcelCell()）
@@ -1082,6 +1096,64 @@ async function runTeacherTests(page, log) {
       throw new Error('locationRows 的「工作地址」欄位未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
     if (!result.mentorCalled)
       throw new Error('salaryRows 的「師傅/學長姐」欄位未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+  });
+
+  await test('T-SEC-27 exportAllStatsExcel() distance/type 兩欄位 Excel 公式注入防護（補齊 T-SEC-26 未涵蓋範圍）', async () => {
+    // 2026-07-01（第二次）新增。
+    // T-SEC-26（2026-06-30）只驗證了 entries[].address／j.mentor 兩欄位，但外部稽核
+    // 複查指出根本原因（rule.txt 對 entries[] 陣列元素完全沒有型別/格式驗證，
+    // Firestore Rules 無法對變動長度陣列逐項驗證）並未處理，entries[].distance／
+    // entries[].type 兩欄位若透過直接 API 呼叫繞過 UI 前端限制（distance 正常靠
+    // parseFloat()＋isNaN()；type 正常是 WORK_TYPES 固定選項或被 /^其他（.*）$/
+    // 收斂成 '其他'），同樣能寫入任意字串。
+    //
+    // 修法與 address/mentor 不同：
+    //   - distance 語意上是數字欄位，改用 Number() 強制轉型而非字串跳脫——任何
+    //     非數字字串（含攻擊字串）轉型失敗變 NaN 即清空，寫入 Excel 時型別必為
+    //     number 或空字串，從根源杜絕字串型公式注入（數字型別儲存格 SheetJS 標
+    //     為 'n'，不管數值多少都不可能被解讀成公式，只有字串型別才有這個風險）。
+    //   - type 語意是文字且會變成 companyWorktypeRows 的欄位標題（header），
+    //     套用既有 sanitizeExcelCell()，與 address/mentor 一致。
+    //
+    // 驗證四項特徵：
+    //   1. distance 賦值前有做 Number() 轉型（非直接沿用原始值）
+    //   2. distance 賦值有用 Number.isFinite() 判斷（非數字才清空為空字串）
+    //   3. distance 賦值前有明確排除 null/undefined/空字串（防止 Number(null)===0
+    //      被 isFinite() 誤判為合法「距離0」，這是修正過程中發現的真實迴歸——
+    //      未填距離的合法初始值 null 若被直接 Number() 轉型，會誤顯示成「距離0km」）
+    //   4. companyWorktypeMap 的 type 賦值有呼叫 sanitizeExcelCell()
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof exportAllStatsExcel === 'function')
+        ? exportAllStatsExcel.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const distanceUsesNumber       = /Number\(\s*(distRaw|e\.distance)\s*\)/.test(fnStr);
+      const distanceUsesFiniteCheck  = /Number\.isFinite\(\s*distNum\s*\)/.test(fnStr);
+      const distanceGuardsNullFirst  = /distRaw\s*===\s*null/.test(fnStr) ||
+                                        /e\.distance\s*===\s*null/.test(fnStr);
+      const typeUsesSanitize         = /const\s+type\s*=\s*sanitizeExcelCell\(/.test(fnStr);
+
+      return {
+        skip: false,
+        distanceUsesNumber,
+        distanceUsesFiniteCheck,
+        distanceGuardsNullFirst,
+        typeUsesSanitize,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.distanceUsesNumber)
+      throw new Error('locationRows 的「距學校(km)」欄位未對 e.distance 做 Number() 轉型，Excel 公式注入防護退化');
+    if (!result.distanceUsesFiniteCheck)
+      throw new Error('locationRows 的「距學校(km)」欄位未用 Number.isFinite() 判斷，非數字攻擊字串可能仍原樣寫入');
+    if (!result.distanceGuardsNullFirst)
+      throw new Error(
+        '「距學校(km)」欄位未在 Number() 轉型前明確排除 null/undefined，' +
+        '會讓「未填距離」的合法 null 值被 Number(null)===0 誤判成「距離0km」（真實迴歸，2026-07-01 曾發生過）'
+      );
+    if (!result.typeUsesSanitize)
+      throw new Error('companyWorktypeMap 的 type 賦值未呼叫 sanitizeExcelCell()，「各公司工作類型」工作表欄位標題的 Excel 公式注入防護退化');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
