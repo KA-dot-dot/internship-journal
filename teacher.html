@@ -3696,6 +3696,19 @@ async function exportAllStatsExcel() {
       const address = (e.address || '').trim();
       if (!address) return;
       const city = extractCityFromAddress(address);
+      // 2026-07-01 補修：distance 語意上為數字欄位，但 rule.txt 對 entries[] 陣列元素
+      // 沒有型別驗證（Firestore Rules 無法對變動長度陣列逐項驗證），技術使用者可繞過
+      // UI 的 parseFloat()/isNaN() 檢查、直接呼叫 API 寫入任意字串（含公式注入攻擊）。
+      // 用 Number() 強制轉型：非數字一律變成空字串，從根本上排除注入可能性，
+      // 比套用 sanitizeExcelCell() 的字串跳脫更適合本來就該是數字的欄位。
+      // 注意：null/undefined/空字串（saveJournal() 未填距離時的合法初始值，見
+      // student.html entries.map() 的 distance: e.distance??null）必須維持顯示空白，
+      // 不可先做 Number() 轉型再判斷——Number(null)===0 且 Number.isFinite(0)===true，
+      // 會誤把「未填距離」顯示成「距離 0km」，是不同語意，須先排除才轉型。
+      const distRaw = e.distance;
+      const distNum = Number(distRaw);
+      const distanceCell = (distRaw === null || distRaw === undefined || distRaw === '')
+        ? '' : (Number.isFinite(distNum) ? distNum : '');
       locationRows.push({
         公司: s.company || j.company || '',
         座號: j.seatNo || '',
@@ -3703,7 +3716,7 @@ async function exportAllStatsExcel() {
         日期: e.date || '',
         縣市: city,
         工作地址: sanitizeExcelCell(address),
-        '距學校(km)': e.distance ?? ''
+        '距學校(km)': distanceCell
       });
     });
   });
@@ -3827,7 +3840,13 @@ async function exportAllStatsExcel() {
     const company = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
     (j.entries || []).forEach(e => {
       const raw = (e.type || '').trim();
-      const type = /^其他（.*）$/.test(raw) ? '其他' : (raw || '未填寫');
+      // 2026-07-01 補修：正常 UI 流程下 type 只會是 WORK_TYPES 固定選項之一，或符合
+      // 「其他（說明）」格式（已被下行的 test() 收斂成固定字串 '其他'）。但 rule.txt
+      // 對 entries[] 陣列元素沒有型別/格式驗證，技術使用者可直接 API 寫入任意字串
+      // 繞過此正規表達式，該字串會直接變成 companyWorktypeMap 的 key，進而成為
+      // 「各公司工作類型」工作表的欄位標題（header），與 address/mentor 同屬未經清洗
+      // 字串進入 json_to_sheet() 的公式注入風險，套用 sanitizeExcelCell() 防護。
+      const type = sanitizeExcelCell(/^其他（.*）$/.test(raw) ? '其他' : (raw || '未填寫'));
       if (!companyWorktypeMap[company]) companyWorktypeMap[company] = {};
       companyWorktypeMap[company][type] = (companyWorktypeMap[company][type] || 0) + 1;
     });
