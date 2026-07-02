@@ -1950,14 +1950,21 @@ async function loadRosterStudentsForSemesters(semesters, journals = []) {
   const groups = await Promise.all(unique.map(async sem => {
     let roster = await loadTermRoster(sem, { fallbackRoot: sem === active });
     if (!roster.length) {
+      // 2026-07-02 補修：此學期沒有存過名冊快照時，直接從月記反推出一份「名冊」，
+      // name/company 這時候其實還是學生自己填的 j.studentName/j.company 原始欄位，
+      // 只是繞了一手，並不是「來自老師端輸入」的安全資料——T-SEC-26/27/28 三輪的
+      // sanitizeExcelCell() 防護都建立在「studentMap 資料來自名冊、安全」這個假設上，
+      // 這個假設在這個分支下不成立。在根源補上 sanitizeExcelCell()，讓所有透過
+      // students/studentMap 取值的下游（含未來新增的統計/匯出功能）都自動繼承防護，
+      // 不需要每次新增功能都重新掃一遍。
       const bySeat = {};
       journals.filter(j => j.semester === sem).forEach(j => {
         const seatNo = String(j.seatNo || '').padStart(2, '0');
         if (!seatNo || bySeat[seatNo]) return;
         bySeat[seatNo] = normalizeRosterStudent({
           seatNo,
-          name: j.studentName || '',
-          company: j.company || ''
+          name: sanitizeExcelCell(j.studentName || ''),
+          company: sanitizeExcelCell(j.company || '')
         }, sem);
       });
       roster = Object.values(bySeat);
@@ -3686,7 +3693,7 @@ async function exportAllStatsExcel() {
       return statusSymbolForJournal(j, deadlineMap);
     });
     const totalSlots = monthSlots.filter(slot => slot.sem === s.semester).length;
-    submitAoA.push([`${s.semester} ${s.seatNo}`, s.name || '', ...cells, `${submitted}/${totalSlots}`]);
+    submitAoA.push([`${s.semester} ${s.seatNo}`, sanitizeExcelCell(s.name || ''), ...cells, `${submitted}/${totalSlots}`]);
   });
 
   const locationRows = [];
@@ -3764,18 +3771,18 @@ async function exportAllStatsExcel() {
     const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)));
     const salaries = sJournals.map(j => Number(j.salary));
     const avg = salaryAvg(salaries) || '';
-    return { 座號: s.seatNo || s.id, 姓名: s.name || '', 公司: s.company || '', 月數: sJournals.length, '平均薪資(元)': avg };
+    return { 座號: s.seatNo || s.id, 姓名: sanitizeExcelCell(s.name || ''), 公司: sanitizeExcelCell(s.company || ''), 月數: sJournals.length, '平均薪資(元)': avg };
   });
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
   journals.filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary))).forEach(j => {
-    const c = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
+    const c = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
     companyAggMap[c].studentSet.add(j.seatNo);
     companyAggMap[c].salaries.push(Number(j.salary));
   });
   const companyRows2 = Object.entries(companyAggMap).sort((a,b) => b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length - a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)
-    .map(([name, d]) => ({ 公司名稱: name, 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
+    .map(([name, d]) => ({ 公司名稱: sanitizeExcelCell(name), 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
 
   // ── 薪資摘要與異常提醒，和頁面判斷口徑一致 ──
   const salaryStudentList = stuSalaryRows
@@ -3797,19 +3804,19 @@ async function exportAllStatsExcel() {
     { 項目:'全班薪資平均', 內容: salaryClassAvg || '' },
     { 項目:'最高單筆薪資', 內容: allSalaryNums.length ? Math.max(...allSalaryNums) : '' },
     { 項目:'最低單筆薪資', 內容: allSalaryNums.length ? Math.min(...allSalaryNums) : '' },
-    { 項目:'最高平均學生', 內容: topSalaryStudent ? `${topSalaryStudent.seatNo} ${topSalaryStudent.name}｜${topSalaryStudent.company}｜${topSalaryStudent.avg}` : '' },
-    { 項目:'最低平均學生', 內容: lowSalaryStudent ? `${lowSalaryStudent.seatNo} ${lowSalaryStudent.name}｜${lowSalaryStudent.company}｜${lowSalaryStudent.avg}` : '' },
-    { 項目:'最高平均公司', 內容: topSalaryCompany ? `${topSalaryCompany.name}｜${topSalaryCompany.studentCount}人｜${topSalaryCompany.avg}` : '' },
-    { 項目:'最低平均公司', 內容: lowSalaryCompany ? `${lowSalaryCompany.name}｜${lowSalaryCompany.studentCount}人｜${lowSalaryCompany.avg}` : '' }
+    { 項目:'最高平均學生', 內容: topSalaryStudent ? sanitizeExcelCell(`${topSalaryStudent.seatNo} ${topSalaryStudent.name}｜${topSalaryStudent.company}｜${topSalaryStudent.avg}`) : '' },
+    { 項目:'最低平均學生', 內容: lowSalaryStudent ? sanitizeExcelCell(`${lowSalaryStudent.seatNo} ${lowSalaryStudent.name}｜${lowSalaryStudent.company}｜${lowSalaryStudent.avg}`) : '' },
+    { 項目:'最高平均公司', 內容: topSalaryCompany ? sanitizeExcelCell(`${topSalaryCompany.name}｜${topSalaryCompany.studentCount}人｜${topSalaryCompany.avg}`) : '' },
+    { 項目:'最低平均公司', 內容: lowSalaryCompany ? sanitizeExcelCell(`${lowSalaryCompany.name}｜${lowSalaryCompany.studentCount}人｜${lowSalaryCompany.avg}`) : '' }
   ];
   const lowThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 0.8) : 0;
   const highThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 1.3) : 0;
   const salaryAlertRows = [];
   salaryStudentList.filter(s => lowThreshold && s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg).forEach(s => {
-    salaryAlertRows.push({ 類型:'低於平均20%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，低於門檻 ${lowThreshold}` });
+    salaryAlertRows.push({ 類型:'低於平均20%', 座號:s.seatNo, 姓名:sanitizeExcelCell(s.name), 公司:sanitizeExcelCell(s.company), 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，低於門檻 ${lowThreshold}` });
   });
   salaryStudentList.filter(s => highThreshold && s.avg > highThreshold).sort((a,b)=>b.avg-a.avg).forEach(s => {
-    salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
+    salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:sanitizeExcelCell(s.name), 公司:sanitizeExcelCell(s.company), 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
   });
   journals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))).forEach(j => {
     const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
@@ -3825,7 +3832,7 @@ async function exportAllStatsExcel() {
     const pct = max ? Math.round(gap / max * 100) : 0;
     return { ...c, max, min, gap, pct };
   }).filter(c => c.studentCount >= 2 && c.gap >= 5000 && c.pct >= 25).sort((a,b)=>b.gap-a.gap).forEach(c => {
-    salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:c.name, 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
+    salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:sanitizeExcelCell(c.name), 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
   });
   // ── 工作表 4：月記清單（含評語、已審閱）──
   let journalListSource = userJournalData(jSnap);
@@ -3847,7 +3854,7 @@ async function exportAllStatsExcel() {
   // ── 公司 × 工作類型統計 ──
   const companyWorktypeMap = {};
   journals.forEach(j => {
-    const company = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
+    const company = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
     (j.entries || []).forEach(e => {
       const raw = (e.type || '').trim();
       // 2026-07-01 補修：正常 UI 流程下 type 只會是 WORK_TYPES 固定選項之一，或符合
@@ -3867,7 +3874,7 @@ async function exportAllStatsExcel() {
   const companyWorktypeRows = Object.entries(companyWorktypeMap)
     .sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'))
     .map(([company, typeMap]) => {
-      const row = { 公司名稱: company };
+      const row = { 公司名稱: sanitizeExcelCell(company) };
       allWorkTypes.forEach(t => { row[t] = typeMap[t] || 0; });
       return row;
     });
