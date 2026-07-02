@@ -1,7 +1,26 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v17
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-01）
+ * 老師端自動化測試 v18
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02）
+ *
+ * v18 新增（2026-07-02）：
+ *   T-SEC-29  loadRosterStudentsForSemesters() 根源防護 + submitAoA／stuSalaryRows／
+ *             companyRows2／companyWorktypeRows／salaryAlertRows(低於平均20%／高於
+ *             平均30%／公司內部落差)／salarySummaryRows 共 6 個工作表/欄位群組的
+ *             Excel 公式注入防護（第四輪複查發現，根因與 T-SEC-26/27/28 相同，
+ *             但這次是透過 studentMap 間接繼承，肉眼看下游程式碼完全看不出來）。
+ *             （背景：T-SEC-26/27/28 三輪防護的判斷基礎都是「studentMap 資料來自
+ *             老師端名冊，安全」，但 loadRosterStudentsForSemesters() 在某學期完全
+ *             沒有存過名冊快照時，會直接從月記反推名冊：
+ *             bySeat[seatNo] = normalizeRosterStudent({ name: j.studentName || '',
+ *             company: j.company || '' }, sem)——這時候 studentMap 的 name/company
+ *             本質上還是學生自己填的原始欄位，只是繞了一手，「來自名冊、安全」
+ *             這個假設不成立。修法分兩層：①根源——loadRosterStudentsForSemesters()
+ *             的 fallback 重建處直接對 name/company 套 sanitizeExcelCell()，讓所有
+ *             透過 students/studentMap 取值的下游（含未來新增功能）自動繼承防護；
+ *             ②個別輸出點——即使根源修了，仍在每個實際寫入 Excel 儲存格的地方
+ *             各自補上 sanitizeExcelCell() 做第二層防禦。未修改 rule.txt，理由與
+ *             前三輪一致。）
  *
  * v17 新增（2026-07-01 第三次，含後續補漏）：
  *   T-SEC-28  exportAllStatsExcel() 姓名/公司/日期/月份/學期/繳交時間/最後更新
@@ -1261,6 +1280,107 @@ async function runTeacherTests(page, log) {
       throw new Error('journalListRows 的「繳交時間」欄位未呼叫 sanitizeExcelCell()，j.submittedAt 的 Excel 公式注入防護退化');
     if (!result.updatedAtCalled)
       throw new Error('journalListRows 的「最後更新」欄位未呼叫 sanitizeExcelCell()，j.updatedAt 的 Excel 公式注入防護退化');
+  });
+
+  await test('T-SEC-29 loadRosterStudentsForSemesters() 根源防護 + submitAoA/stuSalaryRows/companyRows2/companyWorktypeRows/salaryAlertRows(低於/高於平均/公司內部落差)/salarySummaryRows Excel 公式注入防護（第四輪，根因與 T-SEC-26/27/28 相同但透過 studentMap 間接繼承）', async () => {
+    // 2026-07-02 新增。
+    // 背景：T-SEC-26/27/28 三輪的 sanitizeExcelCell() 防護，判斷基礎都是「studentMap
+    // 裡的姓名/公司資料來自老師端名冊，信任邊界跟學生自由輸入不同」。但
+    // loadRosterStudentsForSemesters() 在某學期完全沒有存過名冊快照時
+    // （roster.length === 0，常見於較舊的封存學期），會直接從月記反推出一份
+    // 「名冊」：bySeat[seatNo] = normalizeRosterStudent({ name: j.studentName || '',
+    // company: j.company || '' }, sem) —— 這代表 studentMap 這時候的 name/company
+    // 本質上還是學生自己填的原始欄位，只是繞了一手，前三輪「來自名冊、安全」的假設
+    // 在這個分支下不成立。凡是透過 studentMap 取值、卻沒有各自補上 sanitizeExcelCell()
+    // 的下游，全部間接繼承了這個洞。
+    //
+    // 修法分兩層：① 根源——loadRosterStudentsForSemesters() 的 fallback 重建處直接
+    // 對 name/company 套 sanitizeExcelCell()，讓所有透過 students/studentMap 取值的
+    // 下游（含未來新增的統計/匯出功能）自動繼承防護；② 個別輸出點——即使根源修了，
+    // 仍在下列每個實際寫入 Excel 儲存格的地方各自補上 sanitizeExcelCell()，
+    // 做為第二層防禦（若未來根源修正被誤刪，個別輸出點仍能擋住），且對正常資料
+    // 完全無副作用（sanitizeExcelCell() 只在字串開頭為 =+-@ 時才動作）：
+    //   - submitAoA（工作表「繳交狀況」）：姓名
+    //   - stuSalaryRows（工作表「學生薪資總覽」）：姓名、公司
+    //   - companyAggMap 的 c／companyWorktypeMap 的 company：studentMap 查無此人時
+    //     直接 fallback 到 j.company，是跟「studentMap 本身被污染」不同的另一種失效
+    //     模式（查無資料，不是資料本身被污染），根源修正對它沒幫助，需個別補
+    //   - companyRows2（工作表「各公司薪資」）／companyWorktypeRows（工作表「公司×
+    //     工作類型統計」）：公司名稱（來源已在 companyAggMap/companyWorktypeMap
+    //     清洗過，這裡屬於重複防護)
+    //   - salaryAlertRows「低於平均20%」「高於平均30%」「公司內部落差」三種類型
+    //     （T-SEC-28 只補了「薪資缺漏」一種，這輪補齊剩下三種）
+    //   - salarySummaryRows「最高/最低平均學生」「最高/最低平均公司」四行內容
+    //     （前兩行實務上有 seatNo 前綴意外擋住，跟「月」字尾同一種巧合保護、
+    //     不該依賴；後兩行公司名稱排在字串開頭，完全沒有任何遮擋）
+    const result = await page.evaluate(() => {
+      const rosterFnStr = (typeof loadRosterStudentsForSemesters === 'function')
+        ? loadRosterStudentsForSemesters.toString() : '';
+      const exportFnStr = (typeof exportAllStatsExcel === 'function')
+        ? exportAllStatsExcel.toString() : '';
+      if (!rosterFnStr || !exportFnStr) return { skip: true };
+
+      const rosterFallbackProtected =
+        /name\s*:\s*sanitizeExcelCell\(\s*j\.studentName/.test(rosterFnStr) &&
+        /company\s*:\s*sanitizeExcelCell\(\s*j\.company/.test(rosterFnStr);
+
+      const submitAoaCalled = /sanitizeExcelCell\(s\.name \|\| ''\)/.test(exportFnStr);
+      const stuSalaryCompanyCalled = /sanitizeExcelCell\(s\.company \|\| ''\)/.test(exportFnStr);
+      // s.name || '' 應出現在 submitAoA 與 stuSalaryRows 兩處，共 2 次
+      const nameOrEmptyCount = (exportFnStr.match(/sanitizeExcelCell\(s\.name \|\| ''\)/g) || []).length;
+
+      const companyAggMapCalled = /const c = sanitizeExcelCell\(/.test(exportFnStr);
+      const companyWorktypeMapCalled = /const company = sanitizeExcelCell\(/.test(exportFnStr);
+      const companyRows2Called = /公司名稱\s*:\s*sanitizeExcelCell\(name\)/.test(exportFnStr);
+      const companyWorktypeRowsCalled = /公司名稱\s*:\s*sanitizeExcelCell\(company\)/.test(exportFnStr);
+
+      // 低於平均20%／高於平均30%：姓名、公司皆為 sanitizeExcelCell(s.name)／(s.company)（無 || ''）
+      const alertNameCount = (exportFnStr.match(/姓名\s*:\s*sanitizeExcelCell\(s\.name\)/g) || []).length;
+      const alertCompanyCount = (exportFnStr.match(/公司\s*:\s*sanitizeExcelCell\(s\.company\)/g) || []).length;
+      const gapCalled = /公司\s*:\s*sanitizeExcelCell\(c\.name\)/.test(exportFnStr);
+
+      const summaryCalledCount = (exportFnStr.match(/內容\s*:\s*\w+\s*\?\s*sanitizeExcelCell\(`/g) || []).length;
+
+      return {
+        skip: false,
+        rosterFallbackProtected,
+        submitAoaCalled,
+        stuSalaryCompanyCalled,
+        nameOrEmptyCount,
+        companyAggMapCalled,
+        companyWorktypeMapCalled,
+        companyRows2Called,
+        companyWorktypeRowsCalled,
+        alertNameCount,
+        alertCompanyCount,
+        gapCalled,
+        summaryCalledCount,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.rosterFallbackProtected)
+      throw new Error('loadRosterStudentsForSemesters() 的 journal fallback 重建處未對 name/company 呼叫 sanitizeExcelCell()，根源防護退化（studentMap 可能再次間接帶入未清洗的學生自由輸入）');
+    if (result.nameOrEmptyCount < 2)
+      throw new Error(`sanitizeExcelCell(s.name || '') 只出現 ${result.nameOrEmptyCount} 次（應為 2：submitAoA + stuSalaryRows），至少一處 Excel 公式注入防護退化`);
+    if (!result.stuSalaryCompanyCalled)
+      throw new Error('stuSalaryRows 的「公司」欄位未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (!result.companyAggMapCalled)
+      throw new Error('companyAggMap 的 c（studentMap 查無資料時直接 fallback 到 j.company）未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (!result.companyWorktypeMapCalled)
+      throw new Error('companyWorktypeMap 的 company（studentMap 查無資料時直接 fallback 到 j.company）未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (!result.companyRows2Called)
+      throw new Error('companyRows2（工作表「各公司薪資」）的「公司名稱」未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (!result.companyWorktypeRowsCalled)
+      throw new Error('companyWorktypeRows（工作表「公司×工作類型統計」）的「公司名稱」未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (result.alertNameCount < 2)
+      throw new Error(`salaryAlertRows「低於平均20%」／「高於平均30%」的「姓名」呼叫 sanitizeExcelCell() 的次數只有 ${result.alertNameCount}（應為 2），Excel 公式注入防護退化`);
+    if (result.alertCompanyCount < 2)
+      throw new Error(`salaryAlertRows「低於平均20%」／「高於平均30%」的「公司」呼叫 sanitizeExcelCell() 的次數只有 ${result.alertCompanyCount}（應為 2），Excel 公式注入防護退化`);
+    if (!result.gapCalled)
+      throw new Error('salaryAlertRows「公司內部落差」的「公司」未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
+    if (result.summaryCalledCount < 4)
+      throw new Error(`salarySummaryRows「最高/最低平均學生」「最高/最低平均公司」呼叫 sanitizeExcelCell() 的次數只有 ${result.summaryCalledCount}（應為 4），至少一行 Excel 公式注入防護退化`);
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
