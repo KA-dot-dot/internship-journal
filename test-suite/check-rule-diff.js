@@ -137,6 +137,16 @@ const DANGER_PATTERNS = [
       '差別：學生端 saveJournal() 固定會帶這些欄位（值為 null/false），用 hasAny() 判斷「不存在」會把這種正常寫入也擋掉。',
     regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherComment|teacherReviewed|reviewedAt|teacherCommentUnread)[^\]]*\]\s*\)/,
   },
+  {
+    desc:
+      '同一種 !keys().hasAny([...]) 誤用，發生在 2026-06-26～28 陸續新增的 teacherCommentUpdated／studentReply／' +
+      'studentReplyUnread／studentReplyAt 這幾個欄位上（studentReply 孤兒狀態與 seatNo 驗證那五輪修正加的）。' +
+      '這幾個欄位在 rule.txt 目前用的是 .get(field, default) == default（CREATE 分支）或 ' +
+      '.get(field, default) == resource.data.get(field, default)（UPDATE 一般編輯分支，要求維持原值不變）這類寫法，' +
+      '跟 2026-06-17 那次的欄位屬於同一種風險（誤寫成 hasAny() 檢查「不存在」，會放行不該通過的寫入，或擋下正常寫入)，' +
+      '所以另外列一條規則掃描，不依賴人工在區塊 diff 裡自己看出來。',
+    regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentUpdated|studentReplyUnread|studentReplyAt|studentReply)[^\]]*\]\s*\)/,
+  },
 ];
 
 function scanDangerPatterns(content) {

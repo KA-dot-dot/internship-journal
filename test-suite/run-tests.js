@@ -73,7 +73,11 @@ function printSummary(label, results) {
   log('═'.repeat(50));
   log('產學班實習月記系統 自動化測試');
   log(`執行時間：${now}`);
-  log(`對應 AI_CONTEXT.md 版本：2026-06-30`);
+  // ⚠️ 這行是純手動同步的字串，不會自動反映 tests/*.test.js 的實際版本。
+  //    每次 student.test.js 或 teacher.test.js 版本號變動（v 數字或測試數變動）時，
+  //    要一併把下面日期改成 AI_CONTEXT.md 最新確認的日期，否則報告開頭會顯示過期版本。
+  //    （這行過去已經連續多輪忘記同步，2026-07-02 這次順手核對成目前最新版本。）
+  log(`對應 AI_CONTEXT.md 版本：2026-07-02`);
   log('═'.repeat(50));
 
   // ── .env 讀取（一次，後面共用）────────────────────────
