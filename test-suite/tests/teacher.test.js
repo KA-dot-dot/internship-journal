@@ -3,28 +3,36 @@
  * 老師端自動化測試 v17
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-01）
  *
- * v17 新增（2026-07-01 第三次）：
- *   T-SEC-28  exportAllStatsExcel() 姓名/日期/月份/學期/繳交時間/最後更新共11處
- *             Excel 公式注入防護（收斂 T-SEC-26／T-SEC-27 之後第三輪複查發現）
+ * v17 新增（2026-07-01 第三次，含後續補漏）：
+ *   T-SEC-28  exportAllStatsExcel() 姓名/公司/日期/月份/學期/繳交時間/最後更新
+ *             共14處 Excel 公式注入防護（收斂 T-SEC-26／T-SEC-27 之後第三輪複查發現）
  *             （外部稽核複查指出：T-SEC-26 只補了 address/mentor，T-SEC-27 只補了
  *             distance/type，但同一個函式裡至少還有下列同根因（rule.txt 對
  *             entries[]／月記頂層欄位皆無型別驗證）卻未處理的欄位：
- *             - locationRows：姓名（s.name || j.studentName fallback）、日期（entries[].date）
- *             - salaryRows：姓名（同上 fallback）、月份（j.month）
- *             - salaryAlertRows「薪資缺漏」：姓名（同上 fallback）、說明
+ *             - locationRows：姓名（s.name || j.studentName fallback）、公司
+ *               （s.company || j.company fallback，跟姓名同一種模式，第一輪複查
+ *               漏補、第二次複查才補上）、日期（entries[].date）
+ *             - salaryRows：姓名、公司（同上兩種 fallback）、月份（j.month）
+ *             - salaryAlertRows「薪資缺漏」：姓名、公司（同上兩種 fallback）、說明
  *               （內嵌 j.semester + j.month，且 j.semester 直接在字串開頭、
  *               無任何前置字元或轉換處理，是目前所有實例裡風險最直接的一處）
- *             - journalListRows：姓名（同上 fallback）、學期
+ *             - journalListRows：姓名（同上 fallback，此陣列無「公司」欄位）、學期
  *               （(j.semester||'').replace('-1',...).replace('-2',...) 只替換兩個
  *               固定子字串，非預期格式的攻擊字串完全不會命中、原樣通過）、
  *               月份、繳交時間（j.submittedAt.slice(0,10)）、最後更新
  *               （j.updatedAt.slice(0,10)，.slice() 只截長度、不動起始字元）
- *             共 4 個陣列、11 個欄位實例，全數補上既有 sanitizeExcelCell()（老師評語／
+ *             共 4 個陣列、14 個欄位實例，全數補上既有 sanitizeExcelCell()（老師評語／
  *             已審閱不在範圍內，來自老師端輸入，信任邊界不同，沿用既有判斷）。
  *             未修改 rule.txt——Firestore Rules 語言無法對變動長度陣列逐項驗證，
  *             即使對 semester/month 等頂層純量欄位補格式驗證，也會牽動 Layer 1/
  *             Layer 3 整套重跑，維持「在唯一會把字串當公式解讀的輸出端（Excel
  *             儲存格組成當下）防護」與前兩輪一致的做法。
+ *             【已知遺漏，尚未處理】companyAggMap／companyRows2（工作表3「各公司薪資」，
+ *             companyWs2）的分組 key 一樣是 (studentMap[...]?.company) || j.company || '未填寫'，
+ *             同一根因，但這裡是先當 Map key 分組、再輸出成「公司名稱」欄位，且下游
+ *             salaryStudentList.filter(s => s.company === r.公司名稱) 依賴這個值做相等比對，
+ *             要修必須同時確認清洗後的比對邏輯不會跟著壞掉，複雜度跟前面 4 處不同，
+ *             這輪先不動，留待下一輪決定是否處理。
  *
  * v16 新增（2026-07-01 第二次）：
  *   T-SEC-27  exportAllStatsExcel() distance/type 兩欄位 Excel 公式注入防護
@@ -1179,38 +1187,43 @@ async function runTeacherTests(page, log) {
       throw new Error('companyWorktypeMap 的 type 賦值未呼叫 sanitizeExcelCell()，「各公司工作類型」工作表欄位標題的 Excel 公式注入防護退化');
   });
 
-  await test('T-SEC-28 exportAllStatsExcel() 姓名/日期/月份/學期/繳交時間/最後更新 Excel 公式注入防護（收斂 T-SEC-26/27 之後第三輪）', async () => {
-    // 2026-07-01（第三次）新增。
+  await test('T-SEC-28 exportAllStatsExcel() 姓名/公司/日期/月份/學期/繳交時間/最後更新 Excel 公式注入防護（收斂 T-SEC-26/27 之後第三輪）', async () => {
+    // 2026-07-01（第三次，含後續補漏）新增。
     // T-SEC-26 只驗證了 entries[].address／j.mentor，T-SEC-27 只驗證了
     // entries[].distance／entries[].type，但同一個函式裡至少還有下列同根因
     // （rule.txt 對 entries[] 陣列與月記頂層欄位皆無型別驗證，技術使用者可
     // 直接 API 呼叫繞過 UI 前端限制寫入任意字串）卻未處理的欄位：
-    //   - locationRows：姓名（s.name || j.studentName fallback）、日期（entries[].date）
-    //   - salaryRows：姓名（同上 fallback）、月份（j.month）
-    //   - salaryAlertRows「薪資缺漏」：姓名（同上 fallback）、說明
+    //   - locationRows：姓名（s.name || j.studentName fallback）、公司
+    //     （s.company || j.company fallback，跟姓名同一種 fallback 模式）、
+    //     日期（entries[].date）
+    //   - salaryRows：姓名、公司（同上兩種 fallback）、月份（j.month）
+    //   - salaryAlertRows「薪資缺漏」：姓名、公司（同上兩種 fallback）、說明
     //     （內嵌 j.semester + j.month，j.semester 直接在字串開頭無任何前置字元，
     //     是所有實例裡風險最直接的一處）
-    //   - journalListRows：姓名（同上 fallback）、學期
+    //   - journalListRows：姓名（同上 fallback，此陣列無「公司」欄位）、學期
     //     （.replace('-1',...).replace('-2',...) 只替換兩個固定子字串，非預期格式
     //     的攻擊字串完全不會命中、原樣通過）、月份、繳交時間、最後更新
     //     （皆為 .slice(0,10) 截字串，只截長度不動起始字元）
     //
-    // 驗證 7 項特徵（涵蓋 4 個陣列共 11 個欄位實例，「姓名」與「月份」各自
+    // 驗證 8 項特徵（涵蓋 4 個陣列共 14 個欄位實例，「姓名」「公司」「月份」各自
     // 重複出現多次，用出現次數而非單純存在與否驗證，避免漏改其中一處仍誤判通過）：
     //   1. 「姓名」欄位呼叫 sanitizeExcelCell() 的次數 = 4（locationRows/salaryRows/
     //      salaryAlertRows/journalListRows 各一次）
-    //   2. locationRows「日期」欄位呼叫 sanitizeExcelCell()
-    //   3. 「月份」欄位呼叫 sanitizeExcelCell() 的次數 = 2（salaryRows/journalListRows）
-    //   4. salaryAlertRows「說明」欄位呼叫 sanitizeExcelCell()
-    //   5. journalListRows「學期」欄位呼叫 sanitizeExcelCell()
-    //   6. journalListRows「繳交時間」欄位呼叫 sanitizeExcelCell()
-    //   7. journalListRows「最後更新」欄位呼叫 sanitizeExcelCell()
+    //   2. 「公司」欄位呼叫 sanitizeExcelCell() 的次數 = 3（locationRows/salaryRows/
+    //      salaryAlertRows 各一次；journalListRows 無此欄位）
+    //   3. locationRows「日期」欄位呼叫 sanitizeExcelCell()
+    //   4. 「月份」欄位呼叫 sanitizeExcelCell() 的次數 = 2（salaryRows/journalListRows）
+    //   5. salaryAlertRows「說明」欄位呼叫 sanitizeExcelCell()
+    //   6. journalListRows「學期」欄位呼叫 sanitizeExcelCell()
+    //   7. journalListRows「繳交時間」欄位呼叫 sanitizeExcelCell()
+    //   8. journalListRows「最後更新」欄位呼叫 sanitizeExcelCell()
     const result = await page.evaluate(() => {
       const fnStr = (typeof exportAllStatsExcel === 'function')
         ? exportAllStatsExcel.toString() : '';
       if (!fnStr) return { skip: true };
 
       const nameCalledCount = (fnStr.match(/姓名\s*:\s*sanitizeExcelCell\(/g) || []).length;
+      const companyCalledCount = (fnStr.match(/公司\s*:\s*sanitizeExcelCell\(/g) || []).length;
       const dateCalled = /日期\s*:\s*sanitizeExcelCell\(/.test(fnStr);
       const monthCalledCount = (fnStr.match(/月份\s*:\s*sanitizeExcelCell\(/g) || []).length;
       const descCalled = /說明\s*:\s*sanitizeExcelCell\(/.test(fnStr);
@@ -1221,6 +1234,7 @@ async function runTeacherTests(page, log) {
       return {
         skip: false,
         nameCalledCount,
+        companyCalledCount,
         dateCalled,
         monthCalledCount,
         descCalled,
@@ -1233,6 +1247,8 @@ async function runTeacherTests(page, log) {
     if (result.skip) return;
     if (result.nameCalledCount < 4)
       throw new Error(`「姓名」欄位呼叫 sanitizeExcelCell() 的次數只有 ${result.nameCalledCount}（應為 4：locationRows/salaryRows/salaryAlertRows/journalListRows），至少一處 studentName fallback 的 Excel 公式注入防護退化`);
+    if (result.companyCalledCount < 3)
+      throw new Error(`「公司」欄位呼叫 sanitizeExcelCell() 的次數只有 ${result.companyCalledCount}（應為 3：locationRows/salaryRows/salaryAlertRows），至少一處 j.company fallback 的 Excel 公式注入防護退化`);
     if (!result.dateCalled)
       throw new Error('locationRows 的「日期」欄位未呼叫 sanitizeExcelCell()，entries[].date 的 Excel 公式注入防護退化');
     if (result.monthCalledCount < 2)
