@@ -3710,10 +3710,11 @@ async function exportAllStatsExcel() {
       const distanceCell = (distRaw === null || distRaw === undefined || distRaw === '')
         ? '' : (Number.isFinite(distNum) ? distNum : '');
       // 2026-07-01 補修（同批次，根因與上方 distance 相同）：
-      // 姓名 fallback 到 j.studentName、日期(entries[].date) 皆為未經 rule.txt 驗證的欄位，
-      // 技術使用者可直接 API 寫入任意字串繞過正常路徑，補上 sanitizeExcelCell() 防護。
+      // 姓名 fallback 到 j.studentName、日期(entries[].date)、公司 fallback 到 j.company
+      // 皆為未經 rule.txt 驗證的欄位，技術使用者可直接 API 寫入任意字串繞過正常路徑，
+      // 補上 sanitizeExcelCell() 防護。
       locationRows.push({
-        公司: s.company || j.company || '',
+        公司: sanitizeExcelCell(s.company || j.company || ''),
         座號: j.seatNo || '',
         姓名: sanitizeExcelCell(s.name || j.studentName || ''),
         日期: sanitizeExcelCell(e.date || ''),
@@ -3746,11 +3747,11 @@ async function exportAllStatsExcel() {
     .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
     .map(j => {
       const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
-      // 2026-07-01 補修（同批次）：姓名 fallback、月份同樣未經 rule.txt 驗證，補上防護
+      // 2026-07-01 補修（同批次）：姓名 fallback、公司 fallback、月份同樣未經 rule.txt 驗證，補上防護
       return {
         座號: j.seatNo || '',
         姓名: sanitizeExcelCell(s.name || j.studentName || ''),
-        公司: s.company || j.company || '',
+        公司: sanitizeExcelCell(s.company || j.company || ''),
         月份: sanitizeExcelCell(`${j.month}月`),
         '薪資(元)': Number(j.salary) || 0,
         '師傅/學長姐': sanitizeExcelCell(j.mentor || '')
@@ -3812,9 +3813,9 @@ async function exportAllStatsExcel() {
   });
   journals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))).forEach(j => {
     const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
-    // 2026-07-01 補修（同批次）：姓名 fallback 同上；說明欄內嵌 j.semester 且無任何前置字元，
+    // 2026-07-01 補修（同批次）：姓名／公司 fallback 同上；說明欄內嵌 j.semester 且無任何前置字元，
     // 是四項裡風險最直接的一處，整串套 sanitizeExcelCell() 防護
-    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
+    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:sanitizeExcelCell(s.company || j.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
   });
   salaryCompanyList.map(c => {
     const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
