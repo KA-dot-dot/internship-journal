@@ -4,7 +4,18 @@ service cloud.firestore {
     function schoolUser() {
       return request.auth != null
         && request.auth.token.email is string
-        && request.auth.token.email.matches('^[^@]+@tcivs\\.tc\\.edu\\.tw$');
+        && request.auth.token.email.matches('^[^@]+@tcivs\\.tc\\.edu\\.tw$')
+        // 2026-07-03 補修：要求 email_verified == true，防止透過 Email/Password
+        // 自助註冊、拿一個尚未被任何 provider 使用過的校內信箱字串（例如老師已
+        // 建立 studentBindings 但學生本人尚未第一次登入的空窗期）取得可通過
+        // schoolUser() 的 token，進而讀取/竄改該生 binding 或冒用其座號建立月記。
+        // Google 登入的真實使用者本來就是 email_verified=true，不受影響；
+        // Email/Password 帳號需要真的收到並點擊驗證信才會變 true，等於要求
+        // 「真的掌控該信箱」，把這條路徑拉回跟 Google OAuth 一樣「網域控制力
+        // 歸屬校方」的狀態。⚠️ 部署前必須先確認 test-teacher@ / test-student@
+        // 兩組測試帳號在 Firebase Console 的 email_verified 狀態為 true，否則會
+        // 連 CI 自動登入一起擋下。
+        && request.auth.token.email_verified == true;
     }
     function emailKey() {
       return request.auth.token.email
