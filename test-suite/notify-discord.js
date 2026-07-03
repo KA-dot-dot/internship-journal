@@ -46,12 +46,26 @@ const runUrl =
     ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
     : null;
 
+// canary.yml 是學生端＋老師端一起跑（node run-tests.js 不加 --student/--teacher），
+// 失敗的可能只有一端、也可能兩端都有，不能寫死「學生端」。
+// 從報告內容判斷實際是哪一端出問題：
+//   - 正常測試失敗／未預期錯誤都會在報告裡留下「❌ 學生端」或「❌ 老師端」開頭的訊息
+//     （見 run-tests.js 的 printSummary 總結行、以及各自 catch 區塊的錯誤訊息）
+const failedSides = [];
+if (/❌\s*學生端/.test(report)) failedSides.push('學生端');
+if (/❌\s*老師端/.test(report)) failedSides.push('老師端');
+const sidePrefix = failedSides.length > 0 ? failedSides.join(' + ') : '';
+
 const lines = [
   '<@1014888012888412262>',
-  '🚨 **產學班實習月記系統｜學生端自動化健康檢查失敗**',
+  `🚨 **產學班實習月記系統｜${sidePrefix}自動化健康檢查失敗**`,
   `結果：${summaryText}`,
   '',
 ];
+
+if (failedSides.length === 0) {
+  lines.push('⚠️ 無法從報告內容判斷是學生端還是老師端失敗（可能在瀏覽器啟動或 session 取得階段就中止），請看完整報告。', '');
+}
 
 if (failedDetails.length > 0) {
   lines.push('失敗項目：');
