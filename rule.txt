@@ -63,7 +63,13 @@ service cloud.firestore {
         );
     }
     match /studentBindings/{bindingId} {
-      allow get: if bindingId == emailKey() || isAdmin();
+      // 2026-07-03 補修：原本只比對 bindingId == emailKey()，完全沒呼叫 schoolUser()，
+      // 導致同一批新增的 email_verified 檢查沒套用到這裡——只要 email 字串對得上
+      // 對應的 emailKey()，不論這個 token 是否真的驗證過都能讀到該筆 binding
+      // （老師開學建好名冊、學生本人尚未第一次登入的空窗期正是會被利用的情境）。
+      // 補上 schoolUser() 後，讀取者必須先通過「校內信箱格式 + email_verified==true」
+      // 才會進一步比對 bindingId，其餘條件（bindingId 對應 emailKey()）不變。
+      allow get: if (schoolUser() && bindingId == emailKey()) || isAdmin();
       allow list, create, delete: if isAdmin();
       allow update: if (
           schoolUser()
