@@ -13,7 +13,10 @@ on:
 
 jobs:
   canary:
-    name: 完整自動化測試（學生端 49 項 + 老師端 39 項）
+    # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
+    #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
+    #    （目前對應 2026-07-02：student.test.js 62 項、teacher.test.js 50 項）。
+    name: 完整自動化測試（學生端 62 項 + 老師端 50 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
