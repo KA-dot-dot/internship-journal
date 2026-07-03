@@ -56,6 +56,17 @@ const OUTSIDER_UID = 'outsider-uid';
 const NO_BINDING_EMAIL = 'nobind@tcivs.tc.edu.tw';
 const NO_BINDING_UID = 'no-binding-uid';
 
+// 2026-07-03 新增：模擬「老師已建立 studentBindings（開學匯入名單），但學生本人
+// 尚未第一次登入」的空窗期——binding 存在、有真實 seatNo，但 uid 欄位還沒被寫入。
+// 這是 email_verified 防護要擋的核心情境：在補上此檢查之前，任何人只要能取得一個
+// email 對得上的 token（不論是否真的驗證過），就能讀取/竄改這份 binding、或直接
+// 冒用該座號建立月記，因為 rule.txt 原本判斷全部只看 email 字串，不看 uid。
+const UNCLAIMED_EMAIL = 'stu03@tcivs.tc.edu.tw';
+const UNCLAIMED_SEAT = '03';
+const UNCLAIMED_BINDING_ID = emailKey(UNCLAIMED_EMAIL);
+const ATTACKER_UID = 'attacker-uid'; // 攻擊者自己的 Firebase 帳號 uid，不等於任何真實學生
+const UNCLAIMED_UID_LEGIT = 'unclaimed-legit-uid'; // 對照組：該生本人第一次登入的 uid
+
 let testEnv;
 let pass = 0;
 let fail = 0;
@@ -74,8 +85,19 @@ async function test(name, fn) {
   }
 }
 
+// 2026-07-03 補修：rule.txt 的 schoolUser() 新增 email_verified == true 檢查後，
+// 這個 helper 改為預設帶 email_verified: true——因為全檔既有 64 條測試呼叫 authCtx()
+// 時，代表的都是「合法使用者」（Google 登入的真人，或種子資料裡設定好的學生/老師），
+// 語意上本來就應該通過驗證，所以在這裡統一補上，不需要逐一修改 64 個呼叫點。
+// 真正要測試「未驗證信箱」情境時，改用下面新增的 authCtxUnverified()。
 function authCtx(uid, email) {
-  return testEnv.authenticatedContext(uid, { email });
+  return testEnv.authenticatedContext(uid, { email, email_verified: true });
+}
+
+// 2026-07-03 新增：模擬「拿到一個 email 對得上、但未經 Firebase 驗證」的 token——
+// 例如攻擊者透過 Email/Password 自助註冊時填入的信箱字串，尚未點擊驗證信。
+function authCtxUnverified(uid, email) {
+  return testEnv.authenticatedContext(uid, { email, email_verified: false });
 }
 
 // 2026-06-27 補修：rule.txt create/update 規則補上 seatNo 必須等於 studentBindings
@@ -120,9 +142,12 @@ async function main() {
     await db.doc(`admins/${ADMIN_UID}`).set({ email: ADMIN_EMAIL });
     await db.doc(`studentBindings/${STUDENT_BINDING_ID}`).set({ email: STUDENT_EMAIL, seatNo: STUDENT_SEAT, uid: STUDENT_UID });
     await db.doc(`studentBindings/${OTHER_BINDING_ID}`).set({ email: OTHER_EMAIL, seatNo: OTHER_SEAT, uid: OTHER_UID });
+    // 2026-07-03 新增：刻意不設 uid 欄位，模擬老師建好名冊但學生本人還沒登入過
+    await db.doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).set({ email: UNCLAIMED_EMAIL, seatNo: UNCLAIMED_SEAT });
     await db.doc('students/115-1_01').set({ seatNo: STUDENT_SEAT, semester: '115-1', name: '新格式學生' });
     await db.doc('students/01').set({ seatNo: STUDENT_SEAT, name: '舊格式學生' });
     await db.doc('students/115-1_02').set({ seatNo: OTHER_SEAT, semester: '115-1', name: '另一位學生' });
+    await db.doc('students/115-1_03').set({ seatNo: UNCLAIMED_SEAT, semester: '115-1', name: '尚未登入學生' });
     await db.doc(`users/${STUDENT_UID}/journals/existing-01`).set(journalDoc(STUDENT_UID, STUDENT_EMAIL));
     await db.doc(`users/${OTHER_UID}/journals/existing-02`).set(journalDoc(OTHER_UID, OTHER_EMAIL));
     await db.doc('deadlines/d1').set({ month: 7, deadline: '2026-08-05' });
@@ -551,6 +576,57 @@ async function main() {
 
   await test('admin 可以 read settings', async () => {
     await assertSucceeds(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc('settings/teacher').get());
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // email_verified 防護（2026-07-03）
+  // 背景：schoolUser() 只驗證 email 字串格式，不代表這個字串背後真的受
+  // tcivs.tc.edu.tw 網域控制——Google OAuth 路徑上網域控制力歸屬校方 Google
+  // Workspace，但 Email/Password 是 Firebase 自己一套獨立帳號系統，註冊時
+  // email 欄位填任意字串即可拿到通過 schoolUser() 的 token。最直接可被利用的
+  // 情境：老師開學匯入名單後，studentBindings 文件已存在（有真實 seatNo），
+  // 但學生本人尚未第一次登入（uid 欄位還沒被寫入）——這段空窗期內，任何人
+  // 只要搶先用該信箱自助註冊，就能拿到一個 email 對得上的 token，而下方多條
+  // 規則（studentBindings get/update、students get、journals create 的 seatNo
+  // 驗證）原本都只比對 email 字串、不檢查 uid，會直接放行。
+  // 修法：schoolUser() 新增 email_verified == true。以下測試分兩組對照：
+  // 「未驗證」的攻擊者 token 應被全面擋下；「已驗證」（模擬該生本人首次
+  // Google 登入）的相同操作應維持原本正常運作，確認修補沒有誤傷合法情境。
+  // ════════════════════════════════════════════════════════════
+  await test('【2026-07-03】未驗證信箱不能 get 尚未登入學生的 studentBindings（防止搶先冒用）', async () => {
+    await assertFails(authCtxUnverified(ATTACKER_UID, UNCLAIMED_EMAIL).firestore().doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).get());
+  });
+
+  await test('【2026-07-03】未驗證信箱不能把尚未登入學生的 binding.uid 改成自己（防止搶先綁定冒充身分）', async () => {
+    await assertFails(authCtxUnverified(ATTACKER_UID, UNCLAIMED_EMAIL).firestore().doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).update({ uid: ATTACKER_UID }));
+  });
+
+  await test('【2026-07-03】未驗證信箱不能 get 尚未登入學生對應座號的 students 文件', async () => {
+    await assertFails(authCtxUnverified(ATTACKER_UID, UNCLAIMED_EMAIL).firestore().doc('students/115-1_03').get());
+  });
+
+  await test('【2026-07-03】未驗證信箱不能冒用尚未登入學生的座號 CREATE 月記', async () => {
+    await assertFails(
+      authCtxUnverified(ATTACKER_UID, UNCLAIMED_EMAIL).firestore()
+        .doc(`users/${ATTACKER_UID}/journals/impersonate-01`)
+        .set(journalDoc(ATTACKER_UID, UNCLAIMED_EMAIL, { seatNo: UNCLAIMED_SEAT }))
+    );
+  });
+
+  await test('【2026-07-03】未驗證信箱（全新虛構信箱、無 binding）也不能再讀取 deadlines（收斂原本殘留的低敏感度讀取權）', async () => {
+    await assertFails(authCtxUnverified(NO_BINDING_UID, NO_BINDING_EMAIL).firestore().doc('deadlines/d1').get());
+  });
+
+  await test('【2026-07-03】對照組：已驗證信箱（模擬該生首次 Google 登入）可以 get 自己尚未登入過的 studentBindings', async () => {
+    await assertSucceeds(authCtx(UNCLAIMED_UID_LEGIT, UNCLAIMED_EMAIL).firestore().doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).get());
+  });
+
+  await test('【2026-07-03】對照組：已驗證信箱可以把尚未登入學生的 binding.uid 首次綁定成自己（合法首登流程不受影響）', async () => {
+    await assertSucceeds(authCtx(UNCLAIMED_UID_LEGIT, UNCLAIMED_EMAIL).firestore().doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).update({ uid: UNCLAIMED_UID_LEGIT }));
+  });
+
+  await test('【2026-07-03】對照組：已驗證信箱、無 binding 時仍可讀取 deadlines（確認修補未過度限制既有低風險路徑）', async () => {
+    await assertSucceeds(authCtx(NO_BINDING_UID, NO_BINDING_EMAIL).firestore().doc('deadlines/d1').get());
   });
 
   // ════════════════════════════════════════════════════════════
