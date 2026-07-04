@@ -123,6 +123,7 @@ const RISK_TARGETS = [
   { name: 'function isAdmin()', regex: /function\s+isAdmin\s*\(/ },
   { name: 'function validAdminWrite()', regex: /function\s+validAdminWrite\s*\(/ },
   { name: 'function keepsProtectedFlag()', regex: /function\s+keepsProtectedFlag\s*\(/ },
+  { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },
   { name: 'match /users/{userId}（含 journals 子集合，2026-06-17 那次 bug 的位置）', regex: /match\s+\/users\/\{userId\}/ },
