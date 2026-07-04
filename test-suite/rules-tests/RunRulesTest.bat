@@ -23,6 +23,9 @@ echo.
 :run_test
 echo 開始執行 Rules 單元測試（第一次執行需下載 Firestore Emulator，請確保網路暢通）...
 echo.
+echo 檢查 8080 port 是否有殘留的 Firestore Emulator 行程未釋放...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /C:":8080 " ^| findstr "LISTENING"') do echo   發現殘留行程 PID %%P，強制結束... & taskkill /F /PID %%P > nul 2>&1
+echo.
 call npm test
 goto end
 
