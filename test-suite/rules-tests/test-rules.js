@@ -495,6 +495,10 @@ async function main() {
     await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().collection('admins').get());
   });
 
+  await test('【2026-07-04】一般學生不能 create /admins/ 文件（自我提權應被拒；email 格式本身合法，隔離出真正把關的是 isAdmin()）', async () => {
+    await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`admins/${STUDENT_UID}`).set({ email: STUDENT_EMAIL }));
+  });
+
   await test('admin 新增管理員：email 格式不符 → 應被拒', async () => {
     await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc('admins/new-admin').set({ email: 'not-a-school-email@gmail.com' }));
   });
