@@ -30,6 +30,12 @@ admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 const messaging = admin.messaging();
 
+// 2026-07 修正：這個站是 GitHub Pages 的 project page，網址帶 /internship-journal/ 子路徑
+// （不是 repo 本身叫 xxx.github.io 的 user/org page）。點通知後要開啟的頁面一定要是完整網址，
+// 不能只寫 '/student.html' 這種開頭帶斜線的絕對路徑——那會被瀏覽器解析成網域最上層
+// （https://ka-dot-dot.github.io/student.html，該路徑並不存在），而不是子路徑底下的實際頁面。
+const SITE_BASE_URL = 'https://ka-dot-dot.github.io/internship-journal';
+
 // FCM sendEachForMulticast 單次呼叫上限 500 個 token；本專案規模（一班+老師）幾乎不可能碰到，
 // 但還是切塊處理，避免未來師生人數變多、或同一人多裝置登入導致 token 數量增加時整批失敗。
 const MULTICAST_CHUNK_SIZE = 500;
@@ -121,7 +127,7 @@ async function checkComments() {
     if (tokensSnap.empty) continue; // 該生從未授權推播，或裝置端 token 已被清除，安靜跳過
 
     const body = data.teacherComment.length > 40 ? data.teacherComment.slice(0, 40) + '…' : data.teacherComment;
-    await sendToTokenDocs(tokensSnap.docs, { title: '📩 老師留了新評語', body }, '/student.html');
+    await sendToTokenDocs(tokensSnap.docs, { title: '📩 老師留了新評語', body }, `${SITE_BASE_URL}/student.html`);
     await docSnap.ref.update({ teacherCommentNotifiedAt: new Date().toISOString() });
     sent++;
   }
@@ -164,7 +170,7 @@ async function checkReplies() {
     const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
     const title = `💬 ${data.studentName || '學生'}回覆了評語`;
 
-    await sendToTokenDocs(adminTokenDocs, { title, body }, '/teacher.html');
+    await sendToTokenDocs(adminTokenDocs, { title, body }, `${SITE_BASE_URL}/teacher.html`);
     await docSnap.ref.update({ studentReplyNotifiedAt: new Date().toISOString() });
     sent++;
   }
