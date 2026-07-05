@@ -21,6 +21,15 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// 2026-07-06 新增：讓這支 Service Worker 每次更新後立刻生效，不用等舊分頁全部關閉。
+// 沒有這兩行時，瀏覽器預設行為是「新版檔案上傳了，但只要還有分頁被舊版控制著，
+// 新版就卡在 waiting 狀態，永遠不會真的接手」——這正是這次追查「加了 tag 防重複，
+// 畫面上還是兩則」查到的根本原因：瀏覽器背景其實還在跑更早之前、還沒有 tag 防護
+// 的舊版本。skipWaiting() 讓這支 SW 一安裝完就直接進入 activate，不用等待；
+// clients.claim() 讓它啟用後立刻接管所有已開啟的分頁，不用重新整理頁面。
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
+
 // App 沒開著（背景）時收到推播，顯示系統通知
 messaging.onBackgroundMessage((payload) => {
   const title = payload.notification?.title || '產學班實習月記系統';
