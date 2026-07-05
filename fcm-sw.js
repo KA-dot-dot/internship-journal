@@ -35,7 +35,24 @@ messaging.onBackgroundMessage((payload) => {
     // fcmOptions?.link／data?.link 平常都會由發送端（notify-service）帶完整網址過來；
     // 這裡的 './' 只是兩者都缺失時的保底預設值，資向這支 SW 檔案所在的子路徑本身，
     // 不會是「跳回不相干的網域根目錄」。
-    data: { link: payload.fcmOptions?.link || payload.data?.link || './' }
+    data: { link: payload.fcmOptions?.link || payload.data?.link || './' },
+    // 2026-07-05 新增：修正同一則通知在裝置上重複顯示兩次的問題。
+    // 根本原因是 Web Push 協定本身「至少送達一次」的特性——同一則推播底層被重複投遞
+    // （網路不穩、瀏覽器背景程序重啟等都可能觸發）本身是規格層級的正常現象，不是後端
+    // 或 Firebase 的錯，但 `showNotification()` 預設每次呼叫都會疊加成一則新通知，沒有
+    // 任何防重機制。
+    // 解法：帶入 `tag`，瀏覽器看到相同 `tag` 的第二則通知時會直接「取代」畫面上第一則，
+    // 不會顯示成兩則、也不會重新響鈴/震動（`renotify` 預設為 false）。
+    // `tag` 刻意用 FCM 自動賦予的 `payload.messageId`（每次伺服器端呼叫送出時各自產生的
+    // 唯一值），而不是寫死一個固定字串：
+    //  - 底層協定重複投遞的是「同一次送出」，兩次投遞會帶著相同的 messageId，用它當 tag
+    //    可以正確把這種重複收斂成一則。
+    //  - 老師/學生短時間內收到兩則「內容不同」的真實通知（例如老師連續留言、或不同學生
+    //    各自送出回覆）時，各自的 messageId 不同，仍會分開顯示、不會被誤判成重複而互相
+    //    蓋掉——如果改用固定字串當 tag，會導致這種正常情境下的通知也被吃掉，反而遺漏資訊。
+    // messageId 理論上一定存在（FCM SDK 自動賦予），保留 `|| payload.collapseKey` 作為
+    // 極端情況下的備援，避免萬一缺失時 tag 直接變成 undefined。
+    tag: payload.messageId || payload.collapseKey || undefined
   };
   self.registration.showNotification(title, options);
 });
