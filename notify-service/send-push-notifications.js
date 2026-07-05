@@ -46,7 +46,7 @@ const MULTICAST_CHUNK_SIZE = 500;
  * 直接傳入文件快照（而非集合路徑字串），刪除失效 token 時用 docSnap.ref.delete() 即可，
  * 不需要重新組合路徑字串，也不用假設呼叫端已經知道 token 文件實際掛在哪個路徑下。
  */
-async function sendToTokenDocs(tokenDocs, notification, link) {
+async function sendToTokenDocs(tokenDocs, notification, link, data = {}) {
   if (!tokenDocs.length) return;
 
   for (let i = 0; i < tokenDocs.length; i += MULTICAST_CHUNK_SIZE) {
@@ -56,6 +56,11 @@ async function sendToTokenDocs(tokenDocs, notification, link) {
     const resp = await messaging.sendEachForMulticast({
       tokens,
       notification,
+      // 2026-07-06 新增：data 讓 fcm-sw.js 收到一個由「這邊」自己組出來、跟 FCM 內部
+      // messageId 完全無關的 tag（見 checkComments()/checkReplies() 呼叫處），data 可以
+      // 跟 notification／webpush 在同一個訊息裡並存，FCM Admin SDK 官方文件與型別定義都
+      // 支援這種組合。
+      data,
       webpush: { fcmOptions: { link } },
     });
 
@@ -127,7 +132,15 @@ async function checkComments() {
     if (tokensSnap.empty) continue; // 該生從未授權推播，或裝置端 token 已被清除，安靜跳過
 
     const body = data.teacherComment.length > 40 ? data.teacherComment.slice(0, 40) + '…' : data.teacherComment;
-    await sendToTokenDocs(tokensSnap.docs, { title: '📩 老師留了新評語', body }, `${SITE_BASE_URL}/student.html`);
+    // 2026-07-06 新增：自組 tag，不依賴 FCM 自動賦予的 messageId——重複投遞時兩次送出
+    // 是否共用同一個 messageId 並沒有保證，一旦不同，fcm-sw.js 原本用 messageId 當 tag
+    // 的防重複機制就會形同虛設（這正是這次追查到的實際案例）。改用「這份月記文件的完整
+    // 路徑 + 這次評語真正寫入的時間（reviewedAt，不是這支腳本送出的時間）」組合：
+    // 只要是同一則評語內容，不論被推播幾次、背後 messageId 是否一致，這裡算出來的 tag
+    // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，reviewedAt 會跟著
+    // 改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
+    const tag = `${docSnap.ref.path}:${data.reviewedAt || ''}`;
+    await sendToTokenDocs(tokensSnap.docs, { title: '📩 老師留了新評語', body }, `${SITE_BASE_URL}/student.html`, { tag });
     await docSnap.ref.update({ teacherCommentNotifiedAt: new Date().toISOString() });
     sent++;
   }
@@ -170,7 +183,13 @@ async function checkReplies() {
     const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
     const title = `💬 ${data.studentName || '學生'}回覆了評語`;
 
-    await sendToTokenDocs(adminTokenDocs, { title, body }, `${SITE_BASE_URL}/teacher.html`);
+    // 2026-07-06 新增：同 checkComments()，用「文件完整路徑 + studentReplyAt」自組 tag，
+    // 不依賴 FCM 的 messageId。額外好處：就算未來真的發生「同一支 admin token 字串意外
+    // 掛在兩份不同的 admins/{adminId} 文件底下、collectAdminTokenDocs() 撈出兩筆」這種
+    // 情況，兩筆各自送出時 tag 仍然相同（同一份月記、同一個 studentReplyAt），一樣會被
+    // 瀏覽器收斂成一則，不需要額外去 Firestore 排查 admins/*/fcmTokens 是否有重複。
+    const tag = `${docSnap.ref.path}:${data.studentReplyAt || ''}`;
+    await sendToTokenDocs(adminTokenDocs, { title, body }, `${SITE_BASE_URL}/teacher.html`, { tag });
     await docSnap.ref.update({ studentReplyNotifiedAt: new Date().toISOString() });
     sent++;
   }
