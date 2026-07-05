@@ -11,6 +11,16 @@ on:
 permissions:
   contents: read
 
+# 2026-07 修正：手動 Run workflow 跟排程（每5分鐘一次）如果剛好時間重疊，兩個執行緒
+# 會各自獨立查一次 Firestore，都看到「還沒通知過」而各自送一次，導致同一則評語/回覆
+# 收到兩次重複推播（實測發現的真實案例）。加上 concurrency 群組，同一個 group 名稱
+# 同一時間只允許一個在跑；cancel-in-progress 設 false，代表新觸發的那次會排隊等前一個
+# 執行完再開始，而不是把還在跑到一半的那個強制中止（中止到一半可能來不及把
+# notifiedAt 寫回去，反而更容易造成同一則被漏標、下次又重送)。
+concurrency:
+  group: push-notify
+  cancel-in-progress: false
+
 jobs:
   notify:
     runs-on: ubuntu-latest
