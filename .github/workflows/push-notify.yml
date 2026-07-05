@@ -1,0 +1,33 @@
+name: 推播通知輪詢（老師評語／學生回覆）
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 每5分鐘一次；repo 是公開的，GitHub Actions 分鐘數不限，不用擔心用量
+  workflow_dispatch: {}      # 方便手動觸發測試
+
+# 這支工作流程只需要讀取 repo 內容來跑腳本，不需要對 repo 本身做任何寫入
+# （所有 Firestore 讀寫都是透過 FIREBASE_SERVICE_ACCOUNT_JSON 這個 Secret，
+# 跟 GITHUB_TOKEN 完全無關），故縮到最小權限。
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5   # 排程本身每5分鐘觸發一次；設上限避免單次執行意外卡死、跟下一輪重疊排隊
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: notify-service
+        run: npm install
+
+      - name: Send pending push notifications
+        working-directory: notify-service
+        run: node send-push-notifications.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
