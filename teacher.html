@@ -2202,11 +2202,15 @@ async function initPushNotifications() {
   }
 }
 
+// 2026-07-06 修正：改讀 payload.data.title/body，不再讀 payload.notification.title/body，
+// 跟 fcm-sw.js／send-push-notifications.js 同日修正同步（後端改成只送 data，不再送
+// notification 頂層欄位，避免 FCM SDK 自動顯示與 onBackgroundMessage 手動顯示各跳一次、
+// 同一則收到兩次的問題）。這裡不同步改的話，前景 toast 會變成只顯示「📩」空白訊息。
 try {
   if (window._messaging) {
     const { getMessaging, onMessage } = window._messaging;
     onMessage(getMessaging(window._messaging.app), (payload) => {
-      toast(`📩 ${payload.notification?.title || ''} ${payload.notification?.body || ''}`.trim(), 'success');
+      toast(`📩 ${payload.data?.title || ''} ${payload.data?.body || ''}`.trim(), 'success');
     });
   }
 } catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }

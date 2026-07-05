@@ -31,37 +31,46 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 
 // App 沒開著（背景）時收到推播，顯示系統通知
+//
+// 2026-07-06 第二次修正：找到「加了 tag 還是固定兩則」的真正根因，跟 tag 本身無關。
+// 問題出在 notify-service/send-push-notifications.js 原本送出的 FCM 訊息「同時」帶了
+// 頂層 notification 欄位和 data 欄位。Firebase JS SDK 在 Web 平台上，只要偵測到訊息
+// 帶有 notification 欄位，就會在瀏覽器背景時「自己」呼叫一次 showNotification()
+// 自動顯示（這條路徑完全在 Firebase 內部函式庫裡執行，不會經過下面這個 onBackgroundMessage
+// callback，所以上面加的 tag 防重複機制對它完全無效）；與此同時，因為訊息也帶了 data，
+// 下面這個 onBackgroundMessage callback 一樣會被觸發、再手動呼叫一次 showNotification()。
+// 一則訊息、兩條互相不知道對方存在的顯示路徑，結果就是不管 tag 加得多正確，永遠固定
+// 兩則——這是 Firebase JS SDK 本身長期已知的行為（notification+data 同時存在時的重複顯示），
+// 不是這支專案獨有的 bug。
+// 修法：後端已經改成「只送 data，不再送 notification 頂層欄位」（見
+// send-push-notifications.js 同日修正），這樣 Firebase SDK 內部就沒有 notification
+// 可以自動顯示，只剩下面這一條路徑會執行，從根本上只會顯示一次。相對應地，這裡也要
+// 全部改讀 payload.data.* ，不能再讀 payload.notification.*（已經不會存在了）。
+// 上面 2026-07-05/06 加的 tag 機制本身沒有錯、仍然保留——它解決的是「Web Push 協定
+// 本身至少送達一次、同一則被重複投遞」這個不同層面的問題，跟這次的 notification+data
+// 雙路徑顯示是兩個各自獨立、都要處理的原因，不是二選一。
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || '產學班實習月記系統';
+  const title = payload.data?.title || '產學班實習月記系統';
   const options = {
-    body: payload.notification?.body || '',
+    body: payload.data?.body || '',
     // 2026-07 修正：跟 initPushNotifications() 註冊路徑同一類問題——這個站在 GitHub Pages
     // 的 /internship-journal/ 子路徑下，Service Worker 裡的相對路徑是相對於「這支 SW 檔案
     // 自己的網址」解析（此檔已改用 './fcm-sw.js' 註冊，實際網址在子路徑下），所以這裡改成
     // 不帶開頭斜線的相對路徑，才能正確抓到 .../internship-journal/icon-192.png。
     icon: './icon-192.png',
     badge: './icon-192.png',
-    // fcmOptions?.link／data?.link 平常都會由發送端（notify-service）帶完整網址過來；
-    // 這裡的 './' 只是兩者都缺失時的保底預設值，資向這支 SW 檔案所在的子路徑本身，
-    // 不會是「跳回不相干的網域根目錄」。
-    data: { link: payload.fcmOptions?.link || payload.data?.link || './' },
-    // 2026-07-05 新增、2026-07-06 修正：解決同一則通知在裝置上重複顯示兩次的問題。
-    // 根本原因是 Web Push 協定本身「至少送達一次」的特性——同一則推播底層被重複投遞
-    // （網路不穩、瀏覽器背景程序重啟等都可能觸發）本身是規格層級的正常現象，不是後端
-    // 或 Firebase 的錯，但 `showNotification()` 預設每次呼叫都會疊加成一則新通知，沒有
-    // 任何防重機制。
-    // 解法：帶入 `tag`，瀏覽器看到相同 `tag` 的第二則通知時會直接「取代」畫面上第一則，
-    // 不會顯示成兩則、也不會重新響鈴/震動（`renotify` 預設為 false）。
-    // 2026-07-06 修正：tag 第一版用 FCM 自動賦予的 `payload.messageId`，但實測發現即使
-    // 已經上線這個 tag，畫面上仍出現兩則一模一樣的通知——`messageId` 是 FCM 內部在「這次
-    // 送出」時賦予的值，重複投遞時兩次投遞是否保證共用同一個 messageId 並沒有文件保證，
-    // 一旦不同，這裡的防重複機制就形同虛設。改為優先採用 `payload.data.tag`——這是
-    // notify-service/send-push-notifications.js 自己組出來的值（月記文件完整路徑 +
-    // 評語/回覆真正寫入的時間），完全不經過 FCM 內部機制，同一份評語/回覆不論被推播
-    // 幾次、背後 messageId 是否一致，這裡拿到的 tag 保證一樣，才能真正收斂成一則。
-    // `payload.messageId || payload.collapseKey` 保留作為備援（例如未來有其他管道送出、
-    // 沒有帶 data.tag 的情況），避免 tag 直接變成 undefined、完全失去防護。
-    tag: payload.data?.tag || payload.messageId || payload.collapseKey || undefined
+    // data?.link 由發送端（notify-service）帶完整網址過來；這裡的 './' 只是缺失時的
+    // 保底預設值，指向這支 SW 檔案所在的子路徑本身，不會是「跳回不相干的網域根目錄」。
+    data: { link: payload.data?.link || './' },
+    // 解決同一則通知在裝置上重複顯示兩次的問題（跟上面 notification+data 雙路徑顯示是
+    // 不同成因）：Web Push 協定本身「至少送達一次」，同一則推播底層可能被重複投遞
+    // （網路不穩、瀏覽器背景程序重啟等都可能觸發），`showNotification()` 預設每次呼叫都會
+    // 疊加成一則新通知，沒有任何防重機制。帶入 `tag`，瀏覽器看到相同 `tag` 的第二則通知時
+    // 會直接「取代」畫面上第一則，不會顯示成兩則、也不會重新響鈴/震動（`renotify` 預設 false）。
+    // tag 由 notify-service/send-push-notifications.js 自己組出來（月記文件完整路徑 +
+    // 評語/回覆真正寫入的時間），不經過 FCM 內部機制，同一份評語/回覆不論被投遞幾次，
+    // 這裡拿到的 tag 保證一樣，才能真正收斂成一則。
+    tag: payload.data?.tag || undefined
   };
   self.registration.showNotification(title, options);
 });

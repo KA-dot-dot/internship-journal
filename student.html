@@ -1269,11 +1269,16 @@ async function initPushNotifications() {
 }
 
 // App 開著、收到推播時（前景訊息），FCM 預設不會自動跳系統通知，改用既有的 toast() 顯示
+// 2026-07-06 修正：改讀 payload.data.title/body，不再讀 payload.notification.title/body。
+// 原因見 fcm-sw.js 同日修正的說明——後端 send-push-notifications.js 已經改成只送 data，
+// 不再送 notification 頂層欄位（避免 FCM SDK 自動顯示與 onBackgroundMessage 手動顯示各跳一次
+// 造成同一則收到兩次的問題）。這裡的前景 toast 跟背景通知讀的是同一份 payload 結構，
+// 兩處必須同步改，否則前景時 toast 會變成只顯示「📩」空白訊息。
 try {
   if (window._messaging) {
     const { getMessaging, onMessage } = window._messaging;
     onMessage(getMessaging(window._messaging.app), (payload) => {
-      toast(`📩 ${payload.notification?.title || ''} ${payload.notification?.body || ''}`.trim(), 'success');
+      toast(`📩 ${payload.data?.title || ''} ${payload.data?.body || ''}`.trim(), 'success');
     });
   }
 } catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }
