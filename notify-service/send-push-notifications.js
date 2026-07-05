@@ -45,8 +45,22 @@ const MULTICAST_CHUNK_SIZE = 500;
  * 送出同一則通知，並清掉 FCM 回報「已失效」的 token（使用者解除授權、清瀏覽器資料、換裝置等）。
  * 直接傳入文件快照（而非集合路徑字串），刪除失效 token 時用 docSnap.ref.delete() 即可，
  * 不需要重新組合路徑字串，也不用假設呼叫端已經知道 token 文件實際掛在哪個路徑下。
+ *
+ * 2026-07-06 第二次修正：找到「畫面上固定收到兩則、加了 tag 也沒用」的真正根因——
+ * 原本這裡同時送出頂層 notification 欄位跟 data 欄位。Firebase JS SDK 在 Web 平台上，
+ * 只要偵測到訊息帶 notification 欄位，背景時會「自己」額外呼叫一次 showNotification()
+ * 自動顯示，這條路徑完全在 Firebase 內部函式庫執行、不會經過 fcm-sw.js 的
+ * onBackgroundMessage，所以那邊加的 tag 防重複機制對它完全無效；與此同時，因為訊息
+ * 也帶了 data，onBackgroundMessage 一樣會被觸發、再手動顯示一次——一則訊息兩條互不
+ * 知道對方存在的顯示路徑，不管 tag 加得多正確，永遠固定兩則。這是 Firebase JS SDK
+ * 本身已知的行為（notification+data 同時存在時的重複顯示），不是這支專案獨有的 bug。
+ * 修法：改成「只送 data，不送 notification 頂層欄位」——Firebase SDK 內部就沒有
+ * notification 可以自動顯示，只剩 fcm-sw.js 的 onBackgroundMessage 會執行，從根本上
+ * 只會顯示一次。相應地，不再接受獨立的 notification/link 參數，呼叫端把 title/body/
+ * tag/link 全部收斂進單一 data 物件傳進來（data 訊息的所有值依 FCM 規定必須是字串，
+ * 呼叫端傳的本來就都是字串，不需要額外轉型）。
  */
-async function sendToTokenDocs(tokenDocs, notification, link, data = {}) {
+async function sendToTokenDocs(tokenDocs, data) {
   if (!tokenDocs.length) return;
 
   for (let i = 0; i < tokenDocs.length; i += MULTICAST_CHUNK_SIZE) {
@@ -55,13 +69,7 @@ async function sendToTokenDocs(tokenDocs, notification, link, data = {}) {
 
     const resp = await messaging.sendEachForMulticast({
       tokens,
-      notification,
-      // 2026-07-06 新增：data 讓 fcm-sw.js 收到一個由「這邊」自己組出來、跟 FCM 內部
-      // messageId 完全無關的 tag（見 checkComments()/checkReplies() 呼叫處），data 可以
-      // 跟 notification／webpush 在同一個訊息裡並存，FCM Admin SDK 官方文件與型別定義都
-      // 支援這種組合。
       data,
-      webpush: { fcmOptions: { link } },
     });
 
     await Promise.all(
@@ -73,7 +81,7 @@ async function sendToTokenDocs(tokenDocs, notification, link, data = {}) {
       })
     );
 
-    console.log(`sendToTokenDocs(${link}): ${resp.successCount} 成功 / ${resp.failureCount} 失敗`);
+    console.log(`sendToTokenDocs(${data.link}): ${resp.successCount} 成功 / ${resp.failureCount} 失敗`);
   }
 }
 
@@ -140,7 +148,12 @@ async function checkComments() {
     // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，reviewedAt 會跟著
     // 改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
     const tag = `${docSnap.ref.path}:${data.reviewedAt || ''}`;
-    await sendToTokenDocs(tokensSnap.docs, { title: '📩 老師留了新評語', body }, `${SITE_BASE_URL}/student.html`, { tag });
+    await sendToTokenDocs(tokensSnap.docs, {
+      title: '📩 老師留了新評語',
+      body,
+      tag,
+      link: `${SITE_BASE_URL}/student.html`,
+    });
     await docSnap.ref.update({ teacherCommentNotifiedAt: new Date().toISOString() });
     sent++;
   }
@@ -189,7 +202,12 @@ async function checkReplies() {
     // 情況，兩筆各自送出時 tag 仍然相同（同一份月記、同一個 studentReplyAt），一樣會被
     // 瀏覽器收斂成一則，不需要額外去 Firestore 排查 admins/*/fcmTokens 是否有重複。
     const tag = `${docSnap.ref.path}:${data.studentReplyAt || ''}`;
-    await sendToTokenDocs(adminTokenDocs, { title, body }, `${SITE_BASE_URL}/teacher.html`, { tag });
+    await sendToTokenDocs(adminTokenDocs, {
+      title,
+      body,
+      tag,
+      link: `${SITE_BASE_URL}/teacher.html`,
+    });
     await docSnap.ref.update({ studentReplyNotifiedAt: new Date().toISOString() });
     sent++;
   }
