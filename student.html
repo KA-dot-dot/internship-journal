@@ -16,6 +16,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -35,6 +36,8 @@
 
   window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider, setPersistence, browserLocalPersistence };
+  // 2026-07 新增：Web Push 通知用，比照 window._auth 的暴露方式
+  window._messaging = { app, getMessaging, getToken, onMessage, isMessagingSupported };
 </script>
 
 <style>
@@ -1208,7 +1211,67 @@ function enterApp() {
   bindWriteProgressFloat();
   updateWriteProgress();
   showPage('s-dashboard');
+  // 2026-07 新增：Web Push 通知註冊。刻意 fire-and-forget（不 await、失敗只 console.warn），
+  // 推播設定本身失敗（使用者拒絕權限、瀏覽器不支援等）絕對不能擋住正常登入流程。
+  initPushNotifications();
 }
+
+// ============ Web Push 通知（2026-07 新增） ============
+// 老師留評語 / 更新評語時，由伺服器端排程腳本（notify-service/send-push-notifications.js，
+// 透過 GitHub Actions 每 5 分鐘輪詢一次，見 .github/workflows/push-notify.yml；不是
+// Cloud Functions，本專案未升級 Blaze 方案）推播到這裡註冊的裝置。這裡只負責「取得 token
+// 並存到 Firestore」，實際送出通知的邏輯完全在後端腳本，前端這邊看不到、也不需要知道
+// 其他人的 token。
+const FCM_VAPID_KEY = 'BOUmDJyMxKobgdMBrq1wtf5y6bHoRa8voW7Lm2FDaNDQW0dLA0TtrMfNpPqba_PO4swUOL-pUp7h0p0NevtsI7Y'; // Firebase Console > Cloud Messaging > Web Push 憑證（2026-07-05 產生）
+let _fcmSwRegistration = null;
+
+async function initPushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) return; // 環境不支援，安靜跳過
+    if (!window._messaging) return;
+    const { isMessagingSupported } = window._messaging;
+    if (isMessagingSupported && !(await isMessagingSupported())) return; // 例如 iOS 未加到主畫面的 Safari 分頁
+    if (Notification.permission === 'denied') return; // 使用者已明確拒絕過，不重複打擾
+
+    // 專用的 FCM service worker，跟主要的 sw.js（PWA 離線快取）完全分開註冊在不同 scope，
+    // 不會互相干擾，也完全不需要修改既有 sw.js 的 BYPASS_DOMAINS / 快取邏輯。
+    if (!_fcmSwRegistration) {
+      _fcmSwRegistration = await navigator.serviceWorker.register('/fcm-sw.js', {
+        scope: '/firebase-cloud-messaging-push-scope'
+      });
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const { getMessaging, getToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    });
+    if (!token) return;
+
+    const { doc, setDoc } = firebase_funcs;
+    await setDoc(doc(db, 'users', currentUser.uid, 'fcmTokens', token), {
+      createdAt: localISOStr(),
+      userAgent: (navigator.userAgent || '').slice(0, 200)
+    });
+  } catch (e) {
+    console.warn('[Push] 推播初始化失敗（不影響其他功能）：', e.message || e);
+  }
+}
+
+// App 開著、收到推播時（前景訊息），FCM 預設不會自動跳系統通知，改用既有的 toast() 顯示
+try {
+  if (window._messaging) {
+    const { getMessaging, onMessage } = window._messaging;
+    onMessage(getMessaging(window._messaging.app), (payload) => {
+      toast(`📩 ${payload.notification?.title || ''} ${payload.notification?.body || ''}`.trim(), 'success');
+    });
+  }
+} catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }
 
 // ============ 登出 ============
 async function logout() {

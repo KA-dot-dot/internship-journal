@@ -61,6 +61,15 @@ service cloud.firestore {
           !resource.data.keys().hasAny(['protected'])
           || resource.data.protected != true
         );
+      // 2026-07 新增：老師/管理員端 Web Push 用的 FCM registration token。
+      // 比照 /admins/{adminId} 本身「uid 或 emailKey 皆可」的判斷方式，只有本人能寫入/刪除自己的 token；
+      // 讀取只透過伺服器端腳本的 Admin SDK（notify-service/send-push-notifications.js，由
+      // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
+      // 前端不需要也不應該讀回自己的 token 清單。
+      match /fcmTokens/{tokenId} {
+        allow create, update, delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
+        allow get, list: if false;
+      }
     }
     match /studentBindings/{bindingId} {
       // 2026-07-03 補修：原本只比對 bindingId == emailKey()，完全沒呼叫 schoolUser()，
@@ -172,6 +181,14 @@ service cloud.firestore {
             && request.auth.uid == userId
             && resource.data.ownerUid == request.auth.uid
           ) || isAdmin();
+      }
+      // 2026-07 新增：學生端 Web Push 用的 FCM registration token，只有本人能寫入/刪除自己的 token；
+      // 讀取只透過伺服器端腳本的 Admin SDK（notify-service/send-push-notifications.js，由
+      // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
+      // 前端不需要也不應該讀回自己的 token 清單。
+      match /fcmTokens/{tokenId} {
+        allow create, update, delete: if schoolUser() && request.auth.uid == userId;
+        allow get, list: if false;
       }
     }
     match /{path=**}/journals/{journalId} {
