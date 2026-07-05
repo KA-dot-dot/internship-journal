@@ -1,7 +1,7 @@
 // fcm-sw.js
 // 專門處理 Web Push 背景通知，跟主要的 sw.js（PWA 離線快取邏輯）完全分開、
 // 各自獨立註冊在不同 scope（見 student.html / teacher.html 的
-// initPushNotifications()：scope 設為 '/firebase-cloud-messaging-push-scope'）。
+// initPushNotifications()：scope 設為 './firebase-cloud-messaging-push-scope'）。
 // 這支檔案完全不碰 BYPASS_DOMAINS、cache-first/network-first 那套邏輯，
 // 不會影響 sw.js 既有的任何行為。
 
@@ -26,9 +26,16 @@ messaging.onBackgroundMessage((payload) => {
   const title = payload.notification?.title || '產學班實習月記系統';
   const options = {
     body: payload.notification?.body || '',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    data: { link: payload.fcmOptions?.link || payload.data?.link || '/' }
+    // 2026-07 修正：跟 initPushNotifications() 註冊路徑同一類問題——這個站在 GitHub Pages
+    // 的 /internship-journal/ 子路徑下，Service Worker 裡的相對路徑是相對於「這支 SW 檔案
+    // 自己的網址」解析（此檔已改用 './fcm-sw.js' 註冊，實際網址在子路徑下），所以這裡改成
+    // 不帶開頭斜線的相對路徑，才能正確抓到 .../internship-journal/icon-192.png。
+    icon: './icon-192.png',
+    badge: './icon-192.png',
+    // fcmOptions?.link／data?.link 平常都會由發送端（notify-service）帶完整網址過來；
+    // 這裡的 './' 只是兩者都缺失時的保底預設值，資向這支 SW 檔案所在的子路徑本身，
+    // 不會是「跳回不相干的網域根目錄」。
+    data: { link: payload.fcmOptions?.link || payload.data?.link || './' }
   };
   self.registration.showNotification(title, options);
 });
@@ -36,7 +43,7 @@ messaging.onBackgroundMessage((payload) => {
 // 使用者點通知 → 開啟對應頁面（學生端固定回 student.html，老師端固定回 teacher.html）
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = event.notification.data?.link || '/';
+  const link = event.notification.data?.link || './';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

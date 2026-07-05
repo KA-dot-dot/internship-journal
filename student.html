@@ -1237,8 +1237,13 @@ async function initPushNotifications() {
     // 專用的 FCM service worker，跟主要的 sw.js（PWA 離線快取）完全分開註冊在不同 scope，
     // 不會互相干擾，也完全不需要修改既有 sw.js 的 BYPASS_DOMAINS / 快取邏輯。
     if (!_fcmSwRegistration) {
-      _fcmSwRegistration = await navigator.serviceWorker.register('/fcm-sw.js', {
-        scope: '/firebase-cloud-messaging-push-scope'
+      // 2026-07 修正：這個站是 GitHub Pages 的 project page（網址帶 /internship-journal/
+      // 子路徑），不是 repo 名稱本身就是 xxx.github.io 的 user/org page。用 '/fcm-sw.js'
+      // 這種開頭帶斜線的絕對路徑，瀏覽器一律會去抓網域最上層（https://xxx.github.io/fcm-sw.js），
+      // 但檔案實際上在子路徑下（.../internship-journal/fcm-sw.js），註冊會直接 404 失敗——
+      // 跟下面既有的 './sw.js' 用同一種相對路徑寫法，才能正確對應到目前頁面所在的子路徑。
+      _fcmSwRegistration = await navigator.serviceWorker.register('./fcm-sw.js', {
+        scope: './firebase-cloud-messaging-push-scope'
       });
     }
 
