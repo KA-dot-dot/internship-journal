@@ -1,7 +1,13 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v16
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-01）
+ * 學生端自動化測試 v17
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）
+ *
+ * v17 新增（2026-07-06）：
+ *   S-SEC-29  saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）
+ *             背景：對稱於 teacher.html saveTeacherComment() 的 commentChanged 防護
+ *             （T-SEC-20／T-SEC-23）；rule.txt 同步新增 studentReplyContentAt 欄位
+ *             （create 必須為 null、一般編輯鎖定不變、回覆分支依內容是否改變分兩種條件）。
  *
  * v16 新增（2026-07-01）：
  *   S-SEC-28  executeDeleteJournal() 補上 showLoading()/hideLoading()（2026-06-30）
@@ -1741,6 +1747,84 @@ async function runStudentTests(page, browserContext, log) {
         '刪除失敗後 loading 遮罩會卡住'
       );
   });
+
+  await test('S-SEC-29 saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）', async () => {
+    // 2026-07 新增。對應 teacher.html saveTeacherComment() 的 commentChanged 防護
+    // （T-SEC-20／T-SEC-23）同一類問題：學生只是重新打開回覆框、文字完全沒改就按
+    // 「更新回覆」，若每次都無條件寫 studentReplyUnread:true／studentReplyContentAt，
+    // 會把老師端已讀狀態誤打回未讀，notify-service 也會因 studentReplyContentAt
+    // 跟著刷新而誤判成新回覆、對同一則內容重複推播。
+    //
+    // 驗證五項特徵（缺一即退化）：
+    //   1. replyChanged 變數存在
+    //   2. 舊回覆值從既有快取（_studentHistoryJournals）讀取，不是多打一次 Firestore 讀取
+    //   3. studentReplyUnread 的寫入受 replyChanged 控制（spread 條件寫入）
+    //   4. studentReplyContentAt 的寫入同樣受 replyChanged 控制
+    //   5. studentReplyAt 維持無條件寫入（角色對應 teacher.html 的 reviewedAt，
+    //      純粹是「我的回覆」泡泡顯示時間，不應被 replyChanged 閘住）
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveStudentReply === 'function') ? saveStudentReply.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasReplyChanged = fnStr.includes('replyChanged');
+
+      const readsOldFromCache =
+        /oldReply\s*=\s*cachedJournal/.test(fnStr) ||
+        fnStr.includes('_studentHistoryJournals');
+
+      const unreadGatedByChanged =
+        /replyChanged\s*\?[\s\S]{0,200}studentReplyUnread/.test(fnStr) ||
+        /if\s*\(\s*replyChanged\s*\)[\s\S]{0,200}studentReplyUnread/.test(fnStr);
+
+      const contentAtGatedByChanged =
+        /replyChanged\s*\?[\s\S]{0,200}studentReplyContentAt/.test(fnStr) ||
+        /if\s*\(\s*replyChanged\s*\)[\s\S]{0,200}studentReplyContentAt/.test(fnStr);
+
+      // studentReplyAt 應該在 replyChanged 條件區塊『之外』先無條件寫入；
+      // 用「第一次出現的位置早於 replyChanged 條件區塊」近似檢查是否仍維持無條件寫入
+      const studentReplyAtIdx = fnStr.indexOf('studentReplyAt:');
+      const replyChangedBlockIdx = fnStr.search(/replyChanged\s*\?/);
+      const studentReplyAtUnconditional =
+        studentReplyAtIdx !== -1 &&
+        (replyChangedBlockIdx === -1 || studentReplyAtIdx < replyChangedBlockIdx);
+
+      return {
+        skip: false,
+        hasReplyChanged,
+        readsOldFromCache,
+        unreadGatedByChanged,
+        contentAtGatedByChanged,
+        studentReplyAtUnconditional,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasReplyChanged)
+      throw new Error(
+        'saveStudentReply() 找不到 replyChanged 變數，' +
+        '學生重新送出未修改的回覆會誤觸發老師端已讀狀態倒退與 notify-service 重複推播'
+      );
+    if (!result.readsOldFromCache)
+      throw new Error(
+        'saveStudentReply() 的舊回覆值來源可疑，找不到從既有快取（_studentHistoryJournals）' +
+        '讀取舊值的邏輯，可能改成多打一次 Firestore 讀取，或直接遺失比對基準'
+      );
+    if (!result.unreadGatedByChanged)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyUnread 寫入未受 replyChanged 控制，' +
+        '內容未變的重新送出仍會把老師端已讀狀態誤打回未讀'
+      );
+    if (!result.contentAtGatedByChanged)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyContentAt 寫入未受 replyChanged 控制，' +
+        'notify-service 會把「內容沒變的重新送出」誤判成新回覆而重複推播'
+      );
+    if (!result.studentReplyAtUnconditional)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyAt 疑似被 replyChanged 條件擋住，' +
+        '「我的回覆」泡泡顯示時間可能不會在重新送出時更新'
+      );
+  });
+
 
   return results;
 }
