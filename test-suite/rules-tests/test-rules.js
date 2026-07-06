@@ -430,6 +430,11 @@ async function main() {
     );
   });
 
+  // 2026-07 補修：rule.txt 這條分支新增 studentReplyContentAt 之後，「回覆內容跟舊值不同」
+  // 的情境（這條測試前面 existing-01 的 studentReply 還沒被合法設過值，等於「內容真的改變」）
+  // 現在要求同時提供 studentReplyContentAt（必須是字串）。這條測試原本要驗證的重點是
+  // 「studentReplyAt: null 本身合法」，跟新加的 studentReplyContentAt 要求是兩件獨立的事，
+  // 所以補上這個欄位讓測試繼續驗證原本的意圖，而不是被新規則用不同原因擋下。
   await test('【2026-06-27】學生 UPDATE 回覆：studentReply 正常字串、studentReplyAt 為 null → 應成功（null 為合法值）', async () => {
     await assertSucceeds(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
@@ -438,6 +443,49 @@ async function main() {
           studentReply: '正常回覆內容',
           studentReplyUnread: true,
           studentReplyAt: null,       // null 為允許值
+          studentReplyContentAt: new Date().toISOString(), // 2026-07 新增：內容真的改變，必須提供
+        })
+    );
+  });
+
+  // 2026-07 新增：模擬「老師已讀過這則回覆」（studentReplyUnread=false）之後，學生重新
+  // 打開回覆框、文字完全沒改就再按一次送出——這正是 saveStudentReply() 這次要防的情境：
+  // 內容沒變不該把老師的已讀狀態誤打回未讀。先用 withSecurityRulesDisabled 把 existing-01
+  // 設成明確的「已讀」已知狀態，才能真正測到「從 false 被誤翻回 true」這個轉變本身，
+  // 而不是像最初版本那樣，前一條測試留下的狀態剛好已經是 true，測不出真正的迴歸情境。
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore()
+      .doc(`users/${STUDENT_UID}/journals/existing-01`)
+      .update({
+        studentReply: '已讀回覆內容',
+        studentReplyUnread: false,
+        studentReplyContentAt: '2026-07-01T00:00:00+08:00',
+      });
+  });
+  await test('【2026-07】學生 UPDATE 回覆：內容沒變但嘗試把已讀狀態誤打回未讀 → 應被拒（防止 saveStudentReply() 誤觸發老師端已讀狀態倒退）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '已讀回覆內容', // 跟上面設定的舊值完全相同，屬於「內容沒變」情境
+          studentReplyUnread: true,     // 嘗試把已讀狀態翻回未讀
+          studentReplyContentAt: new Date().toISOString(), // 同時嘗試推進內容改變時間
+        })
+    );
+  });
+
+  // 2026-07 新增：內容沒變時，只更新 studentReplyAt（不變動 studentReplyUnread／
+  // studentReplyContentAt）應該要能成功——對應 saveStudentReply() 內容沒變時的 spread
+  // 條件寫法（只送 studentReply + studentReplyAt 兩個欄位）。沿用上一條測試設定的「已讀」
+  // 狀態（studentReplyUnread=false 未被上一條測試改動，因為上一條是 assertFails，
+  // 寫入沒有真的生效，doc 仍停在 withSecurityRulesDisabled 那次設定的狀態）。
+  await test('【2026-07】學生 UPDATE 回覆：內容沒變、只更新 studentReplyAt（不變動 unread/contentAt）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '已讀回覆內容', // 跟現有值相同
+          studentReplyAt: new Date().toISOString(),
         })
     );
   });
