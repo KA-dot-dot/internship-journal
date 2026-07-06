@@ -247,6 +247,19 @@ async function main() {
     );
   });
 
+  // 2026-07 補修：teacherCommentContentAt 是 2026-07-06 teacher.html saveTeacherComment()
+  // 新增的欄位，rule.txt 的 create 分支同日補上必須為 null 的鎖定（見該行註解），但當時
+  // 沒有補上對應的 Layer 1 回歸測試——跟其他三個老師專屬欄位（teacherComment／
+  // teacherReviewed／teacherCommentUnread）都各自有一條「偽造應被拒」測試相比，這是一個
+  // 遺漏，補上以維持覆蓋率一致（複查 studentReplyContentAt 這次改動時發現）。
+  await test('【2026-07】學生 CREATE 月記：偽造 teacherCommentContentAt 有值 → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-03b`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherCommentContentAt: '2026-07-06T00:00:00+08:00' }))
+    );
+  });
+
   await test('學生 CREATE 月記：ownerUid 對不上自己 uid → 應被拒', async () => {
     await assertFails(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
@@ -313,6 +326,18 @@ async function main() {
     );
   });
 
+  // 2026-07 補修：studentReplyContentAt 是這次（saveStudentReply() replyChanged 防護）
+  // 新增的第四個回覆欄位，rule.txt create 分支同步補上必須為 null 的鎖定，比照
+  // studentReply／studentReplyAt 既有的「CREATE 時夾帶應被拒」測試各補一條，這條專門
+  // 驗證第四個欄位本身也真的被擋下，不是只有語法上寫了鎖定、實際沒被測到。
+  await test('【2026-07】學生 CREATE 月記：夾帶 studentReplyContentAt 欄位 → 應被拒（回覆欄位家族第四欄同樣須為初始空值）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-reply-create-03`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReplyContentAt: '2026-07-06T00:00:00+08:00' }))
+    );
+  });
+
   // ════════════════════════════════════════════════════════════
   // UPDATE
   // ════════════════════════════════════════════════════════════
@@ -329,6 +354,16 @@ async function main() {
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherReviewed: true }))
+    );
+  });
+
+  // 2026-07 補修：同上一條（teacherCommentContentAt CREATE 分支）的遺漏，一般編輯分支
+  // 的鎖定（rule.txt 2026-07-06 補修，要求維持原值不變）同樣沒有對應測試，一併補上。
+  await test('【2026-07】學生 UPDATE 自己月記（一般編輯）：偽造 teacherCommentContentAt 有值 → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherCommentContentAt: '2026-07-06T00:00:00+08:00' }))
     );
   });
 
@@ -402,6 +437,17 @@ async function main() {
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         // 走一般編輯路徑但夾帶 studentReply，應被第一分支的鎖定規則擋下
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReply: '想走一般編輯路徑偷塞回覆' }))
+    );
+  });
+
+  // 2026-07 補修：studentReplyContentAt 是回覆欄位家族第四欄，一般編輯分支同樣要求
+  // 維持原值不變（rule.txt 第168行），比照 studentReply 補上對應測試，驗證這個鎖定
+  // 真的擋得住，而不是只在規則檔案裡寫了卻沒被任何測試驗證過。
+  await test('【2026-07】學生 UPDATE 月記（一般編輯）：嘗試帶入 studentReplyContentAt → 應被拒（回覆欄位家族第四欄同樣鎖定）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { studentReplyContentAt: '2026-07-06T00:00:00+08:00' }))
     );
   });
 
