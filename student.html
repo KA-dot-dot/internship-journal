@@ -3800,13 +3800,33 @@ async function saveStudentReply(seatNo, sem, month) {
   const reply = ta.value.trim();
   if (!reply) return toast('請輸入回覆內容', 'warning');
   if (reply.length > 50) return toast('回覆不可超過 50 字', 'warning');
+  // 2026-07 補修：跟 teacher.html saveTeacherComment() 的 commentChanged 防護同一類問題——
+  // 原本這裡每次送出都無條件寫 studentReplyUnread:true / studentReplyAt，如果學生只是重新
+  // 打開回覆框、文字完全沒改就按一次「更新回覆」，會把老師端已讀狀態誤打回未讀，
+  // notify-service 也會因為 studentReplyAt 跟著刷新而誤判成新回覆、重複推播同一則。
+  // oldReply 直接從 loadStudentHistory() 已經抓好的 window._studentHistoryJournals 找
+  // 對應的月記取得，不需要額外多打一次 Firestore 讀取；找不到快取時（理論上不會發生，
+  // 因為這個輸入框本來就是從歷史列表渲染出來的）保守視為「有改變」，寧可多通知不要漏掉。
+  const cachedJournal = (window._studentHistoryJournals || []).find(
+    hj => hj.seatNo === seatNo && hj.semester === sem && Number(hj.month) === Number(month)
+  );
+  const oldReply = cachedJournal?.studentReply || '';
+  const replyChanged = reply !== oldReply;
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
     await updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), {
       studentReply: reply,
-      studentReplyUnread: true,
-      studentReplyAt: localISOStr()
+      // studentReplyAt 維持每次都無條件更新（純粹用於畫面上「我的回覆」泡泡顯示時間，
+      // 角色對應 teacher.html 那邊維持無條件更新的 reviewedAt，不受 replyChanged 影響）
+      studentReplyAt: localISOStr(),
+      // studentReplyUnread／studentReplyContentAt 只在內容真的改變時才寫入；
+      // 內容沒變（重新按送出但文字沒改）時完全不寫這兩欄，Firestore 原值維持不變，
+      // 避免把老師的已讀狀態誤打回未讀、避免 notify-service 重複推播同一則回覆。
+      ...(replyChanged ? {
+        studentReplyUnread: true,
+        studentReplyContentAt: localISOStr(),
+      } : {})
     });
     hideLoading();
     toast('✅ 回覆已送出', 'success');

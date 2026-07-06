@@ -125,12 +125,20 @@ service cloud.firestore {
             && request.resource.data.get('reviewedAt', null) == null
             && request.resource.data.get('teacherCommentUnread', false) == false
             && request.resource.data.get('teacherCommentUpdated', false) == false
+            // 2026-07-06 補修：teacherCommentContentAt 是 teacher.html saveTeacherComment()
+            // 同日新增的欄位（記錄評語內容真正改變的時間，供 notify-service 判斷是否已推播），
+            // 學生不得在建立時寫入，比照其餘老師專屬欄位一律限制為初始空值
+            && request.resource.data.get('teacherCommentContentAt', null) == null
             // 學生不得在建立時寫入回覆欄位（studentReply / studentReplyUnread / studentReplyAt 三欄皆須為初始空值）
             && request.resource.data.get('studentReply', null) == null
             && request.resource.data.get('studentReplyUnread', false) == false
             // 2026-06-28 補修：studentReplyAt 與 studentReply／studentReplyUnread 同屬回覆欄位，
             // 建立時一律限制為 null，避免夾帶孤立時間戳記（功能上無害，但維持資料乾淨度與意圖一致性）
             && request.resource.data.get('studentReplyAt', null) == null
+            // 2026-07 補修：studentReplyContentAt 與 studentReply／studentReplyUnread／studentReplyAt
+            // 同屬回覆欄位家族，建立時同樣限制為初始空值（比照 teacherCommentContentAt 的設計，
+            // 供 notify-service 判斷學生回覆是否已推播用途）
+            && request.resource.data.get('studentReplyContentAt', null) == null
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -147,11 +155,17 @@ service cloud.firestore {
             && request.resource.data.get('reviewedAt', null) == null
             && request.resource.data.get('teacherCommentUnread', false) == false
             && request.resource.data.get('teacherCommentUpdated', false) == false
+            // 2026-07-06 補修：一般內容編輯同樣要求 teacherCommentContentAt 歸零，
+            // 跟 reviewedAt／teacherComment 等其餘老師專屬欄位處理方式一致——內容被學生
+            // 編輯後，先前『評語內容真正改變的時間』已經失去意義，理由同 create：
+            // 若不歸零，理論上可被直接 API 竄改成任意值，繞過 notify-service 的已通知判斷
+            && request.resource.data.get('teacherCommentContentAt', null) == null
             // 2026-06-27 補修：一般內容編輯不可夾帶變更回覆欄位
             // （防止繞過下方第三分支的50字限制／偽造studentReplyUnread已讀狀態）
             && request.resource.data.get('studentReply', null) == resource.data.get('studentReply', null)
             && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
             && request.resource.data.get('studentReplyAt', null) == resource.data.get('studentReplyAt', null)
+            && request.resource.data.get('studentReplyContentAt', null) == resource.data.get('studentReplyContentAt', null)
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()
@@ -160,21 +174,42 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherCommentUnread'])
             && request.resource.data.teacherCommentUnread == false
           ) || (
-            // 學生回覆評語（允許 studentReply + studentReplyUnread + studentReplyAt 三個欄位）
+            // 學生回覆評語（允許 studentReply + studentReplyUnread + studentReplyAt + studentReplyContentAt 四個欄位）
             // 2026-06-26 更新：拿掉「舊回覆必須已被老師讀過才能再送出」的限制，
             // 改為只要老師還沒讀取（studentReplyUnread 仍是 true），學生也能持續編輯／覆蓋同一則回覆，
             // 直到老師實際讀取（saveTeacherComment 寫回 studentReplyUnread:false）為止才會換成「新一則」回覆。
+            // 2026-07 補修：比照 teacher.html saveTeacherComment() 的 commentChanged 防護——
+            // 新增 studentReplyContentAt（只在回覆內容真正改變時才寫入，供 notify-service 判斷
+            // 是否已推播用途）；studentReplyUnread 不再無條件要求為 true，改成依內容是否真的
+            // 改變分兩種情況：內容真的改變（跟上次的 studentReply 不同）→ 必須設為 true（觸發
+            // 老師端重新注意）且必須同步更新 studentReplyContentAt；內容沒變（例如老師已讀後，
+            // 學生重新按送出但文字沒改）→ studentReplyUnread／studentReplyContentAt 皆須維持
+            // 原值不變，不允許把老師已讀狀態誤打回未讀，也不允許時間戳前進造成 notify-service
+            // 誤判為新內容而重複推播（跟 saveTeacherComment() 曾經的 isCommentUpdate 死碼／
+            // commentChanged 是同一類問題，這裡從一開始就用同樣的架構處理）
             schoolUser()
             && request.auth.uid == userId
             && resource.data.ownerUid == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentReply', 'studentReplyUnread', 'studentReplyAt'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentReply', 'studentReplyUnread', 'studentReplyAt', 'studentReplyContentAt'])
             && request.resource.data.studentReply is string
             // 2026-06-27 補修：禁止空字串回覆（原規則 size()<=50 沒有下限，size()==0 也會通過）
             && request.resource.data.studentReply.size() >= 1
             && request.resource.data.studentReply.size() <= 50
-            && request.resource.data.studentReplyUnread == true
             // 2026-06-27 補修：studentReplyAt 型別驗證（只允許 null 或字串，避免寫入任意型別的值）
             && (request.resource.data.get('studentReplyAt', null) == null || request.resource.data.studentReplyAt is string)
+            && (
+              (
+                // 內容真的改變：必須標記未讀、且必須提供 studentReplyContentAt
+                request.resource.data.studentReply != resource.data.get('studentReply', null)
+                && request.resource.data.studentReplyUnread == true
+                && request.resource.data.studentReplyContentAt is string
+              ) || (
+                // 內容沒變：studentReplyUnread／studentReplyContentAt 皆須維持原值不變
+                request.resource.data.studentReply == resource.data.get('studentReply', null)
+                && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
+                && request.resource.data.get('studentReplyContentAt', null) == resource.data.get('studentReplyContentAt', null)
+              )
+            )
           ) || isAdmin();
         allow delete: if (
             schoolUser()
