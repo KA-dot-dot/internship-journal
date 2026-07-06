@@ -50,6 +50,13 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 // 本身至少送達一次、同一則被重複投遞」這個不同層面的問題，跟這次的 notification+data
 // 雙路徑顯示是兩個各自獨立、都要處理的原因，不是二選一。
 messaging.onBackgroundMessage((payload) => {
+  // 2026-07-06 暫時新增（除錯用，確認問題後可移除）：直接印出收到的原始 payload。
+  // 目的：新版跟舊版 fcm-sw.js 的預設標題文字（'產學班實習月記系統'）完全一樣，
+  // 光看畫面上出現預設文字，無法分辨「新版跑了但 payload.data 是空的」還是
+  // 「瀏覽器背景其實還在跑舊版、根本沒讀 payload.data」這兩種情況——這行 log 能
+  // 直接、無歧義地回答：能在 SW 的 console 看到這行，代表這支新版真的在執行；
+  // 印出來的內容能直接告訴我們 payload.data 底下實際有沒有 title/body/tag/link。
+  console.log('[fcm-sw][診斷] 收到背景推播，原始 payload：', JSON.stringify(payload));
   const title = payload.data?.title || '產學班實習月記系統';
   const options = {
     body: payload.data?.body || '',
