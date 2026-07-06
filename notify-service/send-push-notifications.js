@@ -88,10 +88,10 @@ async function sendToTokenDocs(tokenDocs, data) {
 // ---------------------------------------------------------------------------
 // 時區安全的時間比較
 // ---------------------------------------------------------------------------
-// reviewedAt / studentReplyAt 都是 student.html／teacher.html 共用的 localISOStr() 產生的
-// 字串，格式為 'YYYY-MM-DDTHH:mm:ss'——刻意不帶任何時區資訊，但語意上一律是「使用者裝置的
-// 本地時間」（本專案使用者全部在台灣，等同台灣時間 +08:00）。這支腳本自己寫入的
-// teacherCommentNotifiedAt／studentReplyNotifiedAt 則用 new Date().toISOString()，
+// teacherCommentContentAt / studentReplyContentAt 都是 student.html／teacher.html 共用的
+// localISOStr() 產生的字串，格式為 'YYYY-MM-DDTHH:mm:ss'——刻意不帶任何時區資訊，但語意上
+// 一律是「使用者裝置的本地時間」（本專案使用者全部在台灣，等同台灣時間 +08:00）。這支腳本
+// 自己寫入的 teacherCommentNotifiedAt／studentReplyNotifiedAt 則用 new Date().toISOString()，
 // 是標準 UTC 字串（帶 'Z' 結尾）。
 //
 // 這兩種字串「絕對不能直接用字串大小比較」：GitHub Actions runner 預設時區是 UTC，
@@ -127,7 +127,7 @@ async function checkComments() {
   for (const docSnap of snap.docs) {
     const data = docSnap.data();
     if (!data.teacherComment) continue;
-    if (alreadyNotified(data.teacherCommentNotifiedAt, data.reviewedAt)) continue;
+    if (alreadyNotified(data.teacherCommentNotifiedAt, data.teacherCommentContentAt)) continue;
 
     // 保險起見排除理論上不會有資料、但 rule.txt 裡確實存在的頂層 /journals/{journalId}
     // 集合（跟 /users/{uid}/journals/{journalId} 是不同路徑，若真的意外命中，
@@ -143,11 +143,12 @@ async function checkComments() {
     // 2026-07-06 新增：自組 tag，不依賴 FCM 自動賦予的 messageId——重複投遞時兩次送出
     // 是否共用同一個 messageId 並沒有保證，一旦不同，fcm-sw.js 原本用 messageId 當 tag
     // 的防重複機制就會形同虛設（這正是這次追查到的實際案例）。改用「這份月記文件的完整
-    // 路徑 + 這次評語真正寫入的時間（reviewedAt，不是這支腳本送出的時間）」組合：
-    // 只要是同一則評語內容，不論被推播幾次、背後 messageId 是否一致，這裡算出來的 tag
-    // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，reviewedAt 會跟著
-    // 改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
-    const tag = `${docSnap.ref.path}:${data.reviewedAt || ''}`;
+    // 路徑 + 這次評語內容真正改變的時間（teacherCommentContentAt，不是這支腳本送出的時間，
+    // 也不是每次存檔都會動的 reviewedAt）」組合：只要是同一則評語內容，不論被推播幾次、
+    // 背後 messageId 是否一致、老師是否只是打開 Modal 沒改內容就存檔，這裡算出來的 tag
+    // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，teacherCommentContentAt
+    // 會跟著改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
+    const tag = `${docSnap.ref.path}:${data.teacherCommentContentAt || ''}`;
     await sendToTokenDocs(tokensSnap.docs, {
       title: '📩 老師留了新評語',
       body,
@@ -190,18 +191,27 @@ async function checkReplies() {
   for (const docSnap of snap.docs) {
     const data = docSnap.data();
     if (!data.studentReply) continue;
-    if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyAt)) continue;
+    // 2026-07 修正：改比對 studentReplyContentAt，不再用 studentReplyAt——理由跟
+    // checkComments() 改用 teacherCommentContentAt 完全一樣：student.html
+    // saveStudentReply() 同步修正後，studentReplyAt 仍會在每次送出時無條件更新
+    // （純粹用於畫面上「回覆時間」泡泡顯示），但 studentReplyContentAt 只在回覆內容
+    // 真正改變時才寫入。若這裡繼續用 studentReplyAt 判斷，學生只是重新按一次「更新
+    // 回覆」但文字沒改，也會被誤判成新內容而重複推播同一則老師可能都還沒讀到的回覆。
+    // 相容性備註：這欄位是新增的，改版當下已存在、且 studentReplyUnread 仍為 true 的
+    // 舊回覆文件會暫時沒有這個欄位（undefined），alreadyNotified() 對缺資料的處理是
+    // 保守視為「尚未通知」，這類舊資料會在改版後第一次執行時再收到一次推播，之後恢復正常。
+    if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyContentAt)) continue;
     if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
 
     const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
     const title = `💬 ${data.studentName || '學生'}回覆了評語`;
 
-    // 2026-07-06 新增：同 checkComments()，用「文件完整路徑 + studentReplyAt」自組 tag，
-    // 不依賴 FCM 的 messageId。額外好處：就算未來真的發生「同一支 admin token 字串意外
-    // 掛在兩份不同的 admins/{adminId} 文件底下、collectAdminTokenDocs() 撈出兩筆」這種
-    // 情況，兩筆各自送出時 tag 仍然相同（同一份月記、同一個 studentReplyAt），一樣會被
-    // 瀏覽器收斂成一則，不需要額外去 Firestore 排查 admins/*/fcmTokens 是否有重複。
-    const tag = `${docSnap.ref.path}:${data.studentReplyAt || ''}`;
+    // 2026-07 修正：tag 同步改用 studentReplyContentAt，不再用 studentReplyAt，理由同上——
+    // 避免內容沒變時 tag 跟著變動、繞過瀏覽器端的 tag 防重複機制。額外好處維持不變：
+    // 就算未來真的發生「同一支 admin token 字串意外掛在兩份不同的 admins/{adminId}
+    // 文件底下、collectAdminTokenDocs() 撈出兩筆」這種情況，兩筆各自送出時 tag 仍然相同
+    // （同一份月記、同一個 studentReplyContentAt），一樣會被瀏覽器收斂成一則。
+    const tag = `${docSnap.ref.path}:${data.studentReplyContentAt || ''}`;
     await sendToTokenDocs(adminTokenDocs, {
       title,
       body,
