@@ -148,6 +148,16 @@ const DANGER_PATTERNS = [
       '所以另外列一條規則掃描，不依賴人工在區塊 diff 裡自己看出來。',
     regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentUpdated|studentReplyUnread|studentReplyAt|studentReply)[^\]]*\]\s*\)/,
   },
+  {
+    desc:
+      '同一種 !keys().hasAny([...]) 誤用，發生在 teacherCommentContentAt／studentReplyContentAt 這兩個欄位上' +
+      '（老師評語／學生回覆「內容真正改變」那一刻的時間戳，供推播通知服務判斷是否已推播過、避免內容沒變卻重複推播用）。' +
+      'rule.txt 對這兩個欄位目前用的是 .get(field, default) == default（CREATE 分支，要求須為初始空值）或 ' +
+      '.get(field, default) == resource.data.get(field, default)（一般編輯分支，要求維持原值不變）這類寫法，' +
+      '跟前兩條規則涵蓋的欄位屬於同一種風險（誤寫成 hasAny() 檢查「不存在」，會放行不該通過的寫入，或擋下正常寫入)，' +
+      '所以另外列一條規則掃描，不依賴人工在區塊 diff 裡自己看出來。',
+    regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentContentAt|studentReplyContentAt)[^\]]*\]\s*\)/,
+  },
 ];
 
 function scanDangerPatterns(content) {
