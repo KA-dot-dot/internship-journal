@@ -155,7 +155,22 @@ async function checkComments() {
       tag,
       link: `${SITE_BASE_URL}/student.html`,
     });
-    await docSnap.ref.update({ teacherCommentNotifiedAt: new Date().toISOString() });
+    // 2026-07-07 修正：自我修復缺 teacherCommentContentAt 的資料，避免無限重推。
+    // 原本這裡只寫 teacherCommentNotifiedAt，從未補上 teacherCommentContentAt——這個欄位
+    // 2026-07-06 才新增，改版當下所有「本來就 teacherCommentUnread=true」的既有月記
+    // （評語系統本來就會出現的正常狀態，不是罕見邊界案例）永遠不會有這個欄位，導致
+    // alreadyNotified() 因為 contentAt 缺資料而永遠回傳 false，每輪排程都判定「尚未通知」
+    // 再送一次，直到使用者正常操作（學生開歷史頁／老師開評語 Modal）把 Unread 旗標清掉
+    // 才會停止——這跟下方「改版後第一次執行多收到一次、之後恢復正常」的舊註解矛盾，
+    // 實際上不會恢復正常，是資料遷移的真實 bug，任何舊的未讀評語都會中招。
+    // 修法：只在 contentAt 本來就缺資料時（真正評語內容改變的情況，contentAt 已有值，
+    // 不會進這個分支），把這次送出通知的同一個時間戳一併補上當 contentAt 基準值，
+    // 讓下一輪 notifiedAt >= contentAt 成立、自然收斂；不需要另外寫一次性遷移腳本，
+    // 任何原因造成 contentAt 缺資料都能用同一套邏輯自癒。
+    const notifiedAt = new Date().toISOString();
+    const updatePayload = { teacherCommentNotifiedAt: notifiedAt };
+    if (!data.teacherCommentContentAt) updatePayload.teacherCommentContentAt = notifiedAt;
+    await docSnap.ref.update(updatePayload);
     sent++;
   }
   console.log(`checkComments: 本輪通知 ${sent} 筆`);
@@ -197,9 +212,13 @@ async function checkReplies() {
     // （純粹用於畫面上「回覆時間」泡泡顯示），但 studentReplyContentAt 只在回覆內容
     // 真正改變時才寫入。若這裡繼續用 studentReplyAt 判斷，學生只是重新按一次「更新
     // 回覆」但文字沒改，也會被誤判成新內容而重複推播同一則老師可能都還沒讀到的回覆。
-    // 相容性備註：這欄位是新增的，改版當下已存在、且 studentReplyUnread 仍為 true 的
-    // 舊回覆文件會暫時沒有這個欄位（undefined），alreadyNotified() 對缺資料的處理是
-    // 保守視為「尚未通知」，這類舊資料會在改版後第一次執行時再收到一次推播，之後恢復正常。
+    // 相容性備註（2026-07-07 更正）：這欄位是新增的，改版當下已存在、且 studentReplyUnread
+    // 仍為 true 的舊回覆文件會暫時沒有這個欄位（undefined），alreadyNotified() 對缺資料的
+    // 處理是保守視為「尚未通知」。**這行原本寫「這類舊資料會在改版後第一次執行時再收到一次
+    // 推播，之後恢復正常」，但當時的 update() 只寫 NotifiedAt、從未補上 ContentAt，實際上
+    // 不會恢復正常，會每輪排程無限重推**，直到 Unread 被使用者正常操作清掉才停止——保留這句
+    // 更正紀錄，是為了誠實記錄當時的認知狀態。現在會恢復正常，是因為下方 update() 已補上
+    // 「contentAt 缺資料時，用這次通知的時間戳一併回填」的自我修復邏輯，見該處註解。
     if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyContentAt)) continue;
     if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
 
@@ -218,7 +237,14 @@ async function checkReplies() {
       tag,
       link: `${SITE_BASE_URL}/teacher.html`,
     });
-    await docSnap.ref.update({ studentReplyNotifiedAt: new Date().toISOString() });
+    // 2026-07-07 修正：自我修復缺 studentReplyContentAt 的資料，理由與 checkComments()
+    // 的 teacherCommentContentAt 完全對稱，見該處註解——原本只補 studentReplyNotifiedAt、
+    // 從未補 studentReplyContentAt，導致改版當下所有既有的 studentReplyUnread=true
+    // 舊回覆永遠無限重推，直到 Unread 被正常操作清掉才停止。
+    const notifiedAt = new Date().toISOString();
+    const updatePayload = { studentReplyNotifiedAt: notifiedAt };
+    if (!data.studentReplyContentAt) updatePayload.studentReplyContentAt = notifiedAt;
+    await docSnap.ref.update(updatePayload);
     sent++;
   }
   console.log(`checkReplies: 本輪通知 ${sent} 筆`);
