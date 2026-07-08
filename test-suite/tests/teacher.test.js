@@ -1,7 +1,32 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v18
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02）
+ * 老師端自動化測試 v19
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v19 新增（2026-07-07）：
+ *   T-SEC-30  saveTeacherComment() teacherCommentContentAt 只在評語內容真正改變時才寫入
+ *             （2026-07-06 新增 Web Push 推播子系統時一併新增的欄位，供
+ *             notify-service/send-push-notifications.js 的 checkComments() 判斷評語
+ *             是否已推播過用；規則理應跟既有 teacherCommentUnread／teacherCommentUpdated
+ *             同一個 commentChanged 條件區塊，但當時新增 teacherCommentContentAt 時
+ *             沒有同步擴充 T-SEC-20／T-SEC-23 涵蓋這第三個欄位，這裡補上。與
+ *             student_test.js 這邊已補的 S-SEC-29（studentReplyContentAt／
+ *             replyChanged）對稱）。⚠️ 第一版判斷用固定 600 字元視窗（比照 T-SEC-23
+ *             的 200/400 字元），但實際對照 teacher.html 跑過才發現
+ *             teacherCommentUpdated 與 teacherCommentContentAt 之間夾了一段 644 字元的
+ *             解釋性註解，600 字元視窗會誤判退化（測試本身錯，不是程式碼錯）；已改用
+ *             「抓出 commentChanged ? { ... } : {}) 區塊本身的起訖括號」取代固定視窗，
+ *             不受區塊內註解長度影響。
+ *   T-SEC-31  initPushNotifications() 關鍵特徵（相對路徑註冊 fcm-sw.js、Firestore 寫入
+ *             路徑對應 rule.txt 的 adminId==request.auth.uid、userAgent 截斷 200 字、
+ *             fire-and-forget 不擋登入）。新增 T-SEC-30 當下這裡原本標注「沒看過
+ *             teacher.html 實際內容，先不補、避免重蹈 S-SEC-22/23 照概念模型猜寫介面
+ *             形狀的覆轍」；隨後取得 teacher.html 實際內容，逐項核對真正的原始碼後才
+ *             補上，其中相對路徑那項檢查特別處理過「正規表達式誤命中解釋性註解文字」
+ *             的陷阱——函式內部有一段註解本身就提到 '/fcm-sw.js'（用來解釋為何不能用
+ *             絕對路徑），若用「檢查此字串不存在」的寫法會被註解文字本身誤判為失敗，
+ *             改用「檢查 register('./fcm-sw.js' 這個實際呼叫點的字面模式是否存在」的
+ *             正向比對，不受註解內容影響。
  *
  * v18 新增（2026-07-02）：
  *   T-SEC-29  loadRosterStudentsForSemesters() 根源防護 + submitAoA／stuSalaryRows／
@@ -1027,6 +1052,167 @@ async function runTeacherTests(page, log) {
         '評語未改時仍可能誤改此旗標，造成 State 2→1 或 State 4→3 退化'
       );
   });
+
+  await test('T-SEC-30 saveTeacherComment() teacherCommentContentAt 只在評語內容真正改變時才寫入（與 teacherCommentUnread／teacherCommentUpdated 同一個 commentChanged 條件區塊）', async () => {
+    // 2026-07-07 新增，填補文件自己記錄的測試缺口：teacherCommentContentAt 是
+    // 2026-07-06 新增的欄位（供 notify-service/send-push-notifications.js 的
+    // checkComments() 判斷評語是否已推播過用），寫入邏輯理應沿用既有
+    // commentChanged 守衛（跟 teacherCommentUnread／teacherCommentUpdated 同一個
+    // spread 條件區塊），但 T-SEC-20／T-SEC-23 這兩條原本測 commentChanged 的測試
+    // 新增當下沒有同步擴充涵蓋這第三個欄位——本測試補上，理由與 T-SEC-23 完全對稱：
+    // 若 teacherCommentContentAt 沒被 commentChanged 守衛住，老師只讀取學生回覆、
+    // 評語文字沒改就按儲存，仍會把這個時間戳更新成現在，讓 notify-service 誤判為
+    // 「內容真的變了」而重複推播一則學生早就看過的評語。
+    //
+    // 寫法說明：第一版原本用固定字元數視窗（比照 T-SEC-23 的 200/400 字元），但實際
+    // 對照 teacher.html 跑過才發現 teacherCommentUpdated 跟 teacherCommentContentAt
+    // 之間夾了一大段解釋性註解（說明為何不能沿用 reviewedAt 判斷），距離達 644 字元，
+    // 640 字元視窗會誤判退化（測試本身錯，不是程式碼錯）。改用「抓出
+    // commentChanged ? { ... } : {}) 這個 ternary/spread 區塊本身的起訖括號」再檢查
+    // 欄位是否落在區塊內，不受區塊內註解長度影響，比固定字元視窗更貼近實際程式碼結構。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasContentAt = fnStr.includes('teacherCommentContentAt');
+      if (!hasContentAt) return { skip: false, hasContentAt: false };
+
+      const hasCommentChanged = fnStr.includes('commentChanged');
+
+      // 抓出 `commentChanged ? { ... } : {})` 這個條件 spread 區塊本身，
+      // 不論裡面註解多長都能正確涵蓋。
+      const openIdx = fnStr.indexOf('commentChanged ? {');
+      const closeIdx = openIdx >= 0 ? fnStr.indexOf('} : {})', openIdx) : -1;
+      const block = (openIdx >= 0 && closeIdx > openIdx) ? fnStr.slice(openIdx, closeIdx) : '';
+
+      const contentAtGatedByChanged = block.includes('teacherCommentContentAt');
+      const unreadGatedByChanged = block.includes('teacherCommentUnread');
+      const updatedGatedByChanged = block.includes('teacherCommentUpdated');
+
+      return {
+        skip: false,
+        hasContentAt: true,
+        hasCommentChanged,
+        blockFound: !!block,
+        contentAtGatedByChanged,
+        unreadGatedByChanged,
+        updatedGatedByChanged,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasContentAt)
+      throw new Error(
+        'saveTeacherComment() 找不到 teacherCommentContentAt，' +
+        '推播通知服務（send-push-notifications.js 的 checkComments()）無法判斷評語是否已推播過'
+      );
+    if (!result.hasCommentChanged)
+      throw new Error(
+        'saveTeacherComment() 有 teacherCommentContentAt 但找不到 commentChanged，' +
+        '無法確認這個時間戳是否只在內容真正改變時才更新'
+      );
+    if (!result.blockFound)
+      throw new Error(
+        '找不到 `commentChanged ? { ... } : {})` 這個條件 spread 區塊本身（寫法可能已改變），' +
+        '無法確認 teacherCommentContentAt 是否仍落在同一個守衛範圍內，需要重新設計此測試'
+      );
+    if (!result.contentAtGatedByChanged)
+      throw new Error(
+        'teacherCommentContentAt 不在 commentChanged 條件 spread 區塊內，' +
+        '老師只讀取回覆、評語文字沒改就按儲存，仍會把這個時間戳更新成現在，' +
+        '導致 notify-service 誤判為內容真的改變而對同一則評語重複推播'
+      );
+    if (!result.unreadGatedByChanged || !result.updatedGatedByChanged)
+      throw new Error(
+        'teacherCommentUnread／teacherCommentUpdated 不在同一個 commentChanged 區塊內，' +
+        '這條測試賴以判斷「三個欄位共用同一守衛」的前提被破壞，T-SEC-23 的既有覆蓋可能也已失效'
+      );
+  });
+
+  await test('T-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入', async () => {
+    // 2026-07-07 新增。上一輪（teacher_test.js v19 header）記錄這個函式「沒看過實際
+    // 內容，照文件摘要猜寫測試風險太高，故意先不補」；現在已經拿到 teacher.html
+    // 實際內容，逐項對照真正的原始碼設計以下檢查，不是憑空假設介面形狀。
+    //
+    // 五項檢查對應五個真實存在、各自有明確理由的退化風險：
+    //   1. navigator.serviceWorker.register('./fcm-sw.js', ...) 必須用相對路徑——
+    //      函式內的註解本身就說明這是 2026-07 的真實 bug 修正：這個站是 GitHub Pages
+    //      的 project page（網址帶 /internship-journal/ 子路徑），用開頭帶斜線的絕對
+    //      路徑 '/fcm-sw.js' 會讓瀏覽器去抓網域最上層、實際上 404，這裡若被改回絕對
+    //      路徑，推播會在所有裝置上悄悄失效但不會報錯（try/catch 吞掉），很難察覺。
+    //   2. Firestore 寫入路徑 doc(db, 'admins', currentUser.uid, 'fcmTokens', token)
+    //      必須用 currentUser.uid——這條路徑要能通過 rule.txt 的
+    //      adminId==request.auth.uid 檢查，若改成其他值（例如 email 字串），
+    //      正常情況下仍可能因為 adminId==emailKey() 這個 OR 分支而僥倖通過，但一旦
+    //      未來 emailKey() 邏輯有變動，兩者可能不再等價，鎖住目前實際使用的 uid 寫法。
+    //   3. userAgent 欄位必須截斷至 200 字（.slice(0, 200)）——對應 AI_CONTEXT.md
+    //      「Firestore 資料結構」章節記載的 fcmTokens 文件 schema，若移除截斷，
+    //      理論上可以寫入任意長度字串進這個公開集合。
+    //   4. try/catch 的 catch 區塊不能重新 throw——呼叫端 enterApp() 註解明確寫著
+    //      「fire-and-forget，失敗不擋登入」，若 catch 區塊被改成 rethrow，
+    //      推播初始化失敗會變成未捕捉例外，可能連帶讓 enterApp() 後續邏輯中斷。
+    //   5. enterApp() 呼叫 initPushNotifications() 時不能加 await——同一個
+    //      fire-and-forget 設計意圖的另一半，若被改成 await，使用者登入流程會被
+    //      這整個推播註冊流程（含瀏覽器跳出通知權限詢問視窗）卡住。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof initPushNotifications === 'function') ? initPushNotifications.toString() : '';
+      const enterAppStr = (typeof enterApp === 'function') ? enterApp.toString() : '';
+      if (!fnStr || !enterAppStr) return { skip: true };
+
+      const relativeSwPath = /navigator\.serviceWorker\.register\(\s*['"]\.\/fcm-sw\.js['"]/.test(fnStr);
+      const correctFsPath = /doc\(\s*db\s*,\s*['"]admins['"]\s*,\s*currentUser\.uid\s*,\s*['"]fcmTokens['"]/.test(fnStr);
+      const userAgentTruncated = /userAgent\s*:\s*\([^)]*\)\.slice\(\s*0\s*,\s*200\s*\)/.test(fnStr);
+
+      const catchIdx = fnStr.lastIndexOf('} catch');
+      const catchBlock = catchIdx >= 0 ? fnStr.slice(catchIdx) : '';
+      const catchDoesNotRethrow = !!catchBlock && !catchBlock.includes('throw');
+
+      const hasAwaitedCall = /await\s+initPushNotifications\(\)/.test(enterAppStr);
+      const hasBareCall = enterAppStr.includes('initPushNotifications();') || enterAppStr.includes('initPushNotifications() ;');
+
+      return {
+        skip: false,
+        relativeSwPath,
+        correctFsPath,
+        userAgentTruncated,
+        catchFound: !!catchBlock,
+        catchDoesNotRethrow,
+        hasAwaitedCall,
+        hasBareCall,
+      };
+    });
+    if (result.skip) return;
+    if (!result.relativeSwPath)
+      throw new Error(
+        'initPushNotifications() 沒有用相對路徑 register(\'./fcm-sw.js\')——' +
+        '若被改回絕對路徑 /fcm-sw.js，GitHub Pages project page 子路徑下會 404，' +
+        '推播會悄悄失效（try/catch 吞掉錯誤，畫面上完全看不出來）'
+      );
+    if (!result.correctFsPath)
+      throw new Error(
+        'initPushNotifications() 的 Firestore 寫入路徑不是 doc(db, \'admins\', currentUser.uid, \'fcmTokens\', token)，' +
+        '可能無法通過 rule.txt 的 adminId==request.auth.uid 檢查'
+      );
+    if (!result.userAgentTruncated)
+      throw new Error(
+        'initPushNotifications() 的 userAgent 欄位未截斷至 200 字（.slice(0, 200)），' +
+        '違反 fcmTokens 文件的既定 schema'
+      );
+    if (!result.catchFound || !result.catchDoesNotRethrow)
+      throw new Error(
+        'initPushNotifications() 的 catch 區塊會重新 throw（或找不到 catch 區塊），' +
+        '違反「fire-and-forget，失敗不擋登入」的設計意圖，enterApp() 可能因此被中斷'
+      );
+    if (result.hasAwaitedCall)
+      throw new Error(
+        'enterApp() 用 await 呼叫 initPushNotifications()，' +
+        '登入流程會被整個推播註冊流程（含瀏覽器通知權限詢問視窗）卡住，違反 fire-and-forget 設計'
+      );
+    if (!result.hasBareCall)
+      throw new Error(
+        'enterApp() 找不到不帶 await 的 initPushNotifications() 呼叫，呼叫方式可能已改變，需要重新確認此測試'
+      );
+  });
+
 
   await test('T-SEC-24 _openCommentModalWithUid() oldComment 設定前做身份比對（防快速切換導致 commentChanged 基準錯誤）', async () => {
     // 2026-06-29 補修的回歸測試。
