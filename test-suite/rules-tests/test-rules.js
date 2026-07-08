@@ -575,6 +575,41 @@ async function main() {
   });
 
   // ════════════════════════════════════════════════════════════
+  // /users/{userId}/fcmTokens/{tokenId}（2026-07-06 新增，Web Push 推播 token）
+  // 背景：這條規則新增當下沒有補上對應的 Layer 1 回歸測試（全文搜尋 fcmTokens 零筆），
+  // 已人工手動逐條推演過規則本身邏輯正確（allow create,update,delete: if schoolUser()
+  // && request.auth.uid == userId；get/list 固定 false），但缺乏自動化測試守著，
+  // 未來若有人不小心把 uid 比對拿掉也不會被抓到。這裡補上，對稱 /admins/ 那邊同時補的
+  // 4 條（本人可寫、他人不可寫、get 固定拒絕、list 固定拒絕）。
+  // ════════════════════════════════════════════════════════════
+  await test('【2026-07-07】學生可以 create 自己的 fcmTokens 文件', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/fake-token-self`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-07】別的學生不能 create 別人 uid 底下的 fcmTokens 文件', async () => {
+    await assertFails(
+      authCtx(OTHER_UID, OTHER_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/fake-token-intruder`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-07】學生不能 get 自己的 fcmTokens 文件（get 固定 false，前端本來就不該讀回自己的 token，讀取只透過 Admin SDK）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`users/${STUDENT_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+    });
+    await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`users/${STUDENT_UID}/fcmTokens/seed-token-get`).get());
+  });
+
+  await test('【2026-07-07】學生不能 list 自己的 fcmTokens 集合（list 固定 false）', async () => {
+    await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().collection(`users/${STUDENT_UID}/fcmTokens`).get());
+  });
+
+  // ════════════════════════════════════════════════════════════
   // /admins/{adminId}
   // ════════════════════════════════════════════════════════════
   await test('admin 可以 get 自己的 admins 文件', async () => {
@@ -610,6 +645,39 @@ async function main() {
 
   await test('想把 protected 管理員的 protected 旗標改掉 → 應被拒（keepsProtectedFlag）', async () => {
     await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc('admins/protected-admin').set({ email: ADMIN_EMAIL, protected: false }));
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // /admins/{adminId}/fcmTokens/{tokenId}（2026-07-06 新增，Web Push 推播 token）
+  // 與上方 /users/{userId}/fcmTokens 同一輪缺口、同一次一併補上，理由詳見該處註解。
+  // 規則：allow create,update,delete: if isAdmin() && (adminId==request.auth.uid ||
+  // adminId==emailKey())；get/list 固定 false。
+  // ════════════════════════════════════════════════════════════
+  await test('【2026-07-07】admin 可以 create 自己的 fcmTokens 文件', async () => {
+    await assertSucceeds(
+      authCtx(ADMIN_UID, ADMIN_EMAIL).firestore()
+        .doc(`admins/${ADMIN_UID}/fcmTokens/fake-token-self`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-07】非 admin 的一般學生不能 create 別人（admin）的 fcmTokens 文件', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`admins/${ADMIN_UID}/fcmTokens/fake-token-intruder`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-07】admin 不能 get 自己的 fcmTokens 文件（get 固定 false）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`admins/${ADMIN_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+    });
+    await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc(`admins/${ADMIN_UID}/fcmTokens/seed-token-get`).get());
+  });
+
+  await test('【2026-07-07】admin 不能 list 自己的 fcmTokens 集合（list 固定 false）', async () => {
+    await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().collection(`admins/${ADMIN_UID}/fcmTokens`).get());
   });
 
   // ════════════════════════════════════════════════════════════
