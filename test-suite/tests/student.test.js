@@ -1,7 +1,23 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v17
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）
+ * 學生端自動化測試 v18
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06，本次新增測試補強 2026-07-08
+ * saveJournal() 修正，尚未同步記錄進 AI_CONTEXT.md）
+ *
+ * v18 新增（2026-07-08）：
+ *   S-SEC-30  saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）
+ *             背景：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播子系統時，
+ *             rule.txt 一般編輯分支同步要求歸零的新欄位（跟 teacherComment／teacherReviewed／
+ *             reviewedAt／teacherCommentUnread／teacherCommentUpdated 同一組待遇），但
+ *             saveJournal() 當時漏了同步加上。saveJournal() 用 setDoc(...,{merge:true}) 寫入，
+ *             缺這個欄位時 merge 只會保留舊值——只要月記曾被老師留過評語，學生之後任何一次
+ *             一般編輯儲存都會撞上 rule.txt 的 == null 要求而被 Firestore 拒絕（403），整份
+ *             月記存檔失敗且無其他提示。2026-07-08 已在 saveJournal() 補上此欄位，這裡補上
+ *             對應回歸測試。⚠️ 純靜態分析，只能確認欄位存在、賦值為 null、且落在跟其餘老師
+ *             欄位歸零同一個 data 物件範圍內；無法像對 Firestore Emulator 真正用 merge:true
+ *             模擬「文件已有非 null 舊值」情境那樣驗證 rule.txt 真的會放行——這塊仍是已知
+ *             測試盲區（test-rules.js 目前全部用整份 .set() 覆蓋，從未用過 merge:true），
+ *             建議另外在 test-rules.js 補上對應的規則層級回歸測試。
  *
  * v17 新增（2026-07-06）：
  *   S-SEC-29  saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）
@@ -1822,6 +1838,53 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error(
         'saveStudentReply() 的 studentReplyAt 疑似被 replyChanged 條件擋住，' +
         '「我的回覆」泡泡顯示時間可能不會在重新送出時更新'
+      );
+  });
+
+  await test('S-SEC-30 saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）', async () => {
+    // 2026-07-08 新增。背景：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播
+    // 子系統時，rule.txt 一般編輯分支同步要求歸零的新欄位（跟 teacherComment／
+    // teacherReviewed／reviewedAt／teacherCommentUnread／teacherCommentUpdated 同一組
+    // 待遇）。saveJournal() 用 setDoc(...,{merge:true}) 寫入，若 data 物件沒有明確帶
+    // teacherCommentContentAt: null，merge 只會保留舊值——只要月記曾被老師留過評語
+    // （teacherCommentContentAt 已是非 null 值），學生之後任何一次一般編輯儲存都會撞上
+    // rule.txt 的 == null 要求而被 Firestore 拒絕（403），整份月記存檔失敗，且沒有其他
+    // UI 提示（覆蓋確認對話框的 reviewWarning／replyWarning 都不會提到這個，使用者只會
+    // 看到「❌ 儲存失敗：...」）。
+    //
+    // ⚠️ 純靜態分析：只能確認欄位存在、賦值為 null、且跟其餘老師欄位歸零寫在同一個
+    // data 物件範圍內，無法像真正對 Firestore Emulator 用 merge:true 模擬「文件已有
+    // 非 null 舊值」情境那樣，直接驗證 rule.txt 真的會放行——這塊仍是已知測試盲區
+    // （test-rules.js 目前全部用整份 .set() 覆蓋，從未用過 merge:true 模擬真實寫入
+    // 方式），建議另外在 test-rules.js 補上對應的規則層級回歸測試。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+      const hasField = fnStr.includes('teacherCommentContentAt');
+      const hasNullValue = /teacherCommentContentAt\s*:\s*null/.test(fnStr);
+      // 確認跟其餘老師欄位歸零寫在同一個 data 物件裡（用 teacherCommentUpdated: false
+      // 附近 600 字元窗口比對，跟 teacher_test.js T-SEC-30 的視窗寫法一致，避免只是
+      // 巧合出現在檔案別處，例如註解或其他不相干的函式）
+      const nearOtherTeacherFields =
+        /teacherCommentUpdated\s*:\s*false\s*,[\s\S]{0,600}teacherCommentContentAt\s*:\s*null/.test(fnStr);
+      return { skip: false, hasField, hasNullValue, nearOtherTeacherFields };
+    });
+    if (result.skip) return;
+    if (!result.hasField)
+      throw new Error(
+        'saveJournal() 找不到 teacherCommentContentAt，一般編輯時不會歸零此欄位；' +
+        '只要月記曾被老師留過評語，之後任何一次編輯儲存都會被 rule.txt 拒絕（403），整份月記存檔失敗'
+      );
+    if (!result.hasNullValue)
+      throw new Error(
+        'saveJournal() 有 teacherCommentContentAt 但賦值不是 null，' +
+        '可能無法滿足 rule.txt 一般編輯分支 == null 的要求'
+      );
+    if (!result.nearOtherTeacherFields)
+      throw new Error(
+        'teacherCommentContentAt: null 沒有跟 teacherComment／teacherReviewed／teacherCommentUnread／' +
+        'teacherCommentUpdated 等其餘老師欄位歸零寫在同一個 data 物件內，請確認位置正確（例如誤放進' +
+        '其他 if 分支或條件式區塊，導致實際不會隨每次一般編輯無條件寫入）'
       );
   });
 
