@@ -3154,7 +3154,15 @@ async function saveJournal() {
     teacherReviewed: false,
     reviewedAt: null,
     teacherCommentUnread: false,
-    teacherCommentUpdated: false
+    teacherCommentUpdated: false,
+    // 2026-07-08 補修：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播子系統時
+    // 一併加入的欄位（供 notify-service/send-push-notifications.js 判斷評語是否已推播過），
+    // rule.txt 的一般編輯分支同日同步要求此欄位歸零（跟 teacherComment 等其餘老師專屬欄位
+    // 處理方式一致），但這裡當時漏了同步加上，導致任何「老師已留過評語」的月記，學生
+    // 之後只要再次編輯儲存，merge:true 會讓這個欄位保留舊的非 null 值，撞上 rule.txt
+    // 要求 == null 而被 Firestore 拒絕（整份月記存檔失敗）。補上歸零後與其餘老師欄位
+    // 處理方式一致，rule.txt 不需要修改。
+    teacherCommentContentAt: null
   };
   if (JSON.stringify(data).length > 900000) {
     hideLoading();
