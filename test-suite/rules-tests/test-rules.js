@@ -367,6 +367,75 @@ async function main() {
     );
   });
 
+  // 2026-07-08 補修：上面那條測試的是「學生主動想把 teacherCommentContentAt 設成某個值」
+  // 這種偽造情境，完全測不到真正讓 student.html 出過包的情境——原因出在 journalDoc()
+  // 這個 helper 本身預設就不含 teacherCommentContentAt 這個 key（見上方 function 定義），
+  // 所以既有測試不管是拿 journalDoc() 當「seed 前狀態」還是「送出的新資料」，兩邊都是
+  // 「這個欄位根本不存在」，rule.txt 的 .get('teacherCommentContentAt', null) == null 兩邊
+  // 都吃到預設值 null，永遠trivially成立，天生無法測出「文件已有非 null 舊值、學生送出的
+  // 一般編輯 payload 忘記歸零」這個真正的情境。以下兩條改用 withSecurityRulesDisabled
+  // 明確把 existing-01 的 teacherCommentContentAt seed 成非 null（模擬「老師已經留過評語」），
+  // 再用 .set(...,{merge:true})（跟 student.html saveJournal() 實際呼叫方式一致，不是
+  // journalDoc() 那種整份 .set() 覆蓋）送出一般編輯 payload，分別驗證「缺這一行 → 應被拒」
+  // 與「補上這一行 → 應成功」，直接對應 2026-07-08 那次 student.html 的 bug 與修法。
+  await test('【2026-07-08】學生 UPDATE 自己月記（一般編輯，merge:true）：文件已有教師評語（teacherCommentContentAt 非 null），payload 缺 teacherCommentContentAt → 應被拒', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`users/${STUDENT_UID}/journals/existing-01`).set(
+        journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          teacherComment: '老師評語（模擬已存在）',
+          teacherReviewed: true,
+          reviewedAt: '2026-07-08T09:00:00+08:00',
+          teacherCommentUnread: true,
+          teacherCommentUpdated: false,
+          teacherCommentContentAt: '2026-07-08T09:00:00+08:00',
+        })
+      );
+    });
+    // 模擬 2026-07-08 修正前、有 bug 的 saveJournal()：其餘老師欄位都正確歸零，
+    // 唯獨漏了 teacherCommentContentAt 這個 key（不是設成某個值，是完全沒提到）。
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set({
+          content: '學生重新編輯後的內容',
+          teacherComment: null,
+          teacherReviewed: false,
+          reviewedAt: null,
+          teacherCommentUnread: false,
+          teacherCommentUpdated: false,
+          // 故意不寫 teacherCommentContentAt，對應 bug 版 saveJournal() 的實際送出內容
+        }, { merge: true })
+    );
+  });
+
+  await test('【2026-07-08】學生 UPDATE 自己月記（一般編輯，merge:true）：同上情境，payload 補上 teacherCommentContentAt: null → 應成功（驗證 saveJournal() 修法真的有效）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`users/${STUDENT_UID}/journals/existing-01`).set(
+        journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          teacherComment: '老師評語（模擬已存在）',
+          teacherReviewed: true,
+          reviewedAt: '2026-07-08T09:00:00+08:00',
+          teacherCommentUnread: true,
+          teacherCommentUpdated: false,
+          teacherCommentContentAt: '2026-07-08T09:00:00+08:00',
+        })
+      );
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set({
+          content: '學生重新編輯後的內容（已修正版）',
+          teacherComment: null,
+          teacherReviewed: false,
+          reviewedAt: null,
+          teacherCommentUnread: false,
+          teacherCommentUpdated: false,
+          teacherCommentContentAt: null,   // ← 2026-07-08 修法補上的這一行
+        }, { merge: true })
+    );
+  });
+
   await test('學生不能 UPDATE 別人的月記', async () => {
     await assertFails(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
