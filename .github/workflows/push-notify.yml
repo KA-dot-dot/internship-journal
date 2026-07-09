@@ -36,6 +36,16 @@ jobs:
         working-directory: notify-service
         run: npm install
 
+      # 2026-07（稽核修正）：send-push-notifications.js 先前完全沒有任何自動化測試覆蓋，
+      # 是 AI_CONTEXT.md「推播通知」章節第 4 節⑤點名的問題。parseAsInstant()／
+      # alreadyNotified()／emailToDocId() 已抽到 notify-logic.js 並補上
+      # test-notify-logic.js，不需要任何 Secret 或網路連線即可執行，這裡在真正送出
+      # 推播之前先跑一次，任何邏輯回歸（例如時區換算或時間比較被改壞）會讓這個 job
+      # 直接失敗、不會繼續往下送出可能有問題的通知，也會在 Actions 分頁顯眼地標記失敗。
+      - name: 執行 notify-service 邏輯單元測試（不需要 Secret，純邏輯驗證）
+        working-directory: notify-service
+        run: npm test
+
       - name: Send pending push notifications
         working-directory: notify-service
         run: node send-push-notifications.js
