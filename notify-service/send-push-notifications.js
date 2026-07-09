@@ -179,6 +179,12 @@ async function checkComments() {
 // ---------------------------------------------------------------------------
 // 學生回覆評語 → 通知全體老師/管理員
 // ---------------------------------------------------------------------------
+// 跟 teacher.html 的 emailToDocId() 完全一致（見該檔 ~1533 行），這裡不 import
+// 整個前端檔案，單純複製這個一行函式，避免這支獨立的 Node 腳本平白多一份跨檔依賴。
+function emailToDocId(email) {
+  return (email || '').trim().toLowerCase().replace(/[@.]/g, '_');
+}
+
 // 老師端 fcmTokens 存在 /admins/{adminId}/fcmTokens/ 底下，但 admins 這個集合本身
 // 有兩種可能的 docId（uid 或 emailKey，見 rule.txt isAdmin() 與 teacher.html
 // ensureAdminUidDocument() 的歷史遷移設計）。若直接 db.collection('admins').get()
@@ -186,14 +192,66 @@ async function checkComments() {
 // 這份文件本身還沒建立、但 fcmTokens 子集合已經因為 isAdmin() 檢查通過而寫入成功」
 // 這種情境（例如 ensureAdminUidDocument() 那次網路呼叫剛好失敗，這個情況已有 catch、
 // 不會擋登入，所以使用者完全不會發現，但會讓通知永遠找不到這位老師的 token）。
-// 改用 collectionGroup('fcmTokens') 直接掃描所有 token 文件本身，不依賴 admins
-// 集合有沒有對應的文件存在，能完整涵蓋上述邊界情況。
+// 所以改用 collectionGroup('fcmTokens') 直接掃描所有 token 文件本身，不能只依賴
+// 「admins 集合裡有沒有對應的文件」來判斷該不該收這則通知。
+//
+// 2026-07-08 修正（稽核發現的真實資料外洩管道，非上述既有設計考量）：teacher.html
+// 的 removeAdmin() 只 deleteDoc(doc(db,'admins',id))，從未清過對方的
+// admins/{id}/fcmTokens/ 子集合（Firestore 刪除文件不會連帶刪除子集合），而
+// rule.txt 對 /admins/{adminId}/fcmTokens 的 get/list 規則寫死 false（連 admin 本人
+// 都查不到自己有哪些 token 文件），前端完全沒有機會、也沒有權限在移除當下順手清除。
+// 後果：被移除老師/管理員權限的人，裝置上仍會持續收到「學生回覆評語」推播（含回覆內容
+// 前 40 字），直到 token 自然失效為止——權限收回並不完整。
+// 修法：改成 db.collection('admins').get() 拿到「目前確實存在」的 admins 文件 ID 集合，
+// 逐一比對每個 token 的 adminId（= 寫入時的 currentUser.uid，見 teacher.html
+// initPushNotifications()）是否還在這個集合裡；不在的話，不能直接判定為孤兒——
+// 還必須複刻 verifyCurrentAdmin() 的判斷邏輯（admins/{uid} 或 admins/{emailKey} 任一
+// 存在即算數），用 Admin SDK 的 admin.auth().getUser(uid) 查出對應 email 換算 emailKey
+// 再查一次，才不會把「isAdmin() 檢查通過、但還沒走過 uid 遷移」這種本來就該保留的正常
+// 在職老師 token 一併誤刪（這正是上一段既有設計特別要涵蓋的情境）。兩種存在方式都查
+// 不到，才視為孤兒 token 一併刪除（順手清理，不留著讓下一輪繼續判斷）。
 async function collectAdminTokenDocs() {
-  const snap = await db.collectionGroup('fcmTokens').get();
-  return snap.docs.filter((docSnap) => {
+  const [tokenSnap, adminSnap] = await Promise.all([
+    db.collectionGroup('fcmTokens').get(),
+    db.collection('admins').get(),
+  ]);
+  const activeAdminIds = new Set(adminSnap.docs.map((d) => d.id));
+
+  const candidates = tokenSnap.docs.filter((docSnap) => {
     const parentDocRef = docSnap.ref.parent.parent; // admins/{adminId} 或 users/{uid} 的文件參照
     return !!parentDocRef && parentDocRef.parent.id === 'admins'; // 只留 admins/*/fcmTokens，排除 users/*/fcmTokens
   });
+
+  const valid = [];
+  const orphaned = [];
+  for (const docSnap of candidates) {
+    const adminId = docSnap.ref.parent.parent.id;
+    if (activeAdminIds.has(adminId)) {
+      valid.push(docSnap);
+      continue;
+    }
+    // admins/{uid} 直接查無此文件：再比對 emailKey 格式，避免誤刪尚未遷移的正常老師 token。
+    let stillValid = false;
+    try {
+      const userRecord = await admin.auth().getUser(adminId);
+      const emailKey = emailToDocId(userRecord.email || '');
+      stillValid = !!emailKey && activeAdminIds.has(emailKey);
+    } catch (e) {
+      // getUser 失敗（Auth 帳號已不存在或其他例外）：視為孤兒，往下清除
+    }
+    if (stillValid) {
+      valid.push(docSnap);
+    } else {
+      orphaned.push(docSnap);
+    }
+  }
+
+  if (orphaned.length) {
+    await Promise.all(orphaned.map((d) => d.ref.delete().catch(() => {})));
+    console.log(`collectAdminTokenDocs: 清除 ${orphaned.length} 筆孤兒 token（對應的 /admins/ 權限已不存在，通常是 removeAdmin() 移除後的殘留）`);
+  }
+
+  return valid;
 }
 
 async function checkReplies() {
