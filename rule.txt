@@ -203,6 +203,26 @@ service cloud.firestore {
                 request.resource.data.studentReply != resource.data.get('studentReply', null)
                 && request.resource.data.studentReplyUnread == true
                 && request.resource.data.studentReplyContentAt is string
+                // 2026-07 補修：studentReplyContentAt 先前只驗證型別（is string），沒有任何
+                // 格式或時間合理性檢查，可被直接呼叫 Firestore API 的使用者塞入任意字串（含
+                // 未來時間），讓 notify-service 的 alreadyNotified() 永遠判定「尚未通知」，
+                // 造成同一則回覆每 5 分鐘重複推播給全體老師/管理員（若該月記已有既有評語，
+                // executeBatchReview() 的篩選條件不會處理到它，只能老師逐筆手動開評語 Modal
+                // 才能停止）。teacherCommentContentAt 不受影響、不需要同樣的修法——它完全經
+                // isAdmin() 寫入，跟 teacherComment 本身沒有內容驗證屬於同一信任邊界。
+                // Firestore Rules 沒有能把任意字串解析成 Timestamp 的函式，無法直接拿字串去
+                // 跟 request.time 比較範圍，只能做到兩件事：①格式驗證，擋掉不符合
+                // localISOStr() 輸出格式（'YYYY-MM-DDTHH:mm:ss'，不含時區)的任意字串；
+                // ②要求跟同一次寫入的 studentReplyAt 完全相同——student.html 的
+                // saveStudentReply() 已同步修正為只呼叫一次 localISOStr() 並讓兩個欄位共用
+                // 同一個字串，正常寫入必定相等。這無法阻止有心人把兩個欄位「一起」改成同一個
+                // 未來時間，但堵死了「只竄改 studentReplyContentAt、studentReplyAt 維持正常」
+                // 這種完全不會被使用者自己發現的隱性攻擊——任何竄改都會連帶讓學生自己「我的
+                // 回覆」時間泡泡顯示明顯錯誤的日期，不再是無聲無息。完整解法需把這個欄位改成
+                // 用 serverTimestamp() 寫入的真正 Firestore Timestamp 型別（才能用
+                // request.time 做範圍限制），屬於較大範圍的改動，本次不處理。
+                && request.resource.data.studentReplyContentAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
+                && request.resource.data.studentReplyContentAt == request.resource.data.studentReplyAt
               ) || (
                 // 內容沒變：studentReplyUnread／studentReplyContentAt 皆須維持原值不變
                 request.resource.data.studentReply == resource.data.get('studentReply', null)
