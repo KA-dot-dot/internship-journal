@@ -463,13 +463,8 @@ tr:last-child td { border-bottom: none; }
 .empty-state .icon { font-size: 48px; margin-bottom: 14px; }
 .empty-state p { font-size: 14px; }
 
-/* 2026-07 補修（本次更新：不再只限窄螢幕才生效）：「✅繳交狀況／📍地點統計／💰薪資統計／
-   🗂️工作類型」4個頁籤一律固定不換行、超出寬度就整排橫向捲動，任何螢幕寬度都適用（不再
-   只綁在 max-width:520px 斷點內）——確保 4 個頁籤文字永遠完整顯示、絕不會被擠壓斷字
-   換行，只允許用左右滑動的方式查看超出畫面的頁籤。*/
-.stats-tab-bar { display:flex; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; border-bottom:2px solid var(--border); margin-bottom:20px; gap:0; }
-.stats-tab-bar::-webkit-scrollbar { display:none; }
-.stats-tab { padding: 10px 22px; border: none; background: transparent; color: var(--text2); font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; border-radius:0; white-space:nowrap; flex:0 0 auto; }
+.stats-tab-bar { display:flex; border-bottom:2px solid var(--border); margin-bottom:20px; gap:0; }
+.stats-tab { padding: 10px 22px; border: none; background: transparent; color: var(--text2); font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; border-radius:0; }
 .stats-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight:600; }
 .stats-tab:hover:not(.active) { color:var(--text); background:var(--bg3); }
 .stats-layout { display:flex; flex-direction:column; gap:16px; }
@@ -506,10 +501,19 @@ tr:last-child td { border-bottom: none; }
   .company-filter-panel { left:0; right:0; width:100%; min-width:0; }
 }
 @media (max-width: 520px) {
-  /* 頁籤「固定不換行、橫向捲動」本身已改為不分螢幕寬度一律套用（見上方 .stats-tab-bar／
-     .stats-tab 基礎規則），這裡窄螢幕下只需要再縮小 padding／字級，讓一次能看到的頁籤數
-     多一點，捲動行為不受這個斷點影響。 */
-  .stats-tab { padding:10px 12px; font-size:13px; }
+  /* 2026-07 補修：「✅繳交狀況／📍地點統計／💰薪資統計／🗂️工作類型」4個頁籤在窄螢幕
+     下被擠壓換行，換行點常切在詞語中間（例如「繳交狀」/「況」、「工作類」/「型」），
+     改為文字不換行、頁籤列可橫向捲動，寧可讓使用者左右滑動查看，也不要把詞語截斷。
+     只在此斷點內調整，不影響電腦版（僅套用 max-width:520px 既有斷點）。*/
+  /* 2026-07（第二次）補修：手機/PWA 版用手指滑動頁籤列時，原本只設 overflow-x:auto，
+     沒有明確指定 overflow-y，CSS 規範規定「一軸設非 visible、另一軸仍是 visible」時會
+     被瀏覽器自動computed成 auto，導致這個容器同時具備垂直捲動能力，手指滑動角度稍微
+     不是正橫向時會被判讀成上下捲動，頁籤列跟著跑位。補上 overflow-y:hidden 明確關閉
+     垂直捲動，並用 touch-action:pan-x 限制觸控手勢只能水平平移，兩者一起確保頁籤列
+     只能左右移動，不會再上下跑掉。 */
+  .stats-tab-bar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; touch-action: pan-x; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .stats-tab-bar::-webkit-scrollbar { display: none; }
+  .stats-tab { padding:10px 12px; font-size:13px; white-space: nowrap; flex: 0 0 auto; }
   .stats-control-stack { gap:10px; }
   .stats-control-stack > * { flex:none !important; min-width:0 !important; width:100% !important; align-self:stretch !important; }
   .stats-control-actions { flex-direction:column; }
