@@ -4786,7 +4786,13 @@ async function exportSemesterPDF() {
   const endStr = endVal.replace(/-/g,'');
   const { collection, collectionGroup } = firebase_funcs;
   // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // ★ 2026-07 補修：PWA（手機加到主畫面）standalone 模式下，window.open() 常會脫離 App
+  //   本身另開系統瀏覽器分頁，導致原本的 App 分頁被系統背景回收；使用者看完 PDF 切回
+  //   App 時，該分頁的 JS 執行環境已被系統終止並重新載入，表現為「被登出、要求重新登入」。
+  //   standalone 模式改為完全不開新視窗（win 維持 null），printJournalsPDF()／
+  //   openPdfBlob() 原本就有 win 為 null/已關閉時改用 <a download> 直接下載的
+  //   fallback，這裡只是主動採用它，不必等 window.open() 失敗才觸發。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }
@@ -4818,7 +4824,8 @@ async function exportStudentPDF() {
   const [seat, semester] = val.split('|');
   const { collectionGroup } = firebase_funcs;
   // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // ★ 2026-07 補修：理由同 exportSemesterPDF()，standalone 模式改為完全不開新視窗。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }

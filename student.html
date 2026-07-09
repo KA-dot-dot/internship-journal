@@ -902,6 +902,16 @@ function isStoragePartitionedEnv() {
   return false;
 }
 
+// 2026-07 補修：PWA（手機加到主畫面）standalone 模式下 signInWithPopup 不可靠——
+// standalone 網頁應用不支援真正獨立的彈出視窗，實測表現為按下登入後短暫出現載入畫面，
+// 隨即又默默回到登入畫面（popup 沒有成功建立可通訊的視窗，Promise 最終被 reject 或
+// 卡住後落入非預期的錯誤處理分支）。teacher.html 已有此判斷並在 standalone 模式一律
+// 改走 signInWithRedirect，這裡補上對稱的判斷式，供 googleStudentLogin() 使用。
+function isStandaloneApp() {
+  return window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator.standalone === true;
+}
+
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('studentRedirectLoginPending', '1');
@@ -1122,6 +1132,22 @@ async function googleStudentLogin() {
     if (!window._auth) {
       hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
+      return;
+    }
+    // 2026-07 補修：standalone（PWA 加到主畫面）模式一律直接走 redirect，
+    // 不先嘗試 signInWithPopup——比照 teacher.html googleTeacherLogin() 的既有作法。
+    if (isStandaloneApp()) {
+      if (isStoragePartitionedEnv()) {
+        hideLoading();
+        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+        return;
+      }
+      try {
+        await startStudentRedirectLogin();
+      } catch(re) {
+        hideLoading();
+        toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
+      }
       return;
     }
     const { auth, provider, signInWithPopup } = window._auth;
