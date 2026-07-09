@@ -100,53 +100,66 @@ async function checkComments() {
   const snap = await db.collectionGroup('journals').where('teacherCommentUnread', '==', true).get();
   let sent = 0;
   for (const docSnap of snap.docs) {
-    const data = docSnap.data();
-    if (!data.teacherComment) continue;
-    if (alreadyNotified(data.teacherCommentNotifiedAt, data.teacherCommentContentAt)) continue;
+    // 2026-07-09 修正：整份迴圈本體包一層逐筆 try/catch。原本這裡完全沒有例外處理，
+    // 任何一筆資料處理途中拋出例外（例如 sendToTokenDocs() 呼叫 FCM 失敗、
+    // docSnap.ref.update() 網路瞬斷等）都會直接往外拋出整個 for 迴圈，導致同一輪排程
+    // 剩下的其餘文件全部不會被處理到；若例外發生在 docSnap.ref.update() 標記已通知
+    // 「之前」，該筆文件的 teacherCommentUnread 仍是 true、也還沒有 NotifiedAt，
+    // 下一輪排程會優先卡在同一筆壞資料重新開始，造成後面所有文件的通知被一起拖住，
+    // 直到有人排查為止。修法：單筆處理失敗只記 log、continue 到下一筆，不影響同一輪
+    // 其餘文件的處理；不會掩蓋錯誤本身，只是把「失敗範圍」從整輪縮小到單一文件。
+    try {
+      const data = docSnap.data();
+      if (!data.teacherComment) continue;
+      if (alreadyNotified(data.teacherCommentNotifiedAt, data.teacherCommentContentAt)) continue;
 
-    // 保險起見排除理論上不會有資料、但 rule.txt 裡確實存在的頂層 /journals/{journalId}
-    // 集合（跟 /users/{uid}/journals/{journalId} 是不同路徑，若真的意外命中，
-    // parent.parent 會是 null，直接 .id 會丟例外，這裡先擋掉避免整支腳本中斷）。
-    const userDocRef = docSnap.ref.parent.parent;
-    if (!userDocRef || userDocRef.parent.id !== 'users') continue;
-    const userId = userDocRef.id;
+      // 保險起見排除理論上不會有資料、但 rule.txt 裡確實存在的頂層 /journals/{journalId}
+      // 集合（跟 /users/{uid}/journals/{journalId} 是不同路徑，若真的意外命中，
+      // parent.parent 會是 null，直接 .id 會丟例外，這裡先擋掉避免整支腳本中斷）。
+      const userDocRef = docSnap.ref.parent.parent;
+      if (!userDocRef || userDocRef.parent.id !== 'users') continue;
+      const userId = userDocRef.id;
 
-    const tokensSnap = await db.collection(`users/${userId}/fcmTokens`).get();
-    if (tokensSnap.empty) continue; // 該生從未授權推播，或裝置端 token 已被清除，安靜跳過
+      const tokensSnap = await db.collection(`users/${userId}/fcmTokens`).get();
+      if (tokensSnap.empty) continue; // 該生從未授權推播，或裝置端 token 已被清除，安靜跳過
 
-    const body = data.teacherComment.length > 40 ? data.teacherComment.slice(0, 40) + '…' : data.teacherComment;
-    // 2026-07-06 新增：自組 tag，不依賴 FCM 自動賦予的 messageId——重複投遞時兩次送出
-    // 是否共用同一個 messageId 並沒有保證，一旦不同，fcm-sw.js 原本用 messageId 當 tag
-    // 的防重複機制就會形同虛設（這正是這次追查到的實際案例）。改用「這份月記文件的完整
-    // 路徑 + 這次評語內容真正改變的時間（teacherCommentContentAt，不是這支腳本送出的時間，
-    // 也不是每次存檔都會動的 reviewedAt）」組合：只要是同一則評語內容，不論被推播幾次、
-    // 背後 messageId 是否一致、老師是否只是打開 Modal 沒改內容就存檔，這裡算出來的 tag
-    // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，teacherCommentContentAt
-    // 會跟著改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
-    const tag = `${docSnap.ref.path}:${data.teacherCommentContentAt || ''}`;
-    await sendToTokenDocs(tokensSnap.docs, {
-      title: '📩 老師留了新評語',
-      body,
-      tag,
-      link: `${SITE_BASE_URL}/student.html`,
-    });
-    // 2026-07-07 修正：自我修復缺 teacherCommentContentAt 的資料，避免無限重推。
-    // 原本這裡只寫 teacherCommentNotifiedAt，從未補上 teacherCommentContentAt——這個欄位
-    // 2026-07-06 才新增，改版當下所有「本來就 teacherCommentUnread=true」的既有月記
-    // （評語系統本來就會出現的正常狀態，不是罕見邊界案例）永遠不會有這個欄位，導致
-    // alreadyNotified() 因為 contentAt 缺資料而永遠回傳 false，每輪排程都判定「尚未通知」
-    // 再送一次，直到使用者正常操作（學生開歷史頁／老師開評語 Modal）把 Unread 旗標清掉
-    // 才會停止——這跟下方「改版後第一次執行多收到一次、之後恢復正常」的舊註解矛盾，
-    // 實際上不會恢復正常，是資料遷移的真實 bug，任何舊的未讀評語都會中招。
-    // 修法：只在 contentAt 本來就缺資料時（真正評語內容改變的情況，contentAt 已有值，
-    // 不會進這個分支），把這次送出通知的同一個時間戳一併補上當 contentAt 基準值，
-    // 讓下一輪 notifiedAt >= contentAt 成立、自然收斂；不需要另外寫一次性遷移腳本，
-    // 任何原因造成 contentAt 缺資料都能用同一套邏輯自癒。
-    const notifiedAt = new Date().toISOString();
-    const updatePayload = { teacherCommentNotifiedAt: notifiedAt };
-    if (!data.teacherCommentContentAt) updatePayload.teacherCommentContentAt = notifiedAt;
-    await docSnap.ref.update(updatePayload);
-    sent++;
+      const body = data.teacherComment.length > 40 ? data.teacherComment.slice(0, 40) + '…' : data.teacherComment;
+      // 2026-07-06 新增：自組 tag，不依賴 FCM 自動賦予的 messageId——重複投遞時兩次送出
+      // 是否共用同一個 messageId 並沒有保證，一旦不同，fcm-sw.js 原本用 messageId 當 tag
+      // 的防重複機制就會形同虛設（這正是這次追查到的實際案例）。改用「這份月記文件的完整
+      // 路徑 + 這次評語內容真正改變的時間（teacherCommentContentAt，不是這支腳本送出的時間，
+      // 也不是每次存檔都會動的 reviewedAt）」組合：只要是同一則評語內容，不論被推播幾次、
+      // 背後 messageId 是否一致、老師是否只是打開 Modal 沒改內容就存檔，這裡算出來的 tag
+      // 永遠相同，瀏覽器就能正確收斂成一則；老師之後若真的修改了評語，teacherCommentContentAt
+      // 會跟著改變，tag 也會跟著變，仍會正確顯示成新的一則，不會被誤判成同一則而蓋掉。
+      const tag = `${docSnap.ref.path}:${data.teacherCommentContentAt || ''}`;
+      await sendToTokenDocs(tokensSnap.docs, {
+        title: '📩 老師留了新評語',
+        body,
+        tag,
+        link: `${SITE_BASE_URL}/student.html`,
+      });
+      // 2026-07-07 修正：自我修復缺 teacherCommentContentAt 的資料，避免無限重推。
+      // 原本這裡只寫 teacherCommentNotifiedAt，從未補上 teacherCommentContentAt——這個欄位
+      // 2026-07-06 才新增，改版當下所有「本來就 teacherCommentUnread=true」的既有月記
+      // （評語系統本來就會出現的正常狀態，不是罕見邊界案例）永遠不會有這個欄位，導致
+      // alreadyNotified() 因為 contentAt 缺資料而永遠回傳 false，每輪排程都判定「尚未通知」
+      // 再送一次，直到使用者正常操作（學生開歷史頁／老師開評語 Modal）把 Unread 旗標清掉
+      // 才會停止——這跟下方「改版後第一次執行多收到一次、之後恢復正常」的舊註解矛盾，
+      // 實際上不會恢復正常，是資料遷移的真實 bug，任何舊的未讀評語都會中招。
+      // 修法：只在 contentAt 本來就缺資料時（真正評語內容改變的情況，contentAt 已有值，
+      // 不會進這個分支），把這次送出通知的同一個時間戳一併補上當 contentAt 基準值，
+      // 讓下一輪 notifiedAt >= contentAt 成立、自然收斂；不需要另外寫一次性遷移腳本，
+      // 任何原因造成 contentAt 缺資料都能用同一套邏輯自癒。
+      const notifiedAt = new Date().toISOString();
+      const updatePayload = { teacherCommentNotifiedAt: notifiedAt };
+      if (!data.teacherCommentContentAt) updatePayload.teacherCommentContentAt = notifiedAt;
+      await docSnap.ref.update(updatePayload);
+      sent++;
+    } catch (e) {
+      console.error(`checkComments: 處理 ${docSnap.ref.path} 時發生例外，已跳過這筆，本輪其餘文件繼續處理：`, e);
+      continue;
+    }
   }
   console.log(`checkComments: 本輪通知 ${sent} 筆`);
 }
@@ -234,48 +247,58 @@ async function checkReplies() {
 
   let sent = 0;
   for (const docSnap of snap.docs) {
-    const data = docSnap.data();
-    if (!data.studentReply) continue;
-    // 2026-07 修正：改比對 studentReplyContentAt，不再用 studentReplyAt——理由跟
-    // checkComments() 改用 teacherCommentContentAt 完全一樣：student.html
-    // saveStudentReply() 同步修正後，studentReplyAt 仍會在每次送出時無條件更新
-    // （純粹用於畫面上「回覆時間」泡泡顯示），但 studentReplyContentAt 只在回覆內容
-    // 真正改變時才寫入。若這裡繼續用 studentReplyAt 判斷，學生只是重新按一次「更新
-    // 回覆」但文字沒改，也會被誤判成新內容而重複推播同一則老師可能都還沒讀到的回覆。
-    // 相容性備註（2026-07-07 更正）：這欄位是新增的，改版當下已存在、且 studentReplyUnread
-    // 仍為 true 的舊回覆文件會暫時沒有這個欄位（undefined），alreadyNotified() 對缺資料的
-    // 處理是保守視為「尚未通知」。**這行原本寫「這類舊資料會在改版後第一次執行時再收到一次
-    // 推播，之後恢復正常」，但當時的 update() 只寫 NotifiedAt、從未補上 ContentAt，實際上
-    // 不會恢復正常，會每輪排程無限重推**，直到 Unread 被使用者正常操作清掉才停止——保留這句
-    // 更正紀錄，是為了誠實記錄當時的認知狀態。現在會恢復正常，是因為下方 update() 已補上
-    // 「contentAt 缺資料時，用這次通知的時間戳一併回填」的自我修復邏輯，見該處註解。
-    if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyContentAt)) continue;
-    if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
+    // 2026-07-09 修正：跟 checkComments() 同一次一併補上的逐筆 try/catch，理由完全對稱——
+    // 原本整個迴圈完全沒有例外處理，單筆資料處理途中拋出例外會讓同一輪剩下的其餘文件
+    // 全部不會被處理到；若例外發生在 docSnap.ref.update() 標記已通知「之前」，該筆文件的
+    // studentReplyUnread 仍是 true，下一輪排程會優先卡在同一筆壞資料重新開始，拖住後面
+    // 所有老師/管理員原本該收到的通知。修法：單筆處理失敗只記 log、continue 到下一筆。
+    try {
+      const data = docSnap.data();
+      if (!data.studentReply) continue;
+      // 2026-07 修正：改比對 studentReplyContentAt，不再用 studentReplyAt——理由跟
+      // checkComments() 改用 teacherCommentContentAt 完全一樣：student.html
+      // saveStudentReply() 同步修正後，studentReplyAt 仍會在每次送出時無條件更新
+      // （純粹用於畫面上「回覆時間」泡泡顯示），但 studentReplyContentAt 只在回覆內容
+      // 真正改變時才寫入。若這裡繼續用 studentReplyAt 判斷，學生只是重新按一次「更新
+      // 回覆」但文字沒改，也會被誤判成新內容而重複推播同一則老師可能都還沒讀到的回覆。
+      // 相容性備註（2026-07-07 更正）：這欄位是新增的，改版當下已存在、且 studentReplyUnread
+      // 仍為 true 的舊回覆文件會暫時沒有這個欄位（undefined），alreadyNotified() 對缺資料的
+      // 處理是保守視為「尚未通知」。**這行原本寫「這類舊資料會在改版後第一次執行時再收到一次
+      // 推播，之後恢復正常」，但當時的 update() 只寫 NotifiedAt、從未補上 ContentAt，實際上
+      // 不會恢復正常，會每輪排程無限重推**，直到 Unread 被使用者正常操作清掉才停止——保留這句
+      // 更正紀錄，是為了誠實記錄當時的認知狀態。現在會恢復正常，是因為下方 update() 已補上
+      // 「contentAt 缺資料時，用這次通知的時間戳一併回填」的自我修復邏輯，見該處註解。
+      if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyContentAt)) continue;
+      if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
 
-    const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
-    const title = `💬 ${data.studentName || '學生'}回覆了評語`;
+      const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
+      const title = `💬 ${data.studentName || '學生'}回覆了評語`;
 
-    // 2026-07 修正：tag 同步改用 studentReplyContentAt，不再用 studentReplyAt，理由同上——
-    // 避免內容沒變時 tag 跟著變動、繞過瀏覽器端的 tag 防重複機制。額外好處維持不變：
-    // 就算未來真的發生「同一支 admin token 字串意外掛在兩份不同的 admins/{adminId}
-    // 文件底下、collectAdminTokenDocs() 撈出兩筆」這種情況，兩筆各自送出時 tag 仍然相同
-    // （同一份月記、同一個 studentReplyContentAt），一樣會被瀏覽器收斂成一則。
-    const tag = `${docSnap.ref.path}:${data.studentReplyContentAt || ''}`;
-    await sendToTokenDocs(adminTokenDocs, {
-      title,
-      body,
-      tag,
-      link: `${SITE_BASE_URL}/teacher.html`,
-    });
-    // 2026-07-07 修正：自我修復缺 studentReplyContentAt 的資料，理由與 checkComments()
-    // 的 teacherCommentContentAt 完全對稱，見該處註解——原本只補 studentReplyNotifiedAt、
-    // 從未補 studentReplyContentAt，導致改版當下所有既有的 studentReplyUnread=true
-    // 舊回覆永遠無限重推，直到 Unread 被正常操作清掉才停止。
-    const notifiedAt = new Date().toISOString();
-    const updatePayload = { studentReplyNotifiedAt: notifiedAt };
-    if (!data.studentReplyContentAt) updatePayload.studentReplyContentAt = notifiedAt;
-    await docSnap.ref.update(updatePayload);
-    sent++;
+      // 2026-07 修正：tag 同步改用 studentReplyContentAt，不再用 studentReplyAt，理由同上——
+      // 避免內容沒變時 tag 跟著變動、繞過瀏覽器端的 tag 防重複機制。額外好處維持不變：
+      // 就算未來真的發生「同一支 admin token 字串意外掛在兩份不同的 admins/{adminId}
+      // 文件底下、collectAdminTokenDocs() 撈出兩筆」這種情況，兩筆各自送出時 tag 仍然相同
+      // （同一份月記、同一個 studentReplyContentAt），一樣會被瀏覽器收斂成一則。
+      const tag = `${docSnap.ref.path}:${data.studentReplyContentAt || ''}`;
+      await sendToTokenDocs(adminTokenDocs, {
+        title,
+        body,
+        tag,
+        link: `${SITE_BASE_URL}/teacher.html`,
+      });
+      // 2026-07-07 修正：自我修復缺 studentReplyContentAt 的資料，理由與 checkComments()
+      // 的 teacherCommentContentAt 完全對稱，見該處註解——原本只補 studentReplyNotifiedAt、
+      // 從未補 studentReplyContentAt，導致改版當下所有既有的 studentReplyUnread=true
+      // 舊回覆永遠無限重推，直到 Unread 被正常操作清掉才停止。
+      const notifiedAt = new Date().toISOString();
+      const updatePayload = { studentReplyNotifiedAt: notifiedAt };
+      if (!data.studentReplyContentAt) updatePayload.studentReplyContentAt = notifiedAt;
+      await docSnap.ref.update(updatePayload);
+      sent++;
+    } catch (e) {
+      console.error(`checkReplies: 處理 ${docSnap.ref.path} 時發生例外，已跳過這筆，本輪其餘文件繼續處理：`, e);
+      continue;
+    }
   }
   console.log(`checkReplies: 本輪通知 ${sent} 筆`);
 }
