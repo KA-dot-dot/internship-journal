@@ -501,7 +501,13 @@ tr:last-child td { border-bottom: none; }
   .company-filter-panel { left:0; right:0; width:100%; min-width:0; }
 }
 @media (max-width: 520px) {
-  .stats-tab { padding:10px 12px; font-size:13px; }
+  /* 2026-07 補修：「✅繳交狀況／📍地點統計／💰薪資統計／🗂️工作類型」4個頁籤在窄螢幕
+     下被擠壓換行，換行點常切在詞語中間（例如「繳交狀」/「況」、「工作類」/「型」），
+     改為文字不換行、頁籤列可橫向捲動，寧可讓使用者左右滑動查看，也不要把詞語截斷。
+     只在此斷點內調整，不影響電腦版（僅套用 max-width:520px 既有斷點）。*/
+  .stats-tab-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .stats-tab-bar::-webkit-scrollbar { display: none; }
+  .stats-tab { padding:10px 12px; font-size:13px; white-space: nowrap; flex: 0 0 auto; }
   .stats-control-stack { gap:10px; }
   .stats-control-stack > * { flex:none !important; min-width:0 !important; width:100% !important; align-self:stretch !important; }
   .stats-control-actions { flex-direction:column; }

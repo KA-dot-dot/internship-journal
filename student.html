@@ -2358,7 +2358,25 @@ function openGoogleMapsDistance(addr) {
   const origin = encodeURIComponent('402臺中市南區高工路191號');
   const dest = encodeURIComponent(addr);
   const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
-  window.open(url, '_blank');
+  // 2026-07 補修：standalone（PWA 加到主畫面）模式下 window.open() 常會讓內容脫離 App
+  // 本身、跳到系統瀏覽器，原本的 App 分頁因此被系統背景回收，從 Google Maps 切回來時
+  // 看起來像被登出（跟 PDF 匯出是同一類問題，已在 exportMyPDF()/teacher.html 匯出 PDF
+  // 驗證過「避免產生新的瀏覽情境」有效）。這裡沒辦法完全不跳出去（本來就是要帶學生去看
+  // 地圖），改用真正的 <a> 元素觸發導航，讓 iOS/Android 有機會透過 Universal Link／
+  // App Link 直接切換到原生 Google 地圖 App（真正的「切到另一個 App」），而不是在瀏覽器
+  // 裡另開一個分頁——用 window.open() 這種純 JS 觸發的導航，部分手機瀏覽器不會做這層
+  // App Link 判斷。一般瀏覽器分頁模式維持原行為不變。
+  if (isStandaloneApp()) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } else {
+    window.open(url, '_blank');
+  }
 }
 
 // 計算距離：直接開啟 Google Maps 導航（學校→工作地址），距離由學生查看後手動填入下方欄位
@@ -3516,7 +3534,12 @@ async function exportMyPDF() {
     if (!ok) return;
   }
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // 2026-07 補修：standalone（PWA 加到主畫面）模式下 window.open() 常會讓內容脫離 App
+  // 本身、跳到系統瀏覽器，原本的 App 分頁因此被系統背景回收，切回來時看起來像被登出
+  // （比照 teacher.html 匯出 PDF 的同一項修正，已實機驗證有效）。standalone 模式改為
+  // 完全不開新視窗，printJournalsPDF()／openPdfBlob() 本來就支援 win 為 null 時改用
+  // <a download> 直接下載，這裡只是主動採用它。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 30 秒內沒有完成，系統會自動顯示錯誤原因。</p></body></html>');
   }
