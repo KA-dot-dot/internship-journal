@@ -367,6 +367,60 @@ async function main() {
     );
   });
 
+  // 2026-07-09（#12，補齊 test-rules.js 方法論缺口）：上面所有既有測試都用整份 .set()
+  // （非 merge:true）模擬寫入，這跟 saveJournal() 實際用 setDoc(ref,{...},{merge:true})
+  // 的寫法不同——整份 .set() 時 request.resource.data 就是傳入的物件本身，不會受文件
+  // 「原本已經有的舊值」影響；merge:true 則是「傳入物件」跟「文件原本的值」合併後的結果，
+  // 若某欄位沒出現在傳入物件裡，會直接沿用文件原本的舊值。這個差異不是理論性的——
+  // 2026-07-08 的真實 bug（見第四節／AI_推播系統說明.md「已知真實 bug 修復記錄」）正是
+  // saveJournal() 一般編輯忘記在 payload 裡補上 teacherCommentContentAt: null，
+  // 而 merge:true 沿用了文件裡原本非 null 的舊值，導致任何被老師評過語的月記，學生之後
+  // 編輯儲存一律被 rule.txt 正確擋下（403）。上面用整份 .set() 的測試從頭到尾都測不到
+  // 這個情境（傳入物件裡沒有這個欄位時，整份覆蓋後的文件裡這個欄位就是 undefined，
+  // 而不是「沿用舊的非 null 值」），因此新增以下兩條，先用 withSecurityRulesDisabled
+  // 把 existing-01 種成「已有老師評語、teacherCommentContentAt 非 null」的已知狀態，
+  // 再用真正的 .set({...},{merge:true}) 模擬 saveJournal() 的實際寫法。
+  await test('【2026-07-09（#12）】學生 UPDATE 自己月記（一般編輯，merge:true 模擬 saveJournal() 真實寫法）：payload 漏帶 teacherCommentContentAt → 應被拒（重現 2026-07-08 真實 bug：merge 省略此欄位會沿用舊的非 null 值）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          teacherComment: '老師評語',
+          teacherReviewed: true,
+          reviewedAt: '2026-07-08T10:00:00',
+          teacherCommentContentAt: '2026-07-08T10:00:00', // 模擬「已有老師評語」的既有狀態
+        }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        // 只送一般內容編輯會動到的欄位，故意不提 teacherCommentContentAt——
+        // 這正是修法之前 saveJournal() 的實際寫法（bug 重現）。
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '學生編輯內容，但漏補 teacherCommentContentAt 歸零' }), { merge: true })
+    );
+  });
+
+  await test('【2026-07-09（#12）】學生 UPDATE 自己月記（一般編輯，merge:true 模擬 saveJournal() 真實寫法）：payload 補上 teacherCommentContentAt: null → 應成功（驗證 2026-07-08 修法後的正確寫法真的會被放行）', async () => {
+    // 重新種一次同樣的「已有老師評語」已知狀態，不依賴上一條測試失敗後文件沒被改動
+    // 這個假設，保持每條測試各自獨立、可單獨執行。
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          teacherComment: '老師評語',
+          teacherReviewed: true,
+          reviewedAt: '2026-07-08T10:00:00',
+          teacherCommentContentAt: '2026-07-08T10:00:00',
+        }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        // 修法後的正確寫法：明確補上 teacherCommentContentAt: null，而不是依賴省略。
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '學生編輯內容，正確補上歸零', teacherCommentContentAt: null }), { merge: true })
+    );
+  });
+
   await test('學生不能 UPDATE 別人的月記', async () => {
     await assertFails(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
