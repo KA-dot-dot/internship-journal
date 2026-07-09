@@ -23,6 +23,12 @@
 //      （通常一兩分鐘生效）後，之後每次排程執行都不會再遇到這個錯誤。
 
 const admin = require('firebase-admin');
+// 2026-07（稽核修正）：parseAsInstant()／alreadyNotified()／emailToDocId() 抽到
+// notify-logic.js 這支不依賴 firebase-admin、不碰網路的純邏輯檔，讓它能被
+// test-notify-logic.js 安全 require() 並測試（本檔案在被 require() 的當下就會執行
+// 下面的 admin.initializeApp()，沒辦法安全地被測試檔直接引用）。三個函式的行為與
+// 原本完全相同，只是搬了位置，詳見 notify-logic.js 內的完整註解。
+const { parseAsInstant, alreadyNotified, emailToDocId } = require('./notify-logic');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
@@ -88,37 +94,6 @@ async function sendToTokenDocs(tokenDocs, data) {
 // ---------------------------------------------------------------------------
 // 時區安全的時間比較
 // ---------------------------------------------------------------------------
-// teacherCommentContentAt / studentReplyContentAt 都是 student.html／teacher.html 共用的
-// localISOStr() 產生的字串，格式為 'YYYY-MM-DDTHH:mm:ss'——刻意不帶任何時區資訊，但語意上
-// 一律是「使用者裝置的本地時間」（本專案使用者全部在台灣，等同台灣時間 +08:00）。這支腳本
-// 自己寫入的 teacherCommentNotifiedAt／studentReplyNotifiedAt 則用 new Date().toISOString()，
-// 是標準 UTC 字串（帶 'Z' 結尾）。
-//
-// 這兩種字串「絕對不能直接用字串大小比較」：GitHub Actions runner 預設時區是 UTC，
-// 兩種字串的時區偏移量相差 8 小時、字尾格式也不同（一個沒有時區資訊、一個有 'Z'），
-// 對同一個真實時刻，UTC 字串的時／日數字幾乎總是比台灣本地字串的數字「看起來更小」，
-// 用字串比較會讓「這則評語/回覆已經通知過」的判斷幾乎永遠失敗，導致每次排程都重複推播
-// （這是 AI_CONTEXT.md 已經記錄過兩次的「隱式當本地/UTC解析 vs 明確台灣時區」時區bug
-// 同一類問題，這裡刻意避開，改用 Date 物件的實際時間戳〔getTime()〕比較）。
-function parseAsInstant(isoLike) {
-  if (!isoLike || typeof isoLike !== 'string') return null;
-  // 字串結尾若已經有時區資訊（'Z' 或 +HH:mm / -HH:mm），代表是這支腳本自己寫入的
-  // notifiedAt，直接剖析；否則視為 localISOStr() 產生的「無時區資訊、語意上為台灣時間」
-  // 字串，補上 +08:00 再剖析，才能正確換算成同一套實際時間戳來比較。
-  const hasOffset = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(isoLike.trim());
-  const d = new Date(hasOffset ? isoLike : isoLike + '+08:00');
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** 「這則評語/回覆」（用 contentAtStr 代表最後一次真正改變內容的時間）是否已經通知過。 */
-function alreadyNotified(notifiedAtStr, contentAtStr) {
-  const notifiedAt = parseAsInstant(notifiedAtStr);
-  const contentAt = parseAsInstant(contentAtStr);
-  if (!notifiedAt || !contentAt) return false; // 缺資料時保守起見視為「尚未通知」，寧可多通知也不要漏掉
-  return notifiedAt.getTime() >= contentAt.getTime();
-}
-
-// ---------------------------------------------------------------------------
 // 老師留評語／更新評語 → 通知學生本人
 // ---------------------------------------------------------------------------
 async function checkComments() {
@@ -179,11 +154,8 @@ async function checkComments() {
 // ---------------------------------------------------------------------------
 // 學生回覆評語 → 通知全體老師/管理員
 // ---------------------------------------------------------------------------
-// 跟 teacher.html 的 emailToDocId() 完全一致（見該檔 ~1533 行），這裡不 import
-// 整個前端檔案，單純複製這個一行函式，避免這支獨立的 Node 腳本平白多一份跨檔依賴。
-function emailToDocId(email) {
-  return (email || '').trim().toLowerCase().replace(/[@.]/g, '_');
-}
+// emailToDocId() 現在從 notify-logic.js 引入（見上方 require），跟 teacher.html 的
+// emailToDocId()（~1533 行）完全一致，這裡不重複定義。
 
 // 老師端 fcmTokens 存在 /admins/{adminId}/fcmTokens/ 底下，但 admins 這個集合本身
 // 有兩種可能的 docId（uid 或 emailKey，見 rule.txt isAdmin() 與 teacher.html

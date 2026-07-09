@@ -3,6 +3,9 @@
   "description": "GitHub Actions 排程輪詢 + FCM 推播（不需要 Cloud Functions / Blaze）",
   "private": true,
   "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node test-notify-logic.js"
+  },
   "dependencies": {
     "firebase-admin": "^12.6.0"
   }
