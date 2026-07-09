@@ -3823,17 +3823,25 @@ async function saveStudentReply(seatNo, sem, month) {
   const { doc, updateDoc } = firebase_funcs;
   showLoading();
   try {
+    // 2026-07 補修：studentReplyAt／studentReplyContentAt 只呼叫一次 localISOStr()、
+    // 共用同一個字串，而不是分別呼叫兩次——理論上兩次呼叫幾乎必定同秒（localISOStr()
+    // 只有秒級精度），但仍可能剛好跨秒導致兩個欄位不相等。rule.txt 新增了
+    // 「內容改變時 studentReplyContentAt 必須等於 studentReplyAt」的驗證（防止
+    // studentReplyContentAt 被單獨竄改成未來時間造成 notify-service 無限重推），
+    // 這裡改成只算一次時間戳，從根源確保正常寫入一定滿足新規則，不依賴「幾乎不會跨秒」
+    // 這種機率性假設。
+    const nowStr = localISOStr();
     await updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), {
       studentReply: reply,
       // studentReplyAt 維持每次都無條件更新（純粹用於畫面上「我的回覆」泡泡顯示時間，
       // 角色對應 teacher.html 那邊維持無條件更新的 reviewedAt，不受 replyChanged 影響）
-      studentReplyAt: localISOStr(),
+      studentReplyAt: nowStr,
       // studentReplyUnread／studentReplyContentAt 只在內容真的改變時才寫入；
       // 內容沒變（重新按送出但文字沒改）時完全不寫這兩欄，Firestore 原值維持不變，
       // 避免把老師的已讀狀態誤打回未讀、避免 notify-service 重複推播同一則回覆。
       ...(replyChanged ? {
         studentReplyUnread: true,
-        studentReplyContentAt: localISOStr(),
+        studentReplyContentAt: nowStr,
       } : {})
     });
     hideLoading();
