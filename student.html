@@ -16,7 +16,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-  import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
+  import { getMessaging, getToken, deleteToken, onMessage, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -37,7 +37,7 @@
   window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider, setPersistence, browserLocalPersistence };
   // 2026-07 新增：Web Push 通知用，比照 window._auth 的暴露方式
-  window._messaging = { app, getMessaging, getToken, onMessage, isMessagingSupported };
+  window._messaging = { app, getMessaging, getToken, deleteToken, onMessage, isMessagingSupported };
 </script>
 
 <style>
@@ -1283,8 +1283,39 @@ try {
   }
 } catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }
 
+// 2026-07（稽核修正）：登出時清除推播 token，避免共用裝置（例如電腦教室）換人登入後，
+// 前一位使用者的推播內容（含老師評語文字片段）繼續顯示在同一台裝置上。原本 logout() 只
+// signOut()，從未刪除 /users/{uid}/fcmTokens/ 底下的 token 文件，也沒呼叫 FCM 的
+// deleteToken()——Firebase 官方文件本來就建議在使用者登出時呼叫 deleteToken()，正是為了
+// 這個情境。必須在 signOut() 之前執行：rule.txt 對 fcmTokens 的 delete 規則要求
+// request.auth.uid == userId，一旦先登出，request.auth 就會變 null，屆時想刪也刪不了。
+// 任何一步失敗（例如從未成功註冊過推播、瀏覽器不支援等）都只記錄警告、不擋登出本身。
+async function disablePushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!window._messaging || !_fcmSwRegistration) return; // 從未成功註冊過推播，沒有 token 可清
+    const { getMessaging, getToken, deleteToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    }).catch(() => null);
+    if (token) {
+      const { doc, deleteDoc } = firebase_funcs;
+      await deleteDoc(doc(db, 'users', currentUser.uid, 'fcmTokens', token)).catch(() => {});
+    }
+    // 連同瀏覽器本身的推播訂閱一併取消，下次登入（不論同一人或換別人）都會重新走一次
+    // getToken()，不會沿用舊的訂閱，也就不會有「Firestore 文件刪了、但裝置底層訂閱還在」
+    // 這種殘留狀態。
+    if (deleteToken) await deleteToken(messaging).catch(() => {});
+  } catch (e) {
+    console.warn('[Push] 登出時清除推播 token 失敗（不影響登出本身）：', e.message || e);
+  }
+}
+
 // ============ 登出 ============
 async function logout() {
+  await disablePushNotifications(); // 必須在 signOut() 之前，才有權限刪除自己的 token 文件
   try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
   currentUser = null;
   window._enteringApp = false;
