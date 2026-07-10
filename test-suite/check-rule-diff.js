@@ -123,6 +123,14 @@ const RISK_TARGETS = [
   { name: 'function isAdmin()', regex: /function\s+isAdmin\s*\(/ },
   { name: 'function validAdminWrite()', regex: /function\s+validAdminWrite\s*\(/ },
   { name: 'function keepsProtectedFlag()', regex: /function\s+keepsProtectedFlag\s*\(/ },
+  // 2026-07 補修：validFcmTokenWrite() 是跟 schoolUser()/isAdmin() 同層級的頂層輔助函式
+  // （鎖住 fcmTokens 文件的欄位型別/大小），但先前只有呼叫端（match /admins/{adminId}、
+  // match /users/{userId} 底下的 fcmTokens create/update）因為巢狀在已監控的區塊裡才被
+  // 連帶抓到；函式定義本體自己完全沒有對應的 RISK_TARGETS 項目，弱化函式內部驗證
+  // （例如拿掉 userAgent.size() <= 200）不會被標記為高風險變更。跟 2026-07-03
+  // （DANGER_PATTERNS 漏 studentReply 家族）、2026-07-04（RISK_TARGETS 漏
+  // /admins/{adminId} 區塊本身）是同一種「新增東西時監控清單忘記同步擴充」的模式。
+  { name: 'function validFcmTokenWrite()', regex: /function\s+validFcmTokenWrite\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },
