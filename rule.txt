@@ -51,6 +51,20 @@ service cloud.firestore {
           && request.resource.data.protected == true
         );
     }
+    // 2026-07 補修（稽核 #8）：fcmTokens 文件寫入原本完全沒有欄位型別/大小驗證，
+    // 前端（student.html／teacher.html 的 initPushNotifications()）固定只會寫入
+    // createdAt（ISO 字串）與截斷至 200 字的 userAgent（JS 端截斷，見
+    // AI_推播系統說明.md 3.1 節），但因規則本身沒有驗證，理論上使用者可直接呼叫
+    // Firestore API，在自己的 uid/adminId 路徑下寫入任意型別或超長字串。攻擊範圍天生
+    // 侷限在寫入者自己的裝置清單（get/list 皆固定 false，讀取只透過 Admin SDK），
+    // 不會波及他人，這裡純粹是讓規則本身也能擋下這類寫入，不只依賴前端行為維持乾淨。
+    // hasOnly() 同時鎖住欄位清單，避免夾帶其他未預期欄位。
+    function validFcmTokenWrite() {
+      return request.resource.data.keys().hasOnly(['createdAt', 'userAgent'])
+        && request.resource.data.createdAt is string
+        && request.resource.data.userAgent is string
+        && request.resource.data.userAgent.size() <= 200;
+    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -67,7 +81,12 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        allow create, update, delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
+        // 2026-07 補修（稽核 #8）：create/update 額外套用 validFcmTokenWrite() 做欄位
+        // 型別/大小驗證；delete 刻意分開一條、不呼叫 validFcmTokenWrite()——delete 時
+        // request.resource 為 null，呼叫依賴 request.resource.data 的函式會直接評估為
+        // 不通過，等同誤擋刪除本身。
+        allow create, update: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey()) && validFcmTokenWrite();
+        allow delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
         allow get, list: if false;
       }
     }
@@ -242,7 +261,10 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        allow create, update, delete: if schoolUser() && request.auth.uid == userId;
+        // 2026-07 補修（稽核 #8）：同上方 /admins/{adminId}/fcmTokens 的做法，
+        // create/update 套用 validFcmTokenWrite()，delete 分開一條不呼叫它。
+        allow create, update: if schoolUser() && request.auth.uid == userId && validFcmTokenWrite();
+        allow delete: if schoolUser() && request.auth.uid == userId;
         allow get, list: if false;
       }
     }
