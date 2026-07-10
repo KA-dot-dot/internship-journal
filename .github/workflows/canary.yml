@@ -15,8 +15,11 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-07-02：student.test.js 62 項、teacher.test.js 50 項）。
-    name: 完整自動化測試（學生端 62 項 + 老師端 50 項）
+    #    （目前對應 2026-07-10：student.test.js 65 項〔含 S-SEC-31〕、
+    #     teacher.test.js 52 項〔含 T-SEC-30／T-SEC-31〕。此數字已連續在
+    #     2026-06-24／2026-07-03 過期兩次，見 AI_推播系統說明.md 第六節 #9，
+    #     之後新增/刪除測試時務必記得回來改這一行）。
+    name: 完整自動化測試（學生端 65 項 + 老師端 52 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
