@@ -1,7 +1,9 @@
 // notify-service/test-notify-logic.js
 //
 // 2026-07（稽核修正）：send-push-notifications.js 先前是整個 notify-service 資料夾裡
-// 唯一沒有任何自動化測試覆蓋的核心程式檔（見 AI_CONTEXT.md「推播通知」章節第 4 節⑤）。
+// 唯一沒有任何自動化測試覆蓋的核心程式檔（見 AI_推播系統說明.md 第六節 #5；
+// 2026-07-10 更正：先前這裡誤寫成「AI_CONTEXT.md『推播通知』章節第 4 節⑤」，
+// AI_CONTEXT.md 從未有過「推播通知」這個章節）。
 // parseAsInstant()／alreadyNotified()／emailToDocId() 這三個函式已抽到 notify-logic.js
 // （不依賴 firebase-admin、不碰網路，純粹是字串/日期計算），這支測試檔直接 require()
 // 該檔案來測，不需要 Firestore Emulator、不需要 Service Account、也不需要任何網路連線，
@@ -130,7 +132,7 @@ async function main() {
     );
   });
 
-  await test('alreadyNotified()：contentAt 是格式無法解析的垃圾字串 → false（迴歸：對應稽核發現的 DoS 疑慮，垃圾字串一律視為未通知，會持續重推，非本函式能單獨防禦，需搭配 rule.txt 格式驗證，見 AI_CONTEXT.md 待修正②）', () => {
+  await test('alreadyNotified()：contentAt 是格式無法解析的垃圾字串 → false（迴歸：對應稽核發現的 DoS 疑慮，垃圾字串一律視為未通知，會持續重推，非本函式能單獨防禦，需搭配 rule.txt 格式驗證，見 AI_推播系統說明.md 第六節 #2；2026-07-10 更正原「AI_CONTEXT.md 待修正②」的錯誤引用）', () => {
     assert.strictEqual(alreadyNotified('2026-07-08T05:00:00.000Z', '不是時間字串'), false);
   });
 
