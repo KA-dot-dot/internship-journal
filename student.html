@@ -3892,17 +3892,27 @@ async function saveStudentReply(seatNo, sem, month) {
   // 原本這裡每次送出都無條件寫 studentReplyUnread:true / studentReplyAt，如果學生只是重新
   // 打開回覆框、文字完全沒改就按一次「更新回覆」，會把老師端已讀狀態誤打回未讀，
   // notify-service 也會因為 studentReplyAt 跟著刷新而誤判成新回覆、重複推播同一則。
-  // oldReply 直接從 loadStudentHistory() 已經抓好的 window._studentHistoryJournals 找
-  // 對應的月記取得，不需要額外多打一次 Firestore 讀取；找不到快取時（理論上不會發生，
-  // 因為這個輸入框本來就是從歷史列表渲染出來的）保守視為「有改變」，寧可多通知不要漏掉。
-  const cachedJournal = (window._studentHistoryJournals || []).find(
-    hj => hj.seatNo === seatNo && hj.semester === sem && Number(hj.month) === Number(month)
-  );
-  const oldReply = cachedJournal?.studentReply || '';
-  const replyChanged = reply !== oldReply;
-  const { doc, updateDoc } = firebase_funcs;
+  const { doc, getDoc, updateDoc } = firebase_funcs;
   showLoading();
   try {
+    const ref = doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`);
+    // 2026-07 補修（多裝置/多分頁競態）：oldReply 原本直接讀 window._studentHistoryJournals
+    // （歷史頁「渲染當下」的快照），如果同一學生同時在另一分頁/裝置開著同一份歷史頁
+    // （例如手機跟電腦都開著），對方已經送出新回覆、伺服器值已經改變，但這一頁的快取
+    // 還停在更早的舊值——此時若這頁送出的文字剛好等於「這份過期快取認知的舊值」，
+    // 前端會誤判 replyChanged=false（不送 studentReplyUnread/studentReplyContentAt），
+    // 但 rule.txt 的回覆分支是拿伺服器當下真正的 resource.data.studentReply 比較，
+    // 兩邊資料來源不同步時，「內容改變」與「內容沒變」兩個分支會同時判斷失敗，導致這次
+    // 合法的送出被 403 擋下（不是安全漏洞，是資料一致性問題，沒有越權或外洩）。
+    // 改成送出前才用 getDoc() 現查一次伺服器當下的 studentReply，跟 editJournal() 既有的
+    // 「動作前先 getDoc 現查」是同一種寫法——把「快取可能過期多久」收斂到「這次讀取到
+    // 送出前的極短時間差」，不特別引入 transaction（transaction 能完全消除這個窗口，
+    // 但這是低機率的多裝置邊界案例，評估後不需要上到這個等級的改動）。找不到文件時
+    // （理論上不會發生，這個輸入框本來就是從歷史列表渲染出來的）保守視為「有改變」，
+    // 寧可多通知不要漏掉。
+    const freshSnap = await getDoc(ref);
+    const oldReply = (freshSnap.exists() ? freshSnap.data().studentReply : '') || '';
+    const replyChanged = reply !== oldReply;
     // 2026-07 補修：studentReplyAt／studentReplyContentAt 只呼叫一次 localISOStr()、
     // 共用同一個字串，而不是分別呼叫兩次——理論上兩次呼叫幾乎必定同秒（localISOStr()
     // 只有秒級精度），但仍可能剛好跨秒導致兩個欄位不相等。rule.txt 新增了
@@ -3911,7 +3921,7 @@ async function saveStudentReply(seatNo, sem, month) {
     // 這裡改成只算一次時間戳，從根源確保正常寫入一定滿足新規則，不依賴「幾乎不會跨秒」
     // 這種機率性假設。
     const nowStr = localISOStr();
-    await updateDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`), {
+    await updateDoc(ref, {
       studentReply: reply,
       // studentReplyAt 維持每次都無條件更新（純粹用於畫面上「我的回覆」泡泡顯示時間，
       // 角色對應 teacher.html 那邊維持無條件更新的 reviewedAt，不受 replyChanged 影響）
