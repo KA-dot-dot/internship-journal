@@ -731,6 +731,51 @@ async function main() {
     await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().collection(`users/${STUDENT_UID}/fcmTokens`).get());
   });
 
+  // 2026-07-10 新增（稽核 #8）：fcmTokens 文件寫入原本無任何欄位型別/大小驗證，
+  // 補上 validFcmTokenWrite() 後對應的規則層回歸測試。前端固定只會寫入 createdAt
+  // （字串）與截斷至 200 字的 userAgent（字串），這裡驗證規則本身也擋得住直接呼叫
+  // API 繞過前端限制的情境；同時補一條 delete 的回歸測試，確認拆開
+  // create/update（需驗證）跟 delete（不驗證，因 delete 時 request.resource 為 null）
+  // 這個改動沒有連帶把刪除功能弄壞。
+  await test('【2026-07-10】學生 fcmTokens create：userAgent 超過 200 字元 → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/oversized-useragent`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'x'.repeat(201) })
+    );
+  });
+
+  await test('【2026-07-10】學生 fcmTokens create：userAgent 剛好 200 字元（邊界值）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/boundary-useragent`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'x'.repeat(200) })
+    );
+  });
+
+  await test('【2026-07-10】學生 fcmTokens create：createdAt 型別錯誤（數字而非字串）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/bad-type-createdat`)
+        .set({ createdAt: 20260710, userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-10】學生 fcmTokens create：夾帶未允許的額外欄位 → 應被拒（hasOnly 鎖住欄位清單）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/fcmTokens/extra-field`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'test-agent', extra: 'should-not-be-allowed' })
+    );
+  });
+
+  await test('【2026-07-10】學生仍可以 delete 自己的 fcmTokens 文件（確認型別驗證改動未誤傷 delete，delete 時 request.resource 為 null）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`users/${STUDENT_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+    });
+    await assertSucceeds(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`users/${STUDENT_UID}/fcmTokens/to-delete-token`).delete());
+  });
+
   // ════════════════════════════════════════════════════════════
   // /admins/{adminId}
   // ════════════════════════════════════════════════════════════
@@ -800,6 +845,31 @@ async function main() {
 
   await test('【2026-07-07】admin 不能 list 自己的 fcmTokens 集合（list 固定 false）', async () => {
     await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().collection(`admins/${ADMIN_UID}/fcmTokens`).get());
+  });
+
+  // 2026-07-10 新增（稽核 #8）：對稱補上 admin 端的 fcmTokens 型別/大小驗證測試，
+  // 理由與上方 /users/{userId}/fcmTokens 完全相同，不重複展開。
+  await test('【2026-07-10】admin fcmTokens create：userAgent 超過 200 字元 → 應被拒', async () => {
+    await assertFails(
+      authCtx(ADMIN_UID, ADMIN_EMAIL).firestore()
+        .doc(`admins/${ADMIN_UID}/fcmTokens/oversized-useragent`)
+        .set({ createdAt: new Date().toISOString(), userAgent: 'x'.repeat(201) })
+    );
+  });
+
+  await test('【2026-07-10】admin fcmTokens create：createdAt 型別錯誤（數字而非字串）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(ADMIN_UID, ADMIN_EMAIL).firestore()
+        .doc(`admins/${ADMIN_UID}/fcmTokens/bad-type-createdat`)
+        .set({ createdAt: 20260710, userAgent: 'test-agent' })
+    );
+  });
+
+  await test('【2026-07-10】admin 仍可以 delete 自己的 fcmTokens 文件（確認型別驗證改動未誤傷 delete）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`admins/${ADMIN_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+    });
+    await assertSucceeds(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc(`admins/${ADMIN_UID}/fcmTokens/to-delete-token`).delete());
   });
 
   // ════════════════════════════════════════════════════════════
