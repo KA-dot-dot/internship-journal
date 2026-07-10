@@ -1,8 +1,16 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v18
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06，本次新增測試補強 2026-07-08
- * saveJournal() 修正，尚未同步記錄進 AI_CONTEXT.md）
+ * 學生端自動化測試 v19
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v19 新增（2026-07-10）：
+ *   S-SEC-31  initPushNotifications() 關鍵特徵（相對路徑註冊 fcm-sw.js、Firestore 寫入
+ *             路徑對應 rule.txt 的 request.auth.uid==userId、userAgent 截斷 200 字、
+ *             fire-and-forget 不擋登入）。對稱於 teacher_test.js 既有的 T-SEC-31，補齊
+ *             AI_推播系統說明.md 第六節 #11 記錄的測試覆蓋不對稱（老師端已有、學生端
+ *             缺）。直接取得 student.html 實際內容逐項核對後撰寫，不是照概念模型猜寫，
+ *             寫法特別避開「正規表達式誤命中函式內部解釋性註解文字」的陷阱（該函式註解
+ *             本身就提到 '/fcm-sw.js' 這個「壞」字串用來說明為何不能這樣寫）。
  *
  * v18 新增（2026-07-08）：
  *   S-SEC-30  saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）
@@ -1885,6 +1893,97 @@ async function runStudentTests(page, browserContext, log) {
         'teacherCommentContentAt: null 沒有跟 teacherComment／teacherReviewed／teacherCommentUnread／' +
         'teacherCommentUpdated 等其餘老師欄位歸零寫在同一個 data 物件內，請確認位置正確（例如誤放進' +
         '其他 if 分支或條件式區塊，導致實際不會隨每次一般編輯無條件寫入）'
+      );
+  });
+
+  await test('S-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入', async () => {
+    // 2026-07-10 新增。對稱於 teacher_test.js 的 T-SEC-31（老師端已有此測試，學生端一直
+    // 缺對應覆蓋，見 AI_推播系統說明.md 第六節 #11）。已直接取得 student.html 實際內容
+    // 逐項核對，student.html 的 initPushNotifications() 跟 teacher.html 那份幾乎完全對稱，
+    // 唯一的實質差異是 Firestore 寫入路徑用 'users' 集合（對應 rule.txt 的
+    // request.auth.uid == userId），而非老師端的 'admins' 集合。
+    //
+    // 五項檢查對應五個真實存在、各自有明確理由的退化風險（與 T-SEC-31 完全同構）：
+    //   1. navigator.serviceWorker.register('./fcm-sw.js', ...) 必須用相對路徑——
+    //      函式內的註解本身就說明這是 2026-07 的真實 bug 修正：這個站是 GitHub Pages
+    //      的 project page（網址帶 /internship-journal/ 子路徑），用開頭帶斜線的絕對
+    //      路徑 '/fcm-sw.js' 會讓瀏覽器去抓網域最上層、實際上 404，這裡若被改回絕對
+    //      路徑，推播會在所有裝置上悄悄失效但不會報錯（try/catch 吞掉），很難察覺。
+    //      ⚠️ 注意：函式內部的解釋性註解本身就完整提到 '/fcm-sw.js' 這個「壞」字串
+    //      （用來說明為何不能這樣寫），若測試邏輯只是「檢查這個壞字串不存在」會被
+    //      註解文字本身誤判為失敗（這正是 AI_推播系統說明.md 第九節記錄過的陷阱）。
+    //      這裡跟 T-SEC-31 一樣，改成正向比對「register('./fcm-sw.js' 這個實際呼叫點
+    //      的字面模式是否存在」，不受註解內容影響。
+    //   2. Firestore 寫入路徑 doc(db, 'users', currentUser.uid, 'fcmTokens', token)
+    //      必須用 currentUser.uid——這條路徑要能通過 rule.txt 的
+    //      request.auth.uid == userId 檢查。
+    //   3. userAgent 欄位必須截斷至 200 字（.slice(0, 200)）——對應 AI_CONTEXT.md
+    //      「Firestore 資料結構」章節記載的 fcmTokens 文件 schema，若移除截斷，
+    //      理論上可以寫入任意長度字串進這個公開集合。
+    //   4. try/catch 的 catch 區塊不能重新 throw——呼叫端 enterApp() 註解明確寫著
+    //      「刻意 fire-and-forget（不 await、失敗只 console.warn）」，若 catch 區塊被
+    //      改成 rethrow，推播初始化失敗會變成未捕捉例外，可能連帶讓 enterApp() 後續
+    //      邏輯中斷。
+    //   5. enterApp() 呼叫 initPushNotifications() 時不能加 await——同一個
+    //      fire-and-forget 設計意圖的另一半，若被改成 await，使用者登入流程會被
+    //      這整個推播註冊流程（含瀏覽器跳出通知權限詢問視窗）卡住。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof initPushNotifications === 'function') ? initPushNotifications.toString() : '';
+      const enterAppStr = (typeof enterApp === 'function') ? enterApp.toString() : '';
+      if (!fnStr || !enterAppStr) return { skip: true };
+
+      const relativeSwPath = /navigator\.serviceWorker\.register\(\s*['"]\.\/fcm-sw\.js['"]/.test(fnStr);
+      const correctFsPath = /doc\(\s*db\s*,\s*['"]users['"]\s*,\s*currentUser\.uid\s*,\s*['"]fcmTokens['"]/.test(fnStr);
+      const userAgentTruncated = /userAgent\s*:\s*\([^)]*\)\.slice\(\s*0\s*,\s*200\s*\)/.test(fnStr);
+
+      const catchIdx = fnStr.lastIndexOf('} catch');
+      const catchBlock = catchIdx >= 0 ? fnStr.slice(catchIdx) : '';
+      const catchDoesNotRethrow = !!catchBlock && !catchBlock.includes('throw');
+
+      const hasAwaitedCall = /await\s+initPushNotifications\(\)/.test(enterAppStr);
+      const hasBareCall = enterAppStr.includes('initPushNotifications();') || enterAppStr.includes('initPushNotifications() ;');
+
+      return {
+        skip: false,
+        relativeSwPath,
+        correctFsPath,
+        userAgentTruncated,
+        catchFound: !!catchBlock,
+        catchDoesNotRethrow,
+        hasAwaitedCall,
+        hasBareCall,
+      };
+    });
+    if (result.skip) return;
+    if (!result.relativeSwPath)
+      throw new Error(
+        'initPushNotifications() 沒有用相對路徑 register(\'./fcm-sw.js\')——' +
+        '若被改回絕對路徑 /fcm-sw.js，GitHub Pages project page 子路徑下會 404，' +
+        '推播會悄悄失效（try/catch 吞掉錯誤，畫面上完全看不出來）'
+      );
+    if (!result.correctFsPath)
+      throw new Error(
+        'initPushNotifications() 的 Firestore 寫入路徑不是 doc(db, \'users\', currentUser.uid, \'fcmTokens\', token)，' +
+        '可能無法通過 rule.txt 的 request.auth.uid == userId 檢查'
+      );
+    if (!result.userAgentTruncated)
+      throw new Error(
+        'initPushNotifications() 的 userAgent 欄位未截斷至 200 字（.slice(0, 200)），' +
+        '違反 fcmTokens 文件的既定 schema'
+      );
+    if (!result.catchFound || !result.catchDoesNotRethrow)
+      throw new Error(
+        'initPushNotifications() 的 catch 區塊會重新 throw（或找不到 catch 區塊），' +
+        '違反「fire-and-forget，失敗不擋登入」的設計意圖，enterApp() 可能因此被中斷'
+      );
+    if (result.hasAwaitedCall)
+      throw new Error(
+        'enterApp() 用 await 呼叫 initPushNotifications()，' +
+        '登入流程會被整個推播註冊流程（含瀏覽器通知權限詢問視窗）卡住，違反 fire-and-forget 設計'
+      );
+    if (!result.hasBareCall)
+      throw new Error(
+        'enterApp() 找不到不帶 await 的 initPushNotifications() 呼叫，呼叫方式可能已改變，需要重新確認此測試'
       );
   });
 
