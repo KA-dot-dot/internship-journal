@@ -37,8 +37,9 @@ jobs:
         run: npm install
 
       # 2026-07（稽核修正）：send-push-notifications.js 先前完全沒有任何自動化測試覆蓋，
-      # 是 AI_CONTEXT.md「推播通知」章節第 4 節⑤點名的問題。parseAsInstant()／
-      # alreadyNotified()／emailToDocId() 已抽到 notify-logic.js 並補上
+      # 是 AI_推播系統說明.md 第六節 #5 點名的問題（2026-07-10 更正：先前這裡誤寫成
+      # 「AI_CONTEXT.md『推播通知』章節第 4 節⑤」，AI_CONTEXT.md 從未有過這個章節）。
+      # parseAsInstant()／alreadyNotified()／emailToDocId() 已抽到 notify-logic.js 並補上
       # test-notify-logic.js，不需要任何 Secret 或網路連線即可執行，這裡在真正送出
       # 推播之前先跑一次，任何邏輯回歸（例如時區換算或時間比較被改壞）會讓這個 job
       # 直接失敗、不會繼續往下送出可能有問題的通知，也會在 Actions 分頁顯眼地標記失敗。
