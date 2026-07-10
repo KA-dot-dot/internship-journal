@@ -46,6 +46,25 @@ const SITE_BASE_URL = 'https://ka-dot-dot.github.io/internship-journal';
 // 但還是切塊處理，避免未來師生人數變多、或同一人多裝置登入導致 token 數量增加時整批失敗。
 const MULTICAST_CHUNK_SIZE = 500;
 
+// 2026-07 補修（稽核 #8）：sendToTokenDocs() 原本只認一種 FCM 失效狀態碼
+// （messaging/registration-token-not-registered，使用者主動撤銷授權／移除瀏覽器資料／
+// 換裝置時的典型回應），沒有涵蓋另外兩種同樣代表「這個 token 本身永久失效、不會因為
+// 重試而成功」的官方錯誤碼：
+//   - messaging/invalid-registration-token：token 字串格式本身不合法（例如被截斷、
+//     夾雜非法字元），FCM 直接判定這不是一個有效 token。
+//   - messaging/mismatched-credential：token 是用不同 Firebase 專案的憑證註冊的，
+//     跟這裡呼叫的 Admin SDK 專案對不上，永遠不可能送成功。
+// 三者共同點：都是「這個 token 字串本身的問題」，不會因為下一輪排程重試就自己恢復。
+// 刻意不納入更廣泛的 messaging/invalid-argument——這個碼也可能是酬載格式其他問題造成，
+// 貿然清除 token 有清錯對象的風險，不在本次範圍內。攻擊面本身有限（見 rule.txt：
+// 學生/admin 各自只能寫自己路徑下的 token，一筆垃圾 token 頂多讓寫入者自己少收到一次
+// 通知，不影響其他人），這裡純粹是讓失效 token 的自動清理更完整，非安全修補。
+const INVALID_TOKEN_ERROR_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+  'messaging/mismatched-credential',
+]);
+
 /**
  * 對一批「token 文件」（Firestore QueryDocumentSnapshot，文件 ID 本身就是 FCM token 字串）
  * 送出同一則通知，並清掉 FCM 回報「已失效」的 token（使用者解除授權、清瀏覽器資料、換裝置等）。
@@ -80,7 +99,7 @@ async function sendToTokenDocs(tokenDocs, data) {
 
     await Promise.all(
       resp.responses.map((r, idx) => {
-        if (!r.success && r.error?.code === 'messaging/registration-token-not-registered') {
+        if (!r.success && INVALID_TOKEN_ERROR_CODES.has(r.error?.code)) {
           return chunk[idx].ref.delete().catch(() => {});
         }
         return null;
@@ -272,7 +291,14 @@ async function checkReplies() {
       if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
 
       const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
-      const title = `💬 ${data.studentName || '學生'}回覆了評語`;
+      // 2026-07 補修（稽核 #4）：studentName 直接取自月記文件欄位，寫入時未經 rule.txt
+      // 驗證（同一類威脅模型見 AI_CONTEXT.md「exportAllStatsExcel() Excel 公式注入」章節，
+      // 只是這裡是純文字通知標題、不是會被當公式解讀的 Excel 儲存格，風險僅止於畫面出現
+      // 奇怪/過長的通知，不是資料外洩或執行風險）。比照 body 已有的 40 字截斷邏輯，
+      // 補上同等的長度上限，避免異常長字串把通知標題撐爆或在畫面上顯示不完整。
+      const studentNameRaw = data.studentName || '學生';
+      const studentNameSafe = studentNameRaw.length > 20 ? studentNameRaw.slice(0, 20) + '…' : studentNameRaw;
+      const title = `💬 ${studentNameSafe}回覆了評語`;
 
       // 2026-07 修正：tag 同步改用 studentReplyContentAt，不再用 studentReplyAt，理由同上——
       // 避免內容沒變時 tag 跟著變動、繞過瀏覽器端的 tag 防重複機制。額外好處維持不變：
