@@ -543,8 +543,13 @@ async function main() {
   // assertFails 才是正確答案。這不是規則退化，而是刻意收斂：真實 saveStudentReply()
   // 每次都無條件送出一個有效的 studentReplyAt 字串，從來不會是 null，「內容真的改變、
   // 但送出時間卻是 null」本來就是不該存在的合成狀態，繼續放行反而是規則漏洞（詳見
-  // AI_CONTEXT.md「推播通知」章節第 4 節②：這正是 studentReplyContentAt 被獨立竄改成
+  // AI_推播系統說明.md 第六節 #2：這正是 studentReplyContentAt 被獨立竄改成
   // 未來時間、造成 notify-service 無限重推的那個漏洞，本輪修正就是為了堵住它）。
+  // 2026-07-11 更正：這裡原本誤寫成「見 AI_CONTEXT.md「推播通知」章節第 4 節②」，
+  // 但 AI_CONTEXT.md 從未有過「推播通知」這個章節（本子系統文件依設計獨立成
+  // AI_推播系統說明.md，見該文件開頭說明）。這是 AI_推播系統說明.md #13 修正
+  // notify-logic.js／test-notify-logic.js（2處）／push-notify.yml 四處同款錯誤引用時
+  // 漏掉的第 5 處，現已一併修正為正確章節。
   // 「studentReplyAt 型別可以是 null」這件事本身沒有跟著收回，只是不能再跟「內容真的
   // 改變」這個情境同時出現，該行為由下面新增的測試接手驗證。
   await test('【2026-07（第二輪修正）】學生 UPDATE 回覆：內容真的改變、但 studentReplyAt=null 與 studentReplyContentAt 不相等 → 應被拒（新增一致性驗證）', async () => {
