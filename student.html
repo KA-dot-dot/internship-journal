@@ -3211,15 +3211,19 @@ async function saveJournal() {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     return toast('⚠️ ' + (e.message || '工作照片上傳失敗，請稍後再試'), 'error');
   }
+  // 2026-07 新增：是否為「這份月記第一次被儲存」，跟 submittedAt 的判斷條件完全共用
+  // 同一個布林值——「第一次才記錄當下時間」這句話本身就是「journalSubmitNotifiedAt
+  // 這個推播用標記欄位，第一次才需要明確寫成 null」的同一件事，不另外重算一次條件。
+  const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name, company: currentUser.company || '',
     city: currentUser.city || '', semester: sem, month,
     salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
-    submittedAt: (window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt)
-      ? window._currentJournalCache.submittedAt   // 保留第一次繳交時間
-      : localISOStr(),                             // 第一次才記錄當下時間
+    submittedAt: isFirstSubmit
+      ? localISOStr()                              // 第一次才記錄當下時間
+      : window._currentJournalCache.submittedAt,    // 保留第一次繳交時間
     updatedAt: localISOStr(),                      // 每次儲存都更新
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
@@ -3237,7 +3241,22 @@ async function saveJournal() {
     // 之後只要再次編輯儲存，merge:true 會讓這個欄位保留舊的非 null 值，撞上 rule.txt
     // 要求 == null 而被 Firestore 拒絕（整份月記存檔失敗）。補上歸零後與其餘老師欄位
     // 處理方式一致，rule.txt 不需要修改。
-    teacherCommentContentAt: null
+    teacherCommentContentAt: null,
+    // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬標記
+    // 欄位（notify-service/send-push-notifications.js 的 checkNewJournals() 寫入，判斷邏輯
+    // 見該函式開頭註解）。刻意只在 isFirstSubmit 為真時才把這個 key 塞進 payload——
+    // 一般編輯（isFirstSubmit=false）完全不提這個欄位，靠 merge:true 讓 Firestore 保留
+    // 後端寫入的既有值不動；這跟 studentReplyContentAt 的處理方式是同一個道理（「維持
+    // 原值不變」不能靠省略達成 create 語意，但可以靠省略達成 update 語意）。如果無條件
+    // 把 journalSubmitNotifiedAt: null 放進 data（不分 create/update 都送），會導致學生
+    // 每次編輯月記內容（哪怕只是改個錯字）都把這個欄位打回 null，讓 notify-service
+    // 誤判成「還沒推播過」而重新通知一次，完全違背「只在第一次繳交時推播一次」的設計。
+    // 另一個好處：只有真正的第一次建立才會讓這個欄位「存在且為 null」，此功能上線前的
+    // 所有歷史月記從來沒有這個欄位、也永遠不會有，讓後端可以直接用 Firestore 的
+    // where('journalSubmitNotifiedAt','==',null) 查詢安全排除全部舊資料，不需要額外的
+    // 部署日期分界線或一次性遷移腳本，完整理由見 rule.txt 對應段落與
+    // send-push-notifications.js 的 checkNewJournals() 註解。
+    ...(isFirstSubmit ? { journalSubmitNotifiedAt: null } : {})
   };
   if (JSON.stringify(data).length > 900000) {
     hideLoading();

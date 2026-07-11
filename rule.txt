@@ -158,6 +158,16 @@ service cloud.firestore {
             // 同屬回覆欄位家族，建立時同樣限制為初始空值（比照 teacherCommentContentAt 的設計，
             // 供 notify-service 判斷學生回覆是否已推播用途）
             && request.resource.data.get('studentReplyContentAt', null) == null
+            // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬
+            // 標記欄位（notify-service/send-push-notifications.js 的 checkNewJournals() 寫入），
+            // 建立時同樣限制為初始空值 null。這裡的 null 不只是信任邊界考量（防止學生自己先
+            // 塞一個值假裝已經推播過，藉此讓自己的第一次繳交完全不通知老師），還兼職當
+            // 「哨兵值」用：Firestore 的 where(field,'==',null) 只會比對「欄位存在且為 null」
+            // 的文件，完全不會比對到「欄位根本不存在」的文件——這代表這個功能上線之前就
+            // 存在的所有歷史月記（從來沒有這個欄位）永遠不會被 checkNewJournals() 的查詢撈到，
+            // 不需要另外寫一次性遷移腳本、也不需要硬記一個部署日期當分界線。完整說明見
+            // notify-service/send-push-notifications.js 內 checkNewJournals() 開頭的註解。
+            && request.resource.data.get('journalSubmitNotifiedAt', null) == null
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -185,6 +195,17 @@ service cloud.firestore {
             && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
             && request.resource.data.get('studentReplyAt', null) == resource.data.get('studentReplyAt', null)
             && request.resource.data.get('studentReplyContentAt', null) == resource.data.get('studentReplyContentAt', null)
+            // 2026-07 新增：journalSubmitNotifiedAt 語意上跟 studentReplyContentAt 同一類——
+            // 一旦被後端寫成非 null（代表這份月記的「第一次繳交」通知已經送出），學生之後
+            // 任何一般編輯都不該把它動到，否則等同讓學生可以無限次把這個欄位打回 null，
+            // 逼 notify-service 每一輪排程都重新推播一次「有新月記」給全體老師（等同一種
+            // 學生自己就能觸發的通知洗版管道，比單純造成一次誤判更值得擋）。故要求一般編輯
+            // 時必須「維持原值不變」，不像 teacherCommentContentAt 是「必須變成 null」——
+            // 兩者要求本質不同，理由見 AI_推播系統說明.md 對這兩類欄位的既有區分說明。
+            // student.html 的 saveJournal() 只在偵測到「這是第一次繳交」（isFirstSubmit）
+            // 時才會明確寫入 null，一般編輯完全不帶這個欄位，靠 merge:true 天然滿足這裡
+            // 「維持不變」的要求，不需要額外顯式寫入舊值。
+            && request.resource.data.get('journalSubmitNotifiedAt', null) == resource.data.get('journalSubmitNotifiedAt', null)
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()
