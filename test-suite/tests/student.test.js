@@ -1,7 +1,25 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v19
+ * 學生端自動化測試 v20
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v20 修正（2026-07-11）：
+ *   S-SEC-29  檢查邏輯更新，對應 saveStudentReply() 本身同日的修法：oldReply 原本讀
+ *             window._studentHistoryJournals（前端快取），改成送出前 await getDoc(ref)
+ *             現查伺服器當下值——修正多裝置/多分頁情境下快取可能落後伺服器真實值，
+ *             導致合法回覆被 rule.txt 的「內容改變」與「內容沒變」兩個分支同時判斷失敗、
+ *             誤擋 403 的問題（詳見該函式新版註解）。
+ *             原本的 readsOldFromCache 檢查對新程式碼已經失真：`fnStr.includes(
+ *             '_studentHistoryJournals')` 這種寬鬆字串搜尋，在新版程式碼裡命中的其實是
+ *             「解釋當初為什麼改掉」的說明性註解本身（新版函式仍保留一段提到這個舊變數名
+ *             的動機說明），不是真的還在用快取的邏輯——跟本檔已知的 S-SEC-08／T-SEC-30
+ *             假失敗屬於同一類陷阱，只是方向相反：那兩者是「檢查壞寫法不存在」被解釋性
+ *             註解誤判成還存在，這裡是「檢查好寫法還在」被「已經不這樣寫了」的說明文字
+ *             誤判成還在，兩者本質都是對整個函式字串做寬鬆子字串搜尋、沒有錨定到實際的
+ *             賦值/呼叫語法。改為同時驗證 ①`await getDoc(ref)` 呼叫存在、②`oldReply` 的
+ *             賦值語法明確來自 `freshSnap`（`const oldReply = (freshSnap...`），並把找不到
+ *             時的錯誤訊息方向修正過來（原訊息把「多打一次 Firestore 讀取」講成可疑訊號，
+ *             但這正是修法後的正確行為）。
  *
  * v19 新增（2026-07-10）：
  *   S-SEC-31  initPushNotifications() 關鍵特徵（相對路徑註冊 fcm-sw.js、Firestore 寫入
@@ -1779,9 +1797,15 @@ async function runStudentTests(page, browserContext, log) {
     // 會把老師端已讀狀態誤打回未讀，notify-service 也會因 studentReplyContentAt
     // 跟著刷新而誤判成新回覆、對同一則內容重複推播。
     //
+    // 2026-07-11 修正：saveStudentReply() 本身同日改版——oldReply 原本從前端快取
+    // window._studentHistoryJournals 讀取，改成送出前 await getDoc(ref) 現查伺服器
+    // 當下值（修正多裝置/多分頁快取落後伺服器真實值時，合法回覆會被 rule.txt 的
+    // 「內容改變」與「內容沒變」兩個分支同時判斷失敗、誤擋 403 的問題）。下面第2項
+    // 檢查同步改為驗證新寫法，不再驗證已經不存在的快取讀取邏輯。
+    //
     // 驗證五項特徵（缺一即退化）：
     //   1. replyChanged 變數存在
-    //   2. 舊回覆值從既有快取（_studentHistoryJournals）讀取，不是多打一次 Firestore 讀取
+    //   2. 舊回覆值改為送出前 getDoc(ref) 現查伺服器當下值，不是從前端快取讀取
     //   3. studentReplyUnread 的寫入受 replyChanged 控制（spread 條件寫入）
     //   4. studentReplyContentAt 的寫入同樣受 replyChanged 控制
     //   5. studentReplyAt 維持無條件寫入（角色對應 teacher.html 的 reviewedAt，
@@ -1792,9 +1816,19 @@ async function runStudentTests(page, browserContext, log) {
 
       const hasReplyChanged = fnStr.includes('replyChanged');
 
-      const readsOldFromCache =
-        /oldReply\s*=\s*cachedJournal/.test(fnStr) ||
-        fnStr.includes('_studentHistoryJournals');
+      // 2026-07-11 修正：原本的寫法是 /oldReply\s*=\s*cachedJournal/.test(fnStr) ||
+      // fnStr.includes('_studentHistoryJournals')，第二個條件對新版程式碼會產生假陽性——
+      // 新版函式裡有一段解釋「當初為什麼從快取改成現查」的說明性註解，本身就會提到
+      // '_studentHistoryJournals' 這個舊變數名，寬鬆的 fnStr.includes() 字串搜尋會命中
+      // 這段註解文字本身，而不是真的驗證到程式行為（跟本檔已知的 S-SEC-08／
+      // teacher_test.js T-SEC-30 假失敗同一類陷阱，只是方向相反：那兩者是「檢查壞寫法
+      // 不存在」被解釋性註解誤判成還存在，這裡是「檢查好寫法還在」被「已經不這樣寫了」
+      // 的說明文字誤判成還在）。改為錨定實際的賦值/呼叫語法：①確認有 await getDoc(...)
+      // 呼叫，②確認 oldReply 明確賦值自 freshSnap，兩者都命中真正的程式碼結構，
+      // 不會被單純提到變數名稱的註解文字誤判。
+      const readsOldFromFreshDoc =
+        /await\s+getDoc\s*\(/.test(fnStr) &&
+        /const\s+oldReply\s*=\s*\(\s*freshSnap/.test(fnStr);
 
       const unreadGatedByChanged =
         /replyChanged\s*\?[\s\S]{0,200}studentReplyUnread/.test(fnStr) ||
@@ -1815,7 +1849,7 @@ async function runStudentTests(page, browserContext, log) {
       return {
         skip: false,
         hasReplyChanged,
-        readsOldFromCache,
+        readsOldFromFreshDoc,
         unreadGatedByChanged,
         contentAtGatedByChanged,
         studentReplyAtUnconditional,
@@ -1827,10 +1861,13 @@ async function runStudentTests(page, browserContext, log) {
         'saveStudentReply() 找不到 replyChanged 變數，' +
         '學生重新送出未修改的回覆會誤觸發老師端已讀狀態倒退與 notify-service 重複推播'
       );
-    if (!result.readsOldFromCache)
+    if (!result.readsOldFromFreshDoc)
       throw new Error(
-        'saveStudentReply() 的舊回覆值來源可疑，找不到從既有快取（_studentHistoryJournals）' +
-        '讀取舊值的邏輯，可能改成多打一次 Firestore 讀取，或直接遺失比對基準'
+        'saveStudentReply() 找不到「送出前 await getDoc(ref) 現查伺服器當下 studentReply」' +
+        '的邏輯（應同時看得到 getDoc(...) 呼叫與 const oldReply = (freshSnap... 賦值），' +
+        '舊回覆值可能又改回從前端快取（_studentHistoryJournals）讀取——多裝置/多分頁情境下' +
+        '快取可能落後伺服器真實值，會讓合法回覆被 rule.txt 的「內容改變」與「內容沒變」' +
+        '兩個分支同時判斷失敗而誤擋 403'
       );
     if (!result.unreadGatedByChanged)
       throw new Error(
