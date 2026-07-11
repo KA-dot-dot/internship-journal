@@ -1,7 +1,24 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v19
+ * 老師端自動化測試 v20
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v20 修正（2026-07-11）：
+ *   T-SEC-24  改版。saveTeacherComment() 本身同日改版——oldComment 原本讀
+ *             _currentCommentJournal.oldComment（Modal 開啟當下由
+ *             _openCommentModalWithUid() 快取的舊評語值），改成送出前
+ *             await getDoc(ref) 現查伺服器當下值（修正多裝置/多分頁快取過期，
+ *             導致 commentChanged／isCommentUpdate 算錯的問題；跟 student.html
+ *             saveStudentReply() 同日同款修法，同一類問題）。原本驗證的
+ *             「_openCommentModalWithUid() 設定 oldComment 前有 seatNo/semester/
+ *             month 三重身份比對」已隨對應程式碼一併移除（那段防護的對象——
+ *             _currentCommentJournal.oldComment——已經沒有任何函式會讀取），
+ *             測試改為驗證新的 getDoc 現查機制。
+ *   T-SEC-32  新增。確認 _openCommentModalWithUid() 內原本專門保護
+ *             _currentCommentJournal.oldComment 快取的兩處程式碼（.then() 三重
+ *             身份比對＋.catch() 空字串保底）已經隨 T-SEC-24 的改版一併移除，
+ *             不是只改了 saveTeacherComment() 卻留下一段沒有任何函式會讀取、
+ *             卻長得像還在運作的死碼防護，避免誤導未來的維護者。
  *
  * v19 新增（2026-07-07）：
  *   T-SEC-30  saveTeacherComment() teacherCommentContentAt 只在評語內容真正改變時才寫入
@@ -1214,43 +1231,84 @@ async function runTeacherTests(page, log) {
   });
 
 
-  await test('T-SEC-24 _openCommentModalWithUid() oldComment 設定前做身份比對（防快速切換導致 commentChanged 基準錯誤）', async () => {
-    // 2026-06-29 補修的回歸測試。
-    // 若老師在前一個 getDoc 尚未完成時快速點開另一筆月記的評語按鈕，
-    // _currentCommentJournal 會被覆寫成新月記，但較早的 .then() 若不先比對
-    // seatNo/semester/month 三欄，會對「已是新月記的 _currentCommentJournal」
-    // 設定舊的 oldComment，使 commentChanged 計算基準錯誤，
-    // 造成 teacherCommentUpdated 旗標誤判（State 1/2 顯示錯誤）。
+  await test('T-SEC-24 saveTeacherComment() oldComment 改為送出前 getDoc() 現查伺服器當下值（多裝置/多分頁競態防護）', async () => {
+    // 2026-07-11 改版。原始版本（2026-06-29）驗證的是 _openCommentModalWithUid()
+    // 在設定 _currentCommentJournal.oldComment 前有 seatNo/semester/month 三重身份比對，
+    // 防的是「同一分頁快速切換不同月記」時，較早完成的 getDoc .then() 把錯誤月記的舊評語
+    // 誤設成 oldComment。
+    //
+    // saveTeacherComment() 本身這次同日改版（比照 student.html saveStudentReply() 同款
+    // 修法，兩者是同一類「快取值可能過期」問題）：oldComment 不再讀
+    // _currentCommentJournal.oldComment 這份 Modal 開啟當下的快照，改成送出前
+    // await getDoc(ref) 現查伺服器當下的 teacherComment——這個新機制本身就比舊的三重
+    // 身份比對更徹底：不只防「同分頁快速切換月記」，還一併防「Modal 開著的這段期間，
+    // 同一份月記被另一台裝置/分頁的老師改過評語」這種舊機制完全防不到的多裝置/多分頁
+    // 競態。_openCommentModalWithUid() 原本設定 oldComment 的兩處程式碼（.then() 三重
+    // 身份比對＋.catch() 空字串保底）因此變成沒有任何函式會讀取的死碼，已同步移除
+    // （見 T-SEC-32），本測試同步改為驗證新機制，不再驗證已被移除的舊死碼特徵。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveTeacherComment === 'function') ? saveTeacherComment.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 錨定實際的呼叫/賦值語法（而非寬鬆字串搜尋），避免像 T-SEC-30／student_test.js
+      // S-SEC-29 那樣被解釋性註解本身提到的字詞誤判——這個函式內部就有大段說明
+      // 「當初為什麼從 Modal 快照改成送出前現查」的註解，寬鬆搜尋容易命中註解文字本身
+      // 而非真正的程式行為。
+      const readsOldFromFreshDoc =
+        /await\s+getDoc\s*\(/.test(fnStr) &&
+        /const\s+oldComment\s*=\s*\(\s*freshSnap/.test(fnStr);
+
+      // 確認舊的 Modal 快照讀取方式真的不在了，不是新舊兩套邏輯並存。
+      // ⚠️ 不能用寬鬆的 fnStr.includes('_currentCommentJournal.oldComment') 或單純
+      // .test()——這個函式上方就有大段解釋性註解會提到這個字串本身（說明「當初為什麼
+      // 從這裡改掉」），寬鬆搜尋會命中註解文字，變成本測試自己也踩進 T-SEC-30／
+      // S-SEC-29 已經記錄過的「regex 命中解釋性註解」陷阱。改為錨定實際的指派
+      // （= 但排除 ==/===）或讀取（??）語法，只有真的被當成程式碼使用才會命中。
+      const stillReadsStaleCache = /_currentCommentJournal\.oldComment\s*(?:=(?!=)|\?\?)/.test(fnStr);
+
+      return { skip: false, readsOldFromFreshDoc, stillReadsStaleCache };
+    });
+
+    if (result.skip) return;
+    if (!result.readsOldFromFreshDoc)
+      throw new Error(
+        'saveTeacherComment() 找不到「送出前 await getDoc(ref) 現查伺服器當下 teacherComment」' +
+        '的邏輯（應同時看得到 getDoc(...) 呼叫與 const oldComment = (freshSnap... 賦值），' +
+        '舊評語值可能又改回讀 Modal 開啟當下的快照（_currentCommentJournal.oldComment）——' +
+        '多裝置/多分頁情境下這份快照可能落後伺服器真實值，會讓 commentChanged／' +
+        'isCommentUpdate 算錯，寫入錯誤的 teacherCommentUnread／teacherCommentUpdated'
+      );
+    if (result.stillReadsStaleCache)
+      throw new Error(
+        'saveTeacherComment() 仍讀取 _currentCommentJournal.oldComment，' +
+        '新舊兩套「取得舊評語值」的邏輯可能並存——若是刻意保留的 fallback，' +
+        '請更新本測試的預期行為並在程式碼與此處都補上說明理由'
+      );
+  });
+
+  await test('T-SEC-32 _openCommentModalWithUid() 不再殘留 oldComment 快取死碼（2026-07-11 清理確認）', async () => {
+    // 補充測試，對應上方 T-SEC-24 改版：確認 _openCommentModalWithUid() 內原本專門
+    // 為了保護 _currentCommentJournal.oldComment 快取而寫的三重身份比對（.then() 分支）
+    // 與空字串保底（.catch() 分支）已經一併移除，不是只改了 saveTeacherComment() 卻
+    // 留下一段已經沒有任何函式會讀取、卻長得像還在運作的保護機制的死碼——這類「看起來
+    // 像防護、實際上什麼都防不到」的殘留碼，比乾脆沒有防護更容易誤導未來的維護者
+    // （會誤以為 oldComment 的競態保護是靠這裡的身份比對在做，實際上早已不是）。
     const result = await page.evaluate(() => {
       const fnStr = (typeof _openCommentModalWithUid === 'function')
         ? _openCommentModalWithUid.toString() : '';
       if (!fnStr) return { skip: true };
-
-      // 特徵 1：設定 oldComment 前有 seatNo 身份比對
-      const hasSeatNoCheck  = fnStr.includes('_currentCommentJournal.seatNo === seatNo');
-      // 特徵 2：設定 oldComment 前有 semester 身份比對
-      const hasSemesterCheck = fnStr.includes('_currentCommentJournal.semester === semester');
-      // 特徵 3：設定 oldComment 前有 month 身份比對
-      const hasMonthCheck   = fnStr.includes('_currentCommentJournal.month === month');
-
-      return { skip: false, hasSeatNoCheck, hasSemesterCheck, hasMonthCheck };
+      // 同 T-SEC-24 的理由：這個函式上方也有解釋性註解會提到
+      // _currentCommentJournal.oldComment 字串本身，不能用寬鬆搜尋，
+      // 錨定實際的指派語法（= 但排除 ==/===）才算真的還在用。
+      const hasDeadCache = /_currentCommentJournal\.oldComment\s*=(?!=)/.test(fnStr);
+      return { skip: false, hasDeadCache };
     });
-
     if (result.skip) return;
-    if (!result.hasSeatNoCheck)
+    if (result.hasDeadCache)
       throw new Error(
-        '_openCommentModalWithUid() 缺少 _currentCommentJournal.seatNo === seatNo 比對，' +
-        '快速切換月記時 oldComment 可能被設成錯誤月記的舊評語，commentChanged 計算基準錯誤'
-      );
-    if (!result.hasSemesterCheck)
-      throw new Error(
-        '_openCommentModalWithUid() 缺少 _currentCommentJournal.semester === semester 比對，' +
-        'oldComment 身份比對不完整，不同學期的月記切換時有 commentChanged 錯誤風險'
-      );
-    if (!result.hasMonthCheck)
-      throw new Error(
-        '_openCommentModalWithUid() 缺少 _currentCommentJournal.month === month 比對，' +
-        'oldComment 身份比對不完整，同學期不同月份切換時有 commentChanged 錯誤風險'
+        '_openCommentModalWithUid() 仍設定 _currentCommentJournal.oldComment，' +
+        '但 saveTeacherComment() 已經不讀這個欄位了（見 T-SEC-24）——若是刻意保留供未來' +
+        '其他用途，請在程式碼與本測試都補上說明；若只是忘記清理，請移除'
       );
   });
 
