@@ -338,6 +338,41 @@ async function main() {
     );
   });
 
+  // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬標記
+  // 欄位（見 rule.txt create 分支對應段落的完整說明）。這條驗證真正的威脅：學生若直接
+  // 呼叫 Firestore API，在建立當下就先塞一個非 null 值（例如假裝成已經推播過的樣子），
+  // 會讓 checkNewJournals() 的 where('journalSubmitNotifiedAt','==',null) 查詢從一開始
+  // 就撈不到這份月記，等同讓自己的第一次繳交完全不通知老師——這是這個欄位鎖定要擋的
+  // 核心情境，不是單純的格式一致性問題。
+  await test('【2026-07】學生 CREATE 月記：偽造 journalSubmitNotifiedAt 為非 null 值 → 應被拒（防止學生讓自己的第一次繳交永遠不被 checkNewJournals() 查到）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-submit-notified-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { journalSubmitNotifiedAt: '2099-01-01T00:00:00Z' }))
+    );
+  });
+
+  // 對照組①：明確帶 null（真實 saveJournal() 第一次繳交時的實際寫法，見 student.html
+  // isFirstSubmit 分支）→ 應成功，確認鎖定沒有連合法寫法也一併擋下。
+  await test('【2026-07】學生 CREATE 月記：明確帶 journalSubmitNotifiedAt: null（真實 saveJournal() 第一次繳交寫法）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/real-first-submit-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { journalSubmitNotifiedAt: null }))
+    );
+  });
+
+  // 對照組②：完全不提這個欄位（例如未來若有其他建立路徑忘記顯式帶 null）→ 也應成功，
+  // 因為 request.resource.data.get('journalSubmitNotifiedAt', null) 對完全不存在的欄位
+  // 一樣會拿到預設值 null，跟明確帶 null 效果相同，不應該因為「沒寫」就被多擋一層。
+  await test('【2026-07】學生 CREATE 月記：完全不提 journalSubmitNotifiedAt 欄位 → 應成功（.get() 帶預設值對缺欄位一樣視為 null）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/real-first-submit-02`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL))
+    );
+  });
+
   // ════════════════════════════════════════════════════════════
   // UPDATE
   // ════════════════════════════════════════════════════════════
@@ -660,6 +695,79 @@ async function main() {
           studentReply: '已讀回覆內容', // 跟現有值相同
           studentReplyAt: new Date().toISOString(),
         })
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // journalSubmitNotifiedAt（2026-07 新增：學生第一次繳交月記推播用的後端專屬標記欄位）
+  // ════════════════════════════════════════════════════════════
+  // 下面後三條比照 teacherCommentContentAt 的 #12 那組測試：一般 UPDATE 測試如果只用
+  // 整份 .set()（非 merge:true），existing-01 種子資料不會自然帶有這個欄位，測不出
+  // 「merge:true 沿用舊值」這個真實寫入路徑會發生的情境，必須先用 withSecurityRulesDisabled
+  // 種出「已經推播過」的已知狀態，再用真正的 .set({...},{merge:true}) 模擬 saveJournal()
+  // 一般編輯的實際寫法（一般編輯完全不帶這個欄位，見 student.html isFirstSubmit 分支）。
+
+  // 這條刻意改用 .update()（Firestore 原生的局部更新，不是整份 .set()）：existing-01
+  // 在檔案跑到這裡之前，已經被前面好幾條 studentReply 相關測試（assertSucceeds 那幾條，
+  // 例如上面「內容沒變、只更新 studentReplyAt」那條）寫入過真正非 null 的 studentReply／
+  // studentReplyContentAt 值。若這裡改用整份 .set(journalDoc(...))（沒有 merge:true），
+  // 傳入物件本身沒有帶 studentReply 欄位，會讓最終文件的 studentReply 變成不存在（null），
+  // 但 existing-01 現在的舊值是非 null 字串，會撞上 studentReply 那條「必須維持原值不變」
+  // 的既有鎖定而被拒絕——這是既有規則的正確行為，但會讓這條測試因為「不相干的欄位」
+  // 失敗，而不是真正驗證 journalSubmitNotifiedAt 本身。改用 .update() 只送真正要改的
+  // 欄位，其餘欄位（含 studentReply 家族與 journalSubmitNotifiedAt）完全不受影響，兩邊
+  // 自動相等，才是乾淨地只測「完全沒碰這個欄位的一般編輯」這件事本身。
+  await test('【2026-07】學生 UPDATE 自己月記（一般編輯，完全不觸碰 journalSubmitNotifiedAt）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({ content: '一般編輯，不涉及推播標記欄位' })
+    );
+  });
+
+  await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true 模擬 saveJournal() 真實寫法）：payload 完全不提 journalSubmitNotifiedAt、既有值已是已推播的 ISO 字串 → 應成功（merge 天然保留舊值不動，對應真實一般編輯行為）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z', // 模擬「已經推播過」的既有狀態
+        }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        // 真實 saveJournal() 一般編輯的實際寫法：完全不提這個欄位，靠 merge:true 保留舊值。
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '學生正常編輯內容' }), { merge: true })
+    );
+  });
+
+  await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 明確嘗試把已推播的 journalSubmitNotifiedAt 打回 null → 應被拒（防止學生藉此逼 notify-service 每輪重新推播「有新月記」）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z',
+        }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想把已推播標記打回 null', journalSubmitNotifiedAt: null }), { merge: true })
+    );
+  });
+
+  await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 嘗試把 journalSubmitNotifiedAt 竄改成另一個任意時間戳 → 應被拒（一般編輯必須維持原值不變，不只是不能改成 null）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
+          journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z',
+        }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想竄改成別的時間戳', journalSubmitNotifiedAt: '2026-08-01T00:00:00.000Z' }), { merge: true })
     );
   });
 
