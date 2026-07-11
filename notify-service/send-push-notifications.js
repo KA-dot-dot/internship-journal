@@ -14,13 +14,14 @@
 //
 // 一次性前置作業（跟 /admins/{uid} 要手動在 Console 建立是同一類「無法自動化」的步驟）：
 //   1) 上述服務帳戶 JSON。
-//   2) 第一次執行時，collectionGroup('journals') 的兩個 where 查詢（teacherCommentUnread
-//      跟 studentReplyUnread 各自獨立）都很可能會各自噴出一次「需要建立索引」的錯誤，
-//      錯誤訊息裡會附一個直接建立該索引的連結。這支腳本刻意把兩個檢查各自包在自己的
-//      try/catch 裡（見下方 main()），就算其中一個因為缺索引而失敗，另一個仍會照常執行，
-//      所以「兩個索引都還沒建」的第一次執行，理論上會在同一次的 log 裡就看到兩條建立索引
-//      的連結，不需要為了看到第二條連結而特地再跑第二次。點過兩個連結各自建好索引
-//      （通常一兩分鐘生效）後，之後每次排程執行都不會再遇到這個錯誤。
+//   2) 第一次執行時，collectionGroup('journals') 的三個 where 查詢（teacherCommentUnread、
+//      studentReplyUnread、journalSubmitNotifiedAt 各自獨立，2026-07 新增第三個）都很可能
+//      會各自噴出一次「需要建立索引」的錯誤，錯誤訊息裡會附一個直接建立該索引的連結。
+//      這支腳本刻意把三個檢查各自包在自己的 try/catch 裡（見下方 main()），就算其中一個
+//      因為缺索引而失敗，其餘仍會照常執行，所以「三個索引都還沒建」的第一次執行，理論上
+//      會在同一次的 log 裡就看到三條建立索引的連結，不需要為了看到後面的連結而特地再跑
+//      第二、三次。點過三個連結各自建好索引（通常一兩分鐘生效）後，之後每次排程執行都
+//      不會再遇到這個錯誤。
 
 const admin = require('firebase-admin');
 // 2026-07（稽核修正）：parseAsInstant()／alreadyNotified()／emailToDocId() 抽到
@@ -330,8 +331,89 @@ async function checkReplies() {
 }
 
 // ---------------------------------------------------------------------------
-// 主流程：兩項檢查各自獨立 try/catch，其中一個因缺索引等原因失敗時，
-// 另一個仍會照常執行；只要任一項失敗，整體以非 0 結束碼結束，
+// 學生第一次繳交月記 → 通知全體老師/管理員（2026-07 新增）
+// ---------------------------------------------------------------------------
+// 跟 checkComments()/checkReplies() 的語意本質不同：後兩者的「內容」可以被反覆修改
+// （老師改評語、學生改回覆），每次改動都要重新判斷「這一輪內容有沒有推播過」，所以需要
+// parseAsInstant()/alreadyNotified() 那套時間戳比較（NotifiedAt vs ContentAt）。「第一次
+// 繳交」這件事只會發生一次、也只需要推播一次——journalSubmitNotifiedAt 從 null 變成一個
+// 真正的 ISO 字串之後，會被 rule.txt 的一般編輯分支鎖住必須維持原值不變（student.html
+// 的 saveJournal() 也只在第一次繳交時才會把這個欄位放進寫入 payload），不會再變回 null，
+// 所以這裡完全不需要時間戳比較，單純「這個欄位是不是 null」就是唯一且完整的判斷依據。
+//
+// 查詢本身（where('journalSubmitNotifiedAt','==',null)，見下方）已經把這個判斷做完了：
+// Firestore 的等號查詢只會比對「欄位存在且值為 null」的文件，不會比對到「欄位根本不存在」
+// 的文件（這是 Firestore 索引機制本身的行為，不是這支腳本自己過濾的——每個文件只有在
+// 「擁有該欄位」時才會被寫進該欄位的索引，沒有這個欄位的文件從一開始就不在索引裡，任何
+// 對這個欄位的 where 條件都不可能命中它）。這件事在這個功能的部署安全性上非常關鍵：
+// student.html 的 saveJournal() 只有在偵測到「這是這份月記第一次被儲存」時，才會明確把
+// journalSubmitNotifiedAt: null 放進寫入的資料裡（見該函式內 isFirstSubmit 判斷）；這個
+// 功能上線之前就存在的所有歷史月記，從來沒有寫過這個欄位，往後也不會有任何動作補寫它
+// （一般編輯的 rule.txt 鎖定是「維持原值不變」，不是「補上 null」）。也就是說，這批舊
+// 資料在這裡的查詢範圍裡從頭到尾都不存在，不需要另外寫一次性遷移腳本幫舊資料補欄位，
+// 也不需要在程式碼裡硬記一個「部署日期」當分界線去比對 submittedAt——那種寫法需要精確
+// 記得正式上線的那一刻並手動填一個常數，容易忘記更新或填錯（這個專案已經在
+// run-tests.js 的版本banner字串上踩過三次「忘記同步手動常數」的坑，這裡刻意選一個
+// 完全不需要記住任何日期的做法）。第一次執行前，記得檢查這個查詢是否也跳出「需要建立
+// 索引」的錯誤（見檔案最上方的一次性前置作業說明第 2 點）。
+async function checkNewJournals() {
+  const [snap, adminTokenDocs] = await Promise.all([
+    db.collectionGroup('journals').where('journalSubmitNotifiedAt', '==', null).get(),
+    collectAdminTokenDocs(),
+  ]);
+
+  let sent = 0;
+  for (const docSnap of snap.docs) {
+    // 跟 checkComments()/checkReplies() 同一套逐筆 try/catch：單筆處理失敗只記 log、
+    // continue 到下一筆，不讓一筆壞資料拖住同一輪其餘文件的通知。
+    try {
+      const data = docSnap.data();
+
+      // 保險起見排除理論上不會有資料、但 rule.txt 裡確實存在的頂層 /journals/{journalId}
+      // 集合（跟 /users/{uid}/journals/{journalId} 是不同路徑）。這個舊集合的文件不會有
+      // journalSubmitNotifiedAt 欄位、正常情況下不可能命中這裡的查詢，這裡純粹是跟
+      // checkComments() 同等級的防禦性寫法，避免萬一真的命中時 parent.parent 相關存取出錯。
+      const userDocRef = docSnap.ref.parent.parent;
+      if (!userDocRef || userDocRef.parent.id !== 'users') continue;
+
+      if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過（不標記已通知，下一輪還會再查到，等有人註冊推播後自然補上）
+
+      // studentName／company 跟 checkReplies() 的 studentName 處理同一套威脅模型：兩者
+      // 皆為月記文件上的欄位，寫入時未經 rule.txt 驗證格式或長度（見 AI_CONTEXT.md
+      // 「exportAllStatsExcel() Excel 公式注入」章節對同一類欄位的完整說明），這裡不是
+      // Excel 儲存格、不是公式注入風險，純粹是避免異常長字串把通知內容撐爆或顯示不完整，
+      // 比照既有的 20 字截斷慣例。
+      const studentNameRaw = data.studentName || '學生';
+      const studentNameSafe = studentNameRaw.length > 20 ? studentNameRaw.slice(0, 20) + '…' : studentNameRaw;
+      const companyRaw = data.company || '';
+      const companySafe = companyRaw.length > 20 ? companyRaw.slice(0, 20) + '…' : companyRaw;
+      const monthLabel = data.month ? `${data.month}月份` : '';
+      const bodyParts = [monthLabel, companySafe].filter(Boolean);
+      const body = bodyParts.length ? `${bodyParts.join('．')}的月記已送出，點此前往審閱` : '有新月記已送出，點此前往審閱';
+
+      // tag 不需要像 checkComments()/checkReplies() 那樣把 ContentAt 編進去做「新一輪」
+      // 區分——這份月記的「第一次繳交」事件從語意上只會發生一次，固定字串尾碼即可，
+      // 不會有「同一份文件的第二次首次繳交」這種情境需要區分。
+      const tag = `${docSnap.ref.path}:submit`;
+      await sendToTokenDocs(adminTokenDocs, {
+        title: `📝 ${studentNameSafe}繳交了新月記`,
+        body,
+        tag,
+        link: `${SITE_BASE_URL}/teacher.html`,
+      });
+      await docSnap.ref.update({ journalSubmitNotifiedAt: new Date().toISOString() });
+      sent++;
+    } catch (e) {
+      console.error(`checkNewJournals: 處理 ${docSnap.ref.path} 時發生例外，已跳過這筆，本輪其餘文件繼續處理：`, e);
+      continue;
+    }
+  }
+  console.log(`checkNewJournals: 本輪通知 ${sent} 筆`);
+}
+
+// ---------------------------------------------------------------------------
+// 主流程：三項檢查各自獨立 try/catch，其中一個因缺索引等原因失敗時，
+// 其餘仍會照常執行；只要任一項失敗，整體以非 0 結束碼結束，
 // 讓 GitHub Actions 的 Actions 分頁能看到這次執行標記為失敗（方便注意到）。
 // ---------------------------------------------------------------------------
 (async () => {
@@ -349,6 +431,13 @@ async function checkReplies() {
   } catch (e) {
     hadError = true;
     console.error('checkReplies 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);
+  }
+
+  try {
+    await checkNewJournals();
+  } catch (e) {
+    hadError = true;
+    console.error('checkNewJournals 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);
   }
 
   process.exit(hadError ? 1 : 0);
