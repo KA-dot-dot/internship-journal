@@ -5531,16 +5531,12 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   const { doc, getDoc } = firebase_funcs;
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
-    // 補存舊評語值，供 saveTeacherComment() 計算 teacherCommentUpdated
-    // 2026-06-29 補修：加入身份比對，防止老師快速切換不同月記時，
-    // 較早的 getDoc .then() 仍對「已被覆寫成新月記的 _currentCommentJournal」設定 oldComment，
-    // 導致 commentChanged 計算基準錯誤（影響 teacherCommentUpdated 旗標）。
-    if (_currentCommentJournal &&
-        _currentCommentJournal.seatNo === seatNo &&
-        _currentCommentJournal.semester === semester &&
-        _currentCommentJournal.month === month) {
-      _currentCommentJournal.oldComment = data.teacherComment || '';
-    }
+    // 2026-07-11 清理：原本這裡會設定 _currentCommentJournal.oldComment（搭配
+    // seatNo/semester/month 三重身份比對，防同分頁快速切換月記時設錯舊評語），
+    // 供 saveTeacherComment() 計算 commentChanged 用。saveTeacherComment() 本身
+    // 同日改版為送出前 await getDoc() 現查伺服器當下值（不只防同分頁快速切換，
+    // 還一併防多裝置/多分頁競態，是舊機制防不到的範圍），不再讀這個快照，這裡的
+    // 賦值因此變成死碼一併移除。詳見 saveTeacherComment() 對應註解與 T-SEC-24。
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
@@ -5557,9 +5553,8 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
     }
     openModal('comment-modal');
   }).catch(() => {
-    // getDoc 失敗時：oldComment 設為空字串（視同「第一次留言」），
-    // saveTeacherComment 的 ?? '' 會做相同處理，此行僅作明確化記錄。
-    if (_currentCommentJournal) _currentCommentJournal.oldComment = '';
+    // 2026-07-11 清理：原本這裡會把 _currentCommentJournal.oldComment 設為空字串，
+    // 理由同上方 .then() 分支的說明——saveTeacherComment() 已不再讀這個欄位，一併移除。
     document.getElementById('comment-modal-textarea').value = '';
     const replyBlock = document.getElementById('comment-modal-student-reply');
     if (replyBlock) replyBlock.style.display = 'none';
@@ -5571,17 +5566,33 @@ async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
   const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
-  // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
-  // 計算 teacherCommentUpdated：只有「之前已有評語、且本次仍有新評語文字」才視為「再次留言/更新評語」
-  const oldComment = _currentCommentJournal.oldComment ?? '';
-  // 2026-06-28 補修：比對新舊內容是否真正不同，
-  // 避免「只讀取回覆後直接儲存」誤判為已更新（State 3→2 錯誤轉換）
-  const commentChanged = comment !== oldComment;
-  const isCommentUpdate = !!(oldComment && comment.length > 0 && commentChanged);
-  const { doc, updateDoc } = firebase_funcs;
+  const { doc, getDoc, updateDoc } = firebase_funcs;
   showLoading();
   try {
-    await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
+    const ref = getTeacherJournalRef(seatNo, semester, month, ownerUid);
+    // 2026-07-11 補修（多裝置/多分頁競態）：oldComment 原本直接讀 Modal 開啟當下由
+    // _openCommentModalWithUid() 存進 _currentCommentJournal.oldComment 的快照。若同一則
+    // 月記同時在另一分頁/裝置被開啟並儲存過（伺服器 teacherComment 已經改變），沿用這個舊
+    // 快照會跟伺服器當下真正的值不同步，讓 commentChanged／isCommentUpdate 算錯，寫入錯誤的
+    // teacherCommentUnread／teacherCommentUpdated／teacherCommentContentAt，造成學生端徽章
+    // 顯示異常狀態（例如該是「有新評語」🔴卻顯示成「評語已更新」🟠）。rule.txt 對老師的寫入
+    // 是 isAdmin() 直接放行、沒有格式或一致性驗證兜底（不像學生端 studentReplyContentAt 有
+    // rule.txt 擋著），完全只能靠前端自己算對，故比照 saveStudentReply() 同款修法：送出前先
+    // await getDoc(ref) 現查伺服器當下值，取代 Modal 開啟當下的舊快照。沒有用 transaction
+    // 完全消除競態窗口（getDoc 之後、updateDoc 之前仍有極短暫窗口可能被別的分頁搶先寫入），
+    // 評估為低機率邊界案例，可接受（跟 saveStudentReply() 的取捨一致）。
+    // _currentCommentJournal.oldComment（原本由 _openCommentModalWithUid() 設定，供這裡
+    // 讀取）已確認不再被任何函式讀取，_openCommentModalWithUid() 對應的賦值程式碼
+    // （.then() 三重身份比對＋.catch() 空字串保底）已一併移除，不留下死碼。
+    const freshSnap = await getDoc(ref);
+    // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
+    // 計算 teacherCommentUpdated：只有「之前已有評語、且本次仍有新評語文字」才視為「再次留言/更新評語」
+    const oldComment = (freshSnap.exists() ? freshSnap.data().teacherComment : '') || '';
+    // 2026-06-28 補修：比對新舊內容是否真正不同，
+    // 避免「只讀取回覆後直接儲存」誤判為已更新（State 3→2 錯誤轉換）
+    const commentChanged = comment !== oldComment;
+    const isCommentUpdate = !!(oldComment && comment.length > 0 && commentChanged);
+    await updateDoc(ref, {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
       // 老師儲存評語時，同步清除學生回覆的未讀旗標
       studentReplyUnread: false,
