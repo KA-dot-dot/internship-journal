@@ -135,6 +135,26 @@ const RISK_TARGETS = [
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },
   { name: 'match /users/{userId}（含 journals 子集合，2026-06-17 那次 bug 的位置）', regex: /match\s+\/users\/\{userId\}/ },
+  // 2026-07-11 補上：match 區塊自我檢查（見下方 findUnmonitoredMatchBlocks()）第一次
+  // 實際執行就抓到這 5 個既有的頂層 match 區塊完全沒被監控，逐一評估後判定全部都要補：
+  // /{document=**} 是全站的預設拒絕後備規則，弱化後果最嚴重（優先度最高）；
+  // /{path=**}/journals/{journalId} 是月記的另一個讀取入口（admin-only 跨路徑讀取）；
+  // /settings/{settingId} 全部操作皆掛 isAdmin()，內容含影響全站的學期/名冊設定；
+  // /deadlines/{deadlineId} 讀取本來就對外公開、敏感度較低，但寫入仍掛 isAdmin()；
+  // /journals/{journalId}（裸的）全部操作皆掛 isAdmin()，值得留意這個路徑目前
+  // 是否還有任何前端程式碼在讀寫，或只是舊架構的遺留。
+  { name: 'match /{document=**}', regex: /match\s+\/\{document=\*\*\}/ },
+  { name: 'match /{path=**}/journals/{journalId}', regex: /match\s+\/\{path=\*\*\}\/journals\/\{journalId\}/ },
+  { name: 'match /settings/{settingId}', regex: /match\s+\/settings\/\{settingId\}/ },
+  { name: 'match /deadlines/{deadlineId}', regex: /match\s+\/deadlines\/\{deadlineId\}/ },
+  // 這條刻意錨定實際縮排（4 個空白）：rule.txt 裡 match /journals/{journalId} 這段文字
+  // 出現兩次——一次是這裡要監控的頂層區塊（4 空白縮排），另一次是巢狀在
+  // /users/{userId} 底下的區塊（6 空白縮排，文字完全相同，那個已經透過父層
+  // /users/{userId} 監控涵蓋，不需要也不應該重複列出）。不錨定縮排的話，regex 會
+  // 命中文件裡「第一個出現」的那個（剛好也是這裡要的那個，純屬巧合），一旦未來
+  // rule.txt 內容順序調整，就可能誤抓到錯的區塊，所以直接錨定縮排消除這個歧義，
+  // 不依賴目前的文件順序。
+  { name: 'match /journals/{journalId}（頂層，非巢狀在 /users/{userId} 底下的那個）', regex: /^ {4}match\s+\/journals\/\{journalId\}/m },
 ];
 
 // ── 已知危險寫法掃描 ─────────────────────────────────────────────
@@ -158,13 +178,19 @@ const DANGER_PATTERNS = [
   },
   {
     desc:
-      '同一種 !keys().hasAny([...]) 誤用，發生在 teacherCommentContentAt／studentReplyContentAt 這兩個欄位上' +
-      '（老師評語／學生回覆「內容真正改變」那一刻的時間戳，供推播通知服務判斷是否已推播過、避免內容沒變卻重複推播用）。' +
-      'rule.txt 對這兩個欄位目前用的是 .get(field, default) == default（CREATE 分支，要求須為初始空值）或 ' +
-      '.get(field, default) == resource.data.get(field, default)（一般編輯分支，要求維持原值不變）這類寫法，' +
-      '跟前兩條規則涵蓋的欄位屬於同一種風險（誤寫成 hasAny() 檢查「不存在」，會放行不該通過的寫入，或擋下正常寫入)，' +
-      '所以另外列一條規則掃描，不依賴人工在區塊 diff 裡自己看出來。',
-    regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentContentAt|studentReplyContentAt)[^\]]*\]\s*\)/,
+      '同一種 !keys().hasAny([...]) 誤用，發生在 teacherCommentContentAt／studentReplyContentAt／' +
+      'journalSubmitNotifiedAt 這幾個欄位上（老師評語／學生回覆「內容真正改變」那一刻的時間戳、' +
+      '以及學生「第一次繳交月記」是否已推播通知過老師的標記，皆供推播通知服務判斷是否已推播過、' +
+      '避免內容沒變卻重複推播用）。rule.txt 對這幾個欄位目前用的是 .get(field, default) == default' +
+      '（CREATE 分支，要求須為初始空值）或 .get(field, default) == resource.data.get(field, default)' +
+      '（一般編輯分支，要求維持原值不變）這類寫法，跟前兩條規則涵蓋的欄位屬於同一種風險（誤寫成 ' +
+      'hasAny() 檢查「不存在」，會放行不該通過的寫入，或擋下正常寫入)，所以另外列一條規則掃描，' +
+      '不依賴人工在區塊 diff 裡自己看出來。' +
+      '2026-07-11 補上 journalSubmitNotifiedAt：這是新增欄位跟著同一種模式（新增了屬於已知危險' +
+      '類別的欄位，監控清單卻沒有同步跟著擴充）又發生一次的例子——這次落在 DANGER_PATTERNS，' +
+      '不是 RISK_TARGETS，跟同一天稽核 check-rule-diff.js 本身找到的函式／match 區塊漏洞是同一個' +
+      '根本問題的不同展現形式。',
+    regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentContentAt|studentReplyContentAt|journalSubmitNotifiedAt)[^\]]*\]\s*\)/,
   },
 ];
 
@@ -175,6 +201,105 @@ function scanDangerPatterns(content) {
     if (m) hits.push({ desc: p.desc, snippet: m[0] });
   }
   return hits;
+}
+
+// ── 自我檢查：rule.txt 有沒有頂層 function 宣告沒被 RISK_TARGETS 監控到 ──────
+// 背景：這是同一種模式第三次發生，且三次都是事後稽核才抓到，不是新增當下就發現：
+//   - 2026-07-03：DANGER_PATTERNS 只涵蓋舊欄位，2026-06-26～28 新增的 studentReply
+//     家族欄位漏了。
+//   - 2026-07-04：RISK_TARGETS 監控了三個 admin 輔助函式，卻沒把 /admins/{adminId}
+//     這個 match 區塊本身納入。
+//   - 2026-07-10：RISK_TARGETS 監控了 fcmTokens 的呼叫端（因為巢狀在已監控的
+//     /admins/{adminId}／/users/{userId} 區塊裡才被連帶抓到），卻沒把新增的頂層輔助
+//     函式 validFcmTokenWrite() 這個函式定義本體納入。
+// 與其每次等外部稽核才補一條，這裡改成腳本自己掃描 rule.txt 裡所有頂層 function 宣告，
+// 逐一確認 RISK_TARGETS 裡有沒有任何一條規則會命中它；找不到就直接示警，把「記得補監控
+// 條目」從人工習慣，變成腳本自動檢查、擋下部署的事。
+//
+// 逐行處理並跳過整行註解（trim 後以 // 開頭），避免像 S-SEC-08／T-SEC-30 那種
+// 「regex 命中說明性註解文字本身、而非真正的程式碼」的假訊號——這份專案的函式內部
+// 常常會有長篇中文註解說明「這個函式是做什麼的」，若不排除註解行，容易誤判或漏判。
+function findDeclaredFunctions(content) {
+  const results = [];
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (line.startsWith('//')) continue;
+    const m = /^function\s+(\w+)\s*\(/.exec(line);
+    if (m) results.push({ name: m[1], rawLine });
+  }
+  return results;
+}
+
+function findUnmonitoredFunctions(content) {
+  const declared = findDeclaredFunctions(content);
+  // 用「這一行實際的原始文字，看有沒有任何 RISK_TARGETS 的 regex 會命中它」，而不是
+  // 重新合成一行乾淨的 function NAME( 字串——用合成字串曾經在開發這個功能時踩到一個坑：
+  // 如果某條 RISK_TARGETS 的 regex 為了消歧義而錨定了實際縮排（例如下面 match 區塊
+  // 檢查那條，/journals/{journalId} 跟巢狀在 /users/{userId} 底下的同名區塊文字完全
+  // 相同，只能靠縮排分辨），合成字串會遺失縮排資訊，導致「明明已經補了對應條目，
+  // 自我檢查卻還是誤報成沒監控到」。用原始行文字比對，判斷的才是「這行真正的內容，
+  // 送進 extractBlock() 時真的會不會被同一條 regex 抓到」，跟主程式實際比對區塊時
+  // 用的邏輯是同一套依據。
+  return declared
+    .filter(({ rawLine }) => !RISK_TARGETS.some((t) => t.regex.test(rawLine)))
+    .map(({ name }) => name);
+}
+
+// ── 自我檢查：rule.txt 有沒有頂層 match 區塊沒被 RISK_TARGETS 監控到 ──────────
+// 跟上面的函式自我檢查是同一種模式，補的是 2026-07-04 那次事故真正對應的類型——
+// 那次漏掉的是 /admins/{adminId} 這個 match 區塊本身，不是函式。函式檢查只解決了
+// 一半，match 區塊這一半如果不比照處理，往後同一種疏漏還是可能在「新增 match 區塊」
+// 這條路徑上重演，只是這次不是靠外部稽核事後抓到，而是完全沒人發現。
+//
+// 「頂層」定義為：直接掛在 match /databases/{database}/documents { ... } 這個外層
+// 區塊底下的 match 宣告，不含巢狀在其他 match 區塊裡面的（例如 /admins/{adminId}
+// 底下的 /fcmTokens/{tokenId}）——那些巢狀區塊只要父層區塊有被監控，diff 比對父層時
+// 用括號配對抓出的內容本來就會包含它們，不需要也不應該重複列出來額外監控。
+//
+// 做法：逐行掃描，用「進到這一行 match 宣告的開括號之前，目前的括號深度」判斷這行
+// 是不是直接掛在 documents 區塊底下（深度剛好等於 documents 區塊本身的深度 + 1）。
+// 深度計算採用跟既有 extractBlock() 一致的做法——整行原始字元都算進去，不特別排除
+// 註解行裡的括號；但「這一行算不算 match 宣告」的判斷會先跳過整行註解，避免像
+// S-SEC-08／T-SEC-30 那種「regex 命中說明性註解文字本身」的假訊號。
+function findTopLevelMatchBlocks(content) {
+  const lines = content.split('\n');
+  let depth = 0;
+  let documentsBlockDepth = null; // 找到 documents 區塊那一行時，記錄「進入前」的深度
+  const targets = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const depthBefore = depth;
+
+    if (!line.startsWith('//')) {
+      if (documentsBlockDepth === null && /^match\s+\/databases\/\{database\}\/documents\b/.test(line)) {
+        documentsBlockDepth = depthBefore;
+      } else if (documentsBlockDepth !== null && depthBefore === documentsBlockDepth + 1) {
+        const m = /^match\s+(\S+)\s*\{/.exec(line);
+        if (m) targets.push({ path: m[1], rawLine });
+      }
+    }
+
+    const opens = (rawLine.match(/\{/g) || []).length;
+    const closes = (rawLine.match(/\}/g) || []).length;
+    depth += opens - closes;
+  }
+
+  return targets;
+}
+
+function escapeForRegexDisplay(str) {
+  // 也要跳脫 /，否則印出來的建議字串塞進 /.../ regex literal 時，中間未跳脫的 /
+  // 會被誤判成提前結束 regex，貼上去會直接語法錯誤——既有 RISK_TARGETS 裡的寫法
+  // （例如 /match\s+\/admins\/\{adminId\}/）本來就都有跳脫 /，這裡的建議輸出要跟著一致。
+  return str.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+function findUnmonitoredMatchBlocks(content) {
+  const targets = findTopLevelMatchBlocks(content);
+  return targets
+    .filter(({ rawLine }) => !RISK_TARGETS.some((t) => t.regex.test(rawLine)))
+    .map(({ path }) => path);
 }
 
 // ── 主程式 ──────────────────────────────────────────────────────
@@ -229,6 +354,39 @@ function main() {
       console.log('  說明：' + hit.desc);
       console.log('');
     }
+  }
+
+  const unmonitoredFns = findUnmonitoredFunctions(newContent);
+  if (unmonitoredFns.length > 0) {
+    hasRiskChange = true;
+    console.log('⚠️  偵測到 rule.txt 有頂層 function 宣告，但 RISK_TARGETS 沒有任何一條規則會監控到它：\n');
+    for (const name of unmonitoredFns) {
+      console.log(`  - function ${name}()`);
+    }
+    console.log('');
+    console.log('  這是同一種模式第三次發生（2026-07-03／2026-07-04／2026-07-10 各一次，皆是事後');
+    console.log('  稽核才抓到）：新增了會影響安全性的函式，監控清單卻沒有同步跟著擴充。請在');
+    console.log('  RISK_TARGETS 補上對應條目（{ name: \'function ' + (unmonitoredFns[0] || 'xxx') + '()\', regex: /function\\s+' + (unmonitoredFns[0] || 'xxx') + '\\s*\\(/ }' + '）後再繼續，');
+    console.log('  或確認此函式風險極低、暫不需要監控後加 --confirm。');
+    console.log('');
+  }
+
+  const unmonitoredMatches = findUnmonitoredMatchBlocks(newContent);
+  if (unmonitoredMatches.length > 0) {
+    hasRiskChange = true;
+    console.log('⚠️  偵測到 rule.txt 有頂層 match 區塊，但 RISK_TARGETS 沒有任何一條規則會監控到它：\n');
+    for (const matchPath of unmonitoredMatches) {
+      console.log(`  - match ${matchPath}`);
+    }
+    console.log('');
+    console.log('  這是同一種「新增東西時監控清單忘記同步擴充」的模式，2026-07-04 的');
+    console.log('  /admins/{adminId} 就是這一類（match 區塊本身沒被監控，不是函式）。請在');
+    console.log('  RISK_TARGETS 補上對應條目，例如：');
+    for (const matchPath of unmonitoredMatches) {
+      console.log(`    { name: 'match ${matchPath}', regex: /match\\s+${escapeForRegexDisplay(matchPath)}/ },`);
+    }
+    console.log('  或逐一評估後，確認某些區塊風險極低、暫不需要監控，加 --confirm 略過。');
+    console.log('');
   }
 
   console.log('══════════════════════════════════════');
