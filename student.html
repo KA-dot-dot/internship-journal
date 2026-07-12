@@ -914,7 +914,19 @@ function isStandaloneApp() {
 
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
-  sessionStorage.setItem('studentRedirectLoginPending', '1');
+  // 2026-07-12 補修：pending 旗標改存 localStorage（原為 sessionStorage）。
+  // 根因：iOS standalone PWA 在導去 accounts.google.com 再導回來的這段期間，
+  // 系統可能為了省記憶體回收/重載背景中的 standalone 網頁應用（跟一般 Safari
+  // 分頁不同，standalone 分頁沒有分頁列保護，更容易被回收），回來後等於是一次
+  // 全新的頁面載入，sessionStorage 會被清空——但 setPersistence(browserLocalPersistence)
+  // 已證實 localStorage 在同樣情境下能存活（PWA 重開不需重新登入即是證據）。
+  // 若這個旗標用 sessionStorage 存，遇到上述情境時 handleRedirectResult() 開頭的
+  // 旗標檢查會誤判「沒有觸發過 redirect」而直接 return，完全不會呼叫
+  // getRedirectResult()——即使 Google 那邊登入其實已經成功，也永遠不會被讀回來，
+  // 畫面停在登入頁不動。這正是 iOS 版「APP（加到主畫面）卡登入畫面，但網頁版
+  // Safari 正常」這個回報最貼合的成因：一般 Safari 分頁沒有這種背景回收問題，
+  // sessionStorage 全程存活；Android 的 PWA 實作也不會這樣回收，同樣不受影響。
+  localStorage.setItem('studentRedirectLoginPending', '1');
   await signInWithRedirect(auth, provider);
 }
 
@@ -1182,12 +1194,20 @@ async function handleRedirectResult() {
   // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
   // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
   // 呼叫會拋出 "missing initial state" 錯誤。
-  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
+  // 2026-07-12 補修：判斷改讀 localStorage（原為 sessionStorage）。iOS standalone
+  // PWA 在導去 Google 登入、再導回來的這段期間，系統可能回收/重載背景中的
+  // standalone 網頁應用，回來後等於全新頁面載入，sessionStorage 會被清空——但
+  // localStorage 在同樣情境下已證實能存活（見 startStudentRedirectLogin() 的完整
+  // 說明；setPersistence(browserLocalPersistence) 也是基於同樣理由選 localStorage）。
+  // 這正是 iOS 版「APP 卡登入畫面、但網頁版 Safari 正常」的成因：sessionStorage
+  // 被清空後，這裡原本會誤判「沒有觸發過 redirect」而直接 return，即使 Google
+  // 那邊其實登入成功，也永遠不會呼叫 getRedirectResult() 把結果讀回來。
+  if (!localStorage.getItem('studentRedirectLoginPending')) return;
   // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
   // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
   // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
   if (isStoragePartitionedEnv()) {
-    sessionStorage.removeItem('studentRedirectLoginPending');
+    localStorage.removeItem('studentRedirectLoginPending');
     toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
     return;
   }
@@ -1197,7 +1217,7 @@ async function handleRedirectResult() {
   try {
     const { auth, getRedirectResult } = window._auth;
     const result = await getRedirectResult(auth);
-    sessionStorage.removeItem('studentRedirectLoginPending');
+    localStorage.removeItem('studentRedirectLoginPending');
     if (result?.user && !currentUser) {
       showLoading();
       await handleLoginUser(result.user);
@@ -1206,7 +1226,7 @@ async function handleRedirectResult() {
       _loginHandling = false;
     }
   } catch(e) {
-    sessionStorage.removeItem('studentRedirectLoginPending');
+    localStorage.removeItem('studentRedirectLoginPending');
     _loginHandling = false;
     hideLoading();
     console.error('Redirect 登入失敗', e);
