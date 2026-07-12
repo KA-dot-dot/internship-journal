@@ -2050,11 +2050,30 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
 }
 
 // ============ Google 老師登入 ============
+// isStandaloneApp() 本身不只給登入邏輯用，PDF 匯出（exportSemesterPDF()／exportStudentPDF()）
+// 也靠它判斷是否要避免開新分頁，維持不動。
+//
+// 2026-07-12 補修：拿掉「standalone 一律先走 signInWithRedirect」這條分支，改為跟
+// student.html 完全同一套修法。原本這裡的寫法（standalone 一律先走 redirect）是
+// 2026-07-09 student.html 那次修正時參考的原始版本，但這個判斷從未經過實機驗證。
+// 用真實裝置測試後發現兩件事：①在學生本人的新機（iOS 18.7／Safari 26.5）上，
+// signInWithPopup() 在 standalone 模式下完全正常，反而是 signInWithRedirect()
+// 讀不到登入結果（getRedirectResult() 成功回傳但 result.user 永遠是空值——Firebase Auth
+// 官方已知限制：authDomain 跨網域，Safari 16.1+ 會封鎖跨網域 storage 存取）；
+// ②在老師自己的舊機（iOS 15.8.5／Safari 15.6.7）上，情況完全相反——signInWithPopup()
+// 卡住約 30 秒後拋出 auth/network-request-failed，但 signInWithRedirect() 完全正常。
+// 兩台裝置的結果相反，無法只選一個當預設值，解法是 googleTeacherLogin() 一律先試
+// popup，失敗（除了使用者自己取消）就自動 fallback 到 redirect，見該函式內註解。
+// 完整背景與證據見 student.html 對應位置的註解（同一次修正，兩份檔案同步處理）。
 function isStandaloneApp() {
   return window.matchMedia?.('(display-mode: standalone)')?.matches ||
     window.navigator.standalone === true;
 }
 
+// signInWithPopup() 失敗時的 fallback（見 googleTeacherLogin()）。
+// 2026-07-12 起不再是 standalone 模式的預設路徑，而是任何裝置只要 popup 失敗
+// （不論 standalone 與否）就會呼叫到這裡；某些裝置上這正是唯一能成功登入的路徑
+// （見上方 isStandaloneApp() 註解的舊機案例），不能拿掉。
 async function startTeacherRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('teacherRedirectLoginPending', '1');
@@ -2120,10 +2139,9 @@ async function googleTeacherLogin() {
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
-    if (isStandaloneApp()) {
-      await startTeacherRedirectLogin();
-      return;
-    }
+    // 2026-07-12 補修：不再對 standalone 特別分支走 redirect，一律先試 popup。
+    // 原因見上方 isStandaloneApp() 註解——新舊機在 popup／redirect 上的表現正好相反，
+    // 沒有哪一個能當作 standalone 的預設值，只能兩個都試、讓失敗的自動改走另一條。
     const { auth, provider, signInWithPopup } = window._auth;
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
@@ -2131,16 +2149,19 @@ async function googleTeacherLogin() {
     await handleTeacherLoginUser(result.user);
   } catch(e) {
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
-    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
-      try {
-        await startTeacherRedirectLogin();
-      } catch(re) {
-        toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
-      }
-      return;
+    // 2026-07-12 補修：原本只把 auth/popup-blocked／auth/operation-not-supported-in-this-environment
+    // 兩種錯誤碼視為「popup 不可用，改走 redirect」，但用老師自己的舊機（iOS 15.8.5／
+    // Safari 15.6.7）實測後發現，popup 在這台裝置的 standalone 模式下卡住約 30 秒才
+    // 拋出 auth/network-request-failed，不是原本列舉的兩種錯誤碼。與其每次實測到新的
+    // 錯誤碼就補一條 if，改成「除了使用者主動取消以外，popup 失敗一律自動 fallback 到
+    // redirect」，涵蓋未來可能出現、目前還沒實測到的其他失敗代碼。
+    console.warn('signInWithPopup() 失敗，改嘗試 signInWithRedirect() fallback：', e.code, e.message);
+    try {
+      await startTeacherRedirectLogin();
+    } catch(re) {
+      console.error('signInWithRedirect() fallback 也失敗', re);
+      toast('登入失敗：請確認瀏覽器未封鎖彈出視窗，或改用 Chrome 開啟', 'error');
     }
-    console.error('Google 登入失敗', e);
-    toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
   } finally {
     hideLoading();
   }
