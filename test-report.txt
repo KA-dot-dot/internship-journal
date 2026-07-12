@@ -1,6 +1,6 @@
 ══════════════════════════════════════════════════
 產學班實習月記系統 自動化測試
-執行時間：2026/7/12 下午5:00:02
+執行時間：2026/7/12 下午6:55:03
 對應 AI_CONTEXT.md 版本：2026-07-11
 ══════════════════════════════════════════════════
 
@@ -23,14 +23,8 @@
    ✅ Firebase SDK 登入成功（uid: YYltObOqHVZtmW5DhhMPjVT8vs93）
    🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"YYltObOqHVZtmW5DhhMPjVT8vs93","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n "}
    🔍 Console（最後 8 筆）：
-      [console.log] [PWADBG] handleRedirectResult() 開始執行
-      [console.log] [PWADBG] ❌ 沒有 sessionStorage pending flag，提早 return（不會呼叫 getRedirectResult）
       [console.log] ✅ Firebase 連線成功
       [console.warning] Service Worker registration blocked by Playwright
-      [console.log] [PWADBG] onAuthStateChanged 觸發，user=null  currentUser已存在=false
-      [console.log] [PWADBG] onAuthStateChanged 觸發，user=YYltObOqHVZtmW5DhhMPjVT8vs93  currentUser已存在=false
-      [console.log] [PWADBG] 查詢 studentBindings/test-student_tcivs_tc_edu_tw
-      [console.log] [PWADBG] ✅ 登入資料齊全，呼叫 enterApp()
    ✅ 登入流程成功，app 已顯示
    ✅ session-student.json 已產生（SDK 原生登入模式 v6）
    S-07 以後的學生功能測試將完整執行
@@ -112,7 +106,7 @@
 ──────────────────────────────────────────────────
 學生端 測試結果：65/65 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：21.0s
+耗時：21.6s
 
 ══════════════════════════════════════════════════
 老師端測試（teacher.html）
@@ -176,16 +170,16 @@
 ──────────────────────────────────────────────────
 老師端 測試結果：53/53 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：11.0s
+耗時：10.9s
 
 ══════════════════════════════════════════════════
 整體測試結果
 ══════════════════════════════════════════════════
-✅ 學生端：65/65 通過（21.0s）
-✅ 老師端：53/53 通過（11.0s）
+✅ 學生端：65/65 通過（21.6s）
+✅ 老師端：53/53 通過（10.9s）
 
 合計：118/118 通過，0 失敗
-總耗時：68.3s
+總耗時：68.5s
 ══════════════════════════════════════════════════
 
 報告已儲存至：test-report.txt
