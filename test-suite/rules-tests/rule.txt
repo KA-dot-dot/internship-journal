@@ -51,20 +51,6 @@ service cloud.firestore {
           && request.resource.data.protected == true
         );
     }
-    // 2026-07 補修（稽核 #8）：fcmTokens 文件寫入原本完全沒有欄位型別/大小驗證，
-    // 前端（student.html／teacher.html 的 initPushNotifications()）固定只會寫入
-    // createdAt（ISO 字串）與截斷至 200 字的 userAgent（JS 端截斷，見
-    // AI_推播系統說明.md 3.1 節），但因規則本身沒有驗證，理論上使用者可直接呼叫
-    // Firestore API，在自己的 uid/adminId 路徑下寫入任意型別或超長字串。攻擊範圍天生
-    // 侷限在寫入者自己的裝置清單（get/list 皆固定 false，讀取只透過 Admin SDK），
-    // 不會波及他人，這裡純粹是讓規則本身也能擋下這類寫入，不只依賴前端行為維持乾淨。
-    // hasOnly() 同時鎖住欄位清單，避免夾帶其他未預期欄位。
-    function validFcmTokenWrite() {
-      return request.resource.data.keys().hasOnly(['createdAt', 'userAgent'])
-        && request.resource.data.createdAt is string
-        && request.resource.data.userAgent is string
-        && request.resource.data.userAgent.size() <= 200;
-    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -81,12 +67,7 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        // 2026-07 補修（稽核 #8）：create/update 額外套用 validFcmTokenWrite() 做欄位
-        // 型別/大小驗證；delete 刻意分開一條、不呼叫 validFcmTokenWrite()——delete 時
-        // request.resource 為 null，呼叫依賴 request.resource.data 的函式會直接評估為
-        // 不通過，等同誤擋刪除本身。
-        allow create, update: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey()) && validFcmTokenWrite();
-        allow delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
+        allow create, update, delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
         allow get, list: if false;
       }
     }
@@ -158,16 +139,6 @@ service cloud.firestore {
             // 同屬回覆欄位家族，建立時同樣限制為初始空值（比照 teacherCommentContentAt 的設計，
             // 供 notify-service 判斷學生回覆是否已推播用途）
             && request.resource.data.get('studentReplyContentAt', null) == null
-            // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬
-            // 標記欄位（notify-service/send-push-notifications.js 的 checkNewJournals() 寫入），
-            // 建立時同樣限制為初始空值 null。這裡的 null 不只是信任邊界考量（防止學生自己先
-            // 塞一個值假裝已經推播過，藉此讓自己的第一次繳交完全不通知老師），還兼職當
-            // 「哨兵值」用：Firestore 的 where(field,'==',null) 只會比對「欄位存在且為 null」
-            // 的文件，完全不會比對到「欄位根本不存在」的文件——這代表這個功能上線之前就
-            // 存在的所有歷史月記（從來沒有這個欄位）永遠不會被 checkNewJournals() 的查詢撈到，
-            // 不需要另外寫一次性遷移腳本、也不需要硬記一個部署日期當分界線。完整說明見
-            // notify-service/send-push-notifications.js 內 checkNewJournals() 開頭的註解。
-            && request.resource.data.get('journalSubmitNotifiedAt', null) == null
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -195,17 +166,6 @@ service cloud.firestore {
             && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
             && request.resource.data.get('studentReplyAt', null) == resource.data.get('studentReplyAt', null)
             && request.resource.data.get('studentReplyContentAt', null) == resource.data.get('studentReplyContentAt', null)
-            // 2026-07 新增：journalSubmitNotifiedAt 語意上跟 studentReplyContentAt 同一類——
-            // 一旦被後端寫成非 null（代表這份月記的「第一次繳交」通知已經送出），學生之後
-            // 任何一般編輯都不該把它動到，否則等同讓學生可以無限次把這個欄位打回 null，
-            // 逼 notify-service 每一輪排程都重新推播一次「有新月記」給全體老師（等同一種
-            // 學生自己就能觸發的通知洗版管道，比單純造成一次誤判更值得擋）。故要求一般編輯
-            // 時必須「維持原值不變」，不像 teacherCommentContentAt 是「必須變成 null」——
-            // 兩者要求本質不同，理由見 AI_推播系統說明.md 對這兩類欄位的既有區分說明。
-            // student.html 的 saveJournal() 只在偵測到「這是第一次繳交」（isFirstSubmit）
-            // 時才會明確寫入 null，一般編輯完全不帶這個欄位，靠 merge:true 天然滿足這裡
-            // 「維持不變」的要求，不需要額外顯式寫入舊值。
-            && request.resource.data.get('journalSubmitNotifiedAt', null) == resource.data.get('journalSubmitNotifiedAt', null)
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()
@@ -243,26 +203,6 @@ service cloud.firestore {
                 request.resource.data.studentReply != resource.data.get('studentReply', null)
                 && request.resource.data.studentReplyUnread == true
                 && request.resource.data.studentReplyContentAt is string
-                // 2026-07 補修：studentReplyContentAt 先前只驗證型別（is string），沒有任何
-                // 格式或時間合理性檢查，可被直接呼叫 Firestore API 的使用者塞入任意字串（含
-                // 未來時間），讓 notify-service 的 alreadyNotified() 永遠判定「尚未通知」，
-                // 造成同一則回覆每 5 分鐘重複推播給全體老師/管理員（若該月記已有既有評語，
-                // executeBatchReview() 的篩選條件不會處理到它，只能老師逐筆手動開評語 Modal
-                // 才能停止）。teacherCommentContentAt 不受影響、不需要同樣的修法——它完全經
-                // isAdmin() 寫入，跟 teacherComment 本身沒有內容驗證屬於同一信任邊界。
-                // Firestore Rules 沒有能把任意字串解析成 Timestamp 的函式，無法直接拿字串去
-                // 跟 request.time 比較範圍，只能做到兩件事：①格式驗證，擋掉不符合
-                // localISOStr() 輸出格式（'YYYY-MM-DDTHH:mm:ss'，不含時區)的任意字串；
-                // ②要求跟同一次寫入的 studentReplyAt 完全相同——student.html 的
-                // saveStudentReply() 已同步修正為只呼叫一次 localISOStr() 並讓兩個欄位共用
-                // 同一個字串，正常寫入必定相等。這無法阻止有心人把兩個欄位「一起」改成同一個
-                // 未來時間，但堵死了「只竄改 studentReplyContentAt、studentReplyAt 維持正常」
-                // 這種完全不會被使用者自己發現的隱性攻擊——任何竄改都會連帶讓學生自己「我的
-                // 回覆」時間泡泡顯示明顯錯誤的日期，不再是無聲無息。完整解法需把這個欄位改成
-                // 用 serverTimestamp() 寫入的真正 Firestore Timestamp 型別（才能用
-                // request.time 做範圍限制），屬於較大範圍的改動，本次不處理。
-                && request.resource.data.studentReplyContentAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
-                && request.resource.data.studentReplyContentAt == request.resource.data.studentReplyAt
               ) || (
                 // 內容沒變：studentReplyUnread／studentReplyContentAt 皆須維持原值不變
                 request.resource.data.studentReply == resource.data.get('studentReply', null)
@@ -282,10 +222,7 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        // 2026-07 補修（稽核 #8）：同上方 /admins/{adminId}/fcmTokens 的做法，
-        // create/update 套用 validFcmTokenWrite()，delete 分開一條不呼叫它。
-        allow create, update: if schoolUser() && request.auth.uid == userId && validFcmTokenWrite();
-        allow delete: if schoolUser() && request.auth.uid == userId;
+        allow create, update, delete: if schoolUser() && request.auth.uid == userId;
         allow get, list: if false;
       }
     }

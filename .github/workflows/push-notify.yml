@@ -1,0 +1,66 @@
+name: 推播通知輪詢（老師評語／學生回覆）
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 每5分鐘一次；repo 是公開的，GitHub Actions 分鐘數不限，不用擔心用量
+  workflow_dispatch: {}      # 方便手動觸發測試
+
+# 這支工作流程只需要讀取 repo 內容來跑腳本，不需要對 repo 本身做任何寫入
+# （所有 Firestore 讀寫都是透過 FIREBASE_SERVICE_ACCOUNT_JSON 這個 Secret，
+# 跟 GITHUB_TOKEN 完全無關），故縮到最小權限。
+permissions:
+  contents: read
+
+# 2026-07 修正：手動 Run workflow 跟排程（每5分鐘一次）如果剛好時間重疊，兩個執行緒
+# 會各自獨立查一次 Firestore，都看到「還沒通知過」而各自送一次，導致同一則評語/回覆
+# 收到兩次重複推播（實測發現的真實案例）。加上 concurrency 群組，同一個 group 名稱
+# 同一時間只允許一個在跑；cancel-in-progress 設 false，代表新觸發的那次會排隊等前一個
+# 執行完再開始，而不是把還在跑到一半的那個強制中止（中止到一半可能來不及把
+# notifiedAt 寫回去，反而更容易造成同一則被漏標、下次又重送)。
+concurrency:
+  group: push-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5   # 排程本身每5分鐘觸發一次；設上限避免單次執行意外卡死、跟下一輪重疊排隊
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: notify-service
+        run: npm install
+
+      # 2026-07（稽核修正）：send-push-notifications.js 先前完全沒有任何自動化測試覆蓋，
+      # 是 AI_推播系統說明.md 第六節 #5 點名的問題（2026-07-10 更正：先前這裡誤寫成
+      # 「AI_CONTEXT.md『推播通知』章節第 4 節⑤」，AI_CONTEXT.md 從未有過這個章節）。
+      # parseAsInstant()／alreadyNotified()／emailToDocId() 已抽到 notify-logic.js 並補上
+      # test-notify-logic.js，不需要任何 Secret 或網路連線即可執行，這裡在真正送出
+      # 推播之前先跑一次，任何邏輯回歸（例如時區換算或時間比較被改壞）會讓這個 job
+      # 直接失敗、不會繼續往下送出可能有問題的通知，也會在 Actions 分頁顯眼地標記失敗。
+      - name: 執行 notify-service 邏輯單元測試（不需要 Secret，純邏輯驗證）
+        working-directory: notify-service
+        run: npm test
+
+      - name: Send pending push notifications
+        working-directory: notify-service
+        run: node send-push-notifications.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
+      # 2026-07（稽核修正 #6）：先前只有 canary.yml（系統A／Layer 2）在失敗時會推 Discord
+      # 通知，這支排程本身輪詢默默壞掉不會有人發現，只能等有人剛好翻 Actions 分頁才知道。
+      # 補上同樣的失敗通知 step；用途不同於 test-suite/notify-discord.js（那支解析
+      # Playwright 產生的 test-report.txt），這裡沒有對應報告可解析，改用
+      # notify-service/notify-discord.js（簡短固定文字＋本次執行連結，見該檔案註解）。
+      - name: 推播失敗時推送 Discord 通知
+        if: failure()
+        working-directory: notify-service
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: node notify-discord.js

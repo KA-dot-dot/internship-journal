@@ -1,0 +1,185 @@
+══════════════════════════════════════════════════
+產學班實習月記系統 自動化測試
+執行時間：2026/7/12 上午7:50:23
+對應 AI_CONTEXT.md 版本：2026-07-11
+══════════════════════════════════════════════════
+
+🤖 偵測到老師帳號 .env 設定，自動產生老師 session...
+
+🔑 自動登入測試老師帳號：test-teacher@tcivs.tc.edu.tw
+   ✅ Firebase SDK 登入成功（uid: lJQpjeeehog177mCrW2IKwzvdE43）
+   🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"lJQpjeeehog177mCrW2IKwzvdE43","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n\n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n"}
+   🔍 Console（最後 8 筆）：
+      [console.log] ✅ Firebase 連線成功
+      [console.warning] Service Worker registration blocked by Playwright
+   ✅ 登入流程成功，app 已顯示
+   ✅ session-teacher.json 已產生（SDK 原生登入模式 v1）
+   老師端測試將完整執行
+
+
+🤖 偵測到學生帳號 .env 設定，自動產生學生 session...
+
+🔑 自動登入測試學生帳號：test-student@tcivs.tc.edu.tw
+   ✅ Firebase SDK 登入成功（uid: YYltObOqHVZtmW5DhhMPjVT8vs93）
+   🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"YYltObOqHVZtmW5DhhMPjVT8vs93","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n "}
+   🔍 Console（最後 8 筆）：
+      [console.log] ✅ Firebase 連線成功
+      [console.warning] Service Worker registration blocked by Playwright
+   ✅ 登入流程成功，app 已顯示
+   ✅ session-student.json 已產生（SDK 原生登入模式 v6）
+   S-07 以後的學生功能測試將完整執行
+
+
+══════════════════════════════════════════════════
+學生端測試（student.html）
+══════════════════════════════════════════════════
+
+【學生端】開始測試
+  ✅ S-01 學生端頁面正常載入
+  ✅ S-02 主頁儀表板或提示訊息出現
+  ✅ S-03 切換到填寫月記
+  ✅ S-04 切換到歷史月記
+  ✅ S-05 切換到匯出
+  ✅ S-06 切回主頁
+
+  [學生帳號 session 存在，開啟功能測試頁面]
+  ✅ S-07 填寫月記頁面元素存在（學生帳號）
+  ✅ S-08 截止日資訊有載入（學生帳號）
+  ✅ S-09 填寫月記表單欄位存在且可見（學生帳號）
+  ✅ S-10 歷史月記頁面載入（學生帳號）
+  ✅ S-11 歷史月記有資料或空白提示（學生帳號）
+  ✅ S-12 匯出頁面有載入（學生帳號）
+  ✅ S-13 匯出頁面有 PDF 下載按鈕（學生帳號）
+  ✅ S-14 PDF 匯出按鈕可見（學生帳號）
+  ✅ S-07B 登入後無迴圈（學生帳號）
+  ✅ S-09B 學生帳號資料正確渲染（姓名不含 undefined）
+  ✅ S-WRITE-02 月記儲存按鈕可見且未被鎖定（學生帳號）
+  ✅ S-WRITE-REAL Firestore CREATE 規則驗證（學生身份 REST 直接寫入）
+  ✅ S-RULES-01 studentBindings uid 補寫權限（登入後 uid 回填）
+  ✅ S-RULES-02 journals UPDATE 正常路徑（學生修改已有月記）
+  ✅ S-RULES-03 journals CREATE 安全性：teacherComment 偽造應被拒（403）
+  ✅ S-RULES-04 journals UPDATE 安全性：teacherReviewed 偽造應被拒（403）
+  ✅ S-RULES-05 journals DELETE 權限（學生可刪除自己的月記）
+  ✅ S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）
+  ✅ S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）
+  ✅ S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）
+  ✅ S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）
+  ✅ S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）
+  ✅ S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）
+  ✅ S-SEC-26 Firestore Rules：學生不能把 teacherCommentUpdated 設為 true（第二分支）
+  ✅ S-SEC-01 月記卡不執行惡意 HTML（escapeHtml 驗證）
+  ✅ S-SEC-02 jsArg() 正確 escape onclick 參數
+  ✅ S-SEC-03 saveJournal data 物件包含 teacher 欄位歸零
+  ✅ S-SEC-04 _currentJournalCache 快取機制存在
+  ✅ S-SEC-05 editJournal() 有 try/catch/finally 防 loading 卡死
+  ✅ S-SEC-06 關鍵 async 函式均有 try/catch/finally { hideLoading() }
+  ✅ S-SEC-07 月記儲存函式可呼叫且表單欄位完整
+  ✅ S-SEC-08 歷史月記含老師評語渲染邏輯
+  ✅ S-SEC-09 renderJournalCard() 使用 escapeHtml 和 jsArg
+  ✅ S-SEC-10 checkMonthDeadline() 圖片 src / 日期欄位使用 escapeHtml
+  ✅ S-SEC-11 safeNumber() 函式已定義且可正常運作
+  ✅ S-SEC-12 loadStudentDashboard() 月記排序含 semester 與 month 雙欄位
+  ✅ S-SEC-13 executeDeleteJournal() 的 catch 有呼叫 closeModal
+  ✅ S-SEC-14 PDF catch 區塊使用 escapeHtml 防 XSS
+  ✅ S-SEC-15 initWriteForm() Firestore semesterLabel 插入 innerHTML 前有 escapeHtml
+  ✅ S-SEC-17 editJournal/checkMonthDeadline 正確還原「其他（補充說明）」型別
+  ✅ S-SEC-18 saveJournal() 照片上傳中存檔防呆邏輯存在
+  ✅ S-SEC-19 editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標
+  ✅ S-SEC-20 showPage()／initWriteForm() 仍支援 _skipWriteInit／skipDeadlineCheck 跳過機制
+  ✅ S-SEC-21 checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告
+  ✅ S-SEC-22 getCommentBadgeState() 四狀態 + 無徽章邏輯正確
+  ✅ S-SEC-23 renderCommentBadgeHtml() 各 state 輸出正確徽章
+  ✅ S-SEC-24 loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）
+  ✅ S-SEC-25 學生標記已讀只能把 teacherCommentUnread 設為 false（第二分支靜態分析）
+  ✅ S-15 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
+  ✅ S-16 handleLoginUser() 支援新學期 docId 格式（{semester}_{seatNo}）
+  ✅ S-16B onAuthStateChanged 登入邏輯的 emailKey() 使用全域取代（/[@.]/g）
+  ✅ S-17 _loginHandling 互斥旗標已宣告，handleLoginUser() 所有 return 路徑均清旗標
+  ✅ S-17B onAuthStateChanged 有 _loginHandling 輪詢等待邏輯
+  ✅ S-SEC-16 calcDistance() 的 addressError 插入 innerHTML 前有 escapeHtml()
+  ✅ S-SEC-27 完成度進度條／單筆摘要收合判斷的地址檢查已套用 validateCompleteTaiwanAddress() 格式驗證
+  ✅ S-SEC-28 executeDeleteJournal() 有 showLoading()，且成功與失敗路徑皆有 hideLoading()
+  ✅ S-SEC-29 saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）
+  ✅ S-SEC-30 saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）
+  ✅ S-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入
+
+──────────────────────────────────────────────────
+學生端 測試結果：65/65 通過，0 失敗
+──────────────────────────────────────────────────
+耗時：21.5s
+
+══════════════════════════════════════════════════
+老師端測試（teacher.html）
+══════════════════════════════════════════════════
+
+【老師端】開始測試
+  ✅ T-01 老師端頁面正常載入
+  ✅ T-02 主頁統計數字載入
+  ✅ T-03 切換到學生管理
+  ✅ T-04 切換到月記管理
+  ✅ T-05 切換到統計
+  ✅ T-06 切換到截止日管理
+  ✅ T-07 切換到匯出
+  ✅ T-08 切換到設定
+  ✅ T-09 切換到管理員設定
+  ✅ T-10 切回主頁
+  ✅ T-11 學生管理表格有資料
+  ✅ T-12 月記管理可以載入
+  ✅ T-13 月記管理查詢按鈕存在且可呼叫
+  ✅ T-13B 月記卡片內容正確顯示（無亂碼）
+  ✅ T-14 截止日表格有載入
+  ✅ T-15 統計頁有載入
+  ✅ T-16 匯出頁有載入
+  ✅ T-17 匯出頁有學生可選
+  ✅ T-18 設定頁正常顯示
+  ✅ T-SEC-01 escapeHtml() 正確阻擋 XSS payload
+  ✅ T-SEC-02 jsArg() 正確 escape onclick 參數（含單引號與尖括號）
+  ✅ T-SEC-03 loadBindingList() 使用 escapeHtml 和 jsArg
+  ✅ T-SEC-04 confirmBatchReview() 日期值插入 innerHTML 前有 escapeHtml
+  ✅ T-SEC-05 學期 select 的 key 和 label 有 escapeHtml
+  ✅ T-SEC-06 關鍵函式均有 try/catch/finally 防 loading 卡死（原有 8 個）
+  ✅ T-SEC-06B 2026-06-11 補修的 10 個函式的 catch 均有 hideLoading()
+  ✅ T-SEC-07 刪除月記後立即更新 _teacherJournalsCache
+  ✅ T-SEC-08 Firestore 失敗後 loading 遮罩不殘留
+  ✅ T-SEC-09 renderJournalCard() 使用 escapeHtml 和 jsArg
+  ✅ T-SEC-10 loadSalaryPhotoOnDemand() 使用 escapeHtml 且錯誤用 toast()
+  ✅ T-SEC-11 saveTeacherComment() 含有 teacherCommentUnread 寫入路徑（弱效 sanity check）
+  ✅ T-SEC-12 loadDeadlineInfo() 日期欄位使用 escapeHtml 防 XSS
+  ✅ T-SEC-13 safeNumber() 函式已定義且可正常運作
+  ✅ T-SEC-14 getTeacherJournalMonthRangeLabel() 使用西元年/月格式
+  ✅ T-SEC-15 deleteStudent() 月記刪除使用 ownerEmail 雙重比對
+  ✅ T-SEC-16 deleteStudent() 非active學期會清除 /students/ 根文件
+  ✅ T-SEC-17 printJournalsPDF() 將 getBlob() 包進 await new Promise
+  ✅ T-SEC-18 exportSemesterPDF()／exportStudentPDF() 呼叫 printJournalsPDF() 時有 await
+  ✅ T-SEC-19 renderJournalCard() 孤兒回覆顯示警示而非整段隱藏
+  ✅ T-SEC-20 saveTeacherComment() isCommentUpdate 邏輯（oldComment 非空才設 Updated）
+  ✅ T-SEC-21 saveTeacherComment() teacherCommentUnread：有評語才設 true
+  ✅ T-SEC-22 saveTeacherComment() teacherCommentUpdated 由 isCommentUpdate 控制（代理 sanity check）
+  ✅ T-SEC-23 saveTeacherComment() 評語未改時 teacherCommentUnread 不重新觸發（State 3→2 防護）
+  ✅ T-SEC-30 saveTeacherComment() teacherCommentContentAt 只在評語內容真正改變時才寫入（與 teacherCommentUnread／teacherCommentUpdated 同一個 commentChanged 條件區塊）
+  ✅ T-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入
+  ✅ T-SEC-24 saveTeacherComment() oldComment 改為送出前 getDoc() 現查伺服器當下值（多裝置/多分頁競態防護）
+  ✅ T-SEC-32 _openCommentModalWithUid() 不再殘留 oldComment 快取死碼（2026-07-11 清理確認）
+  ✅ T-SEC-25 executeBatchReview() 批次審閱同時清除學生回覆未讀旗標（studentReplyUnread: false）
+  ✅ T-SEC-26 exportAllStatsExcel() Excel 公式注入防護（sanitizeExcelCell() 套用於工作地址／師傅姓名）
+  ✅ T-SEC-27 exportAllStatsExcel() distance/type 兩欄位 Excel 公式注入防護（補齊 T-SEC-26 未涵蓋範圍）
+  ✅ T-SEC-28 exportAllStatsExcel() 姓名/公司/日期/月份/學期/繳交時間/最後更新 Excel 公式注入防護（收斂 T-SEC-26/27 之後第三輪）
+  ✅ T-SEC-29 loadRosterStudentsForSemesters() 根源防護 + submitAoA/stuSalaryRows/companyRows2/companyWorktypeRows/salaryAlertRows(低於/高於平均/公司內部落差)/salarySummaryRows Excel 公式注入防護（第四輪，根因與 T-SEC-26/27/28 相同但透過 studentMap 間接繼承）
+  ✅ T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
+
+──────────────────────────────────────────────────
+老師端 測試結果：53/53 通過，0 失敗
+──────────────────────────────────────────────────
+耗時：11.8s
+
+══════════════════════════════════════════════════
+整體測試結果
+══════════════════════════════════════════════════
+✅ 學生端：65/65 通過（21.5s）
+✅ 老師端：53/53 通過（11.8s）
+
+合計：118/118 通過，0 失敗
+總耗時：94.3s
+══════════════════════════════════════════════════
+
+報告已儲存至：test-report.txt

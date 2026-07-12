@@ -1,7 +1,143 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v7
- * 對應 AI_CONTEXT.md 安全性清單（截至 2026-06-17）
+ * 學生端自動化測試 v20
+ * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v20 修正（2026-07-11）：
+ *   S-SEC-29  檢查邏輯更新，對應 saveStudentReply() 本身同日的修法：oldReply 原本讀
+ *             window._studentHistoryJournals（前端快取），改成送出前 await getDoc(ref)
+ *             現查伺服器當下值——修正多裝置/多分頁情境下快取可能落後伺服器真實值，
+ *             導致合法回覆被 rule.txt 的「內容改變」與「內容沒變」兩個分支同時判斷失敗、
+ *             誤擋 403 的問題（詳見該函式新版註解）。
+ *             原本的 readsOldFromCache 檢查對新程式碼已經失真：`fnStr.includes(
+ *             '_studentHistoryJournals')` 這種寬鬆字串搜尋，在新版程式碼裡命中的其實是
+ *             「解釋當初為什麼改掉」的說明性註解本身（新版函式仍保留一段提到這個舊變數名
+ *             的動機說明），不是真的還在用快取的邏輯——跟本檔已知的 S-SEC-08／T-SEC-30
+ *             假失敗屬於同一類陷阱，只是方向相反：那兩者是「檢查壞寫法不存在」被解釋性
+ *             註解誤判成還存在，這裡是「檢查好寫法還在」被「已經不這樣寫了」的說明文字
+ *             誤判成還在，兩者本質都是對整個函式字串做寬鬆子字串搜尋、沒有錨定到實際的
+ *             賦值/呼叫語法。改為同時驗證 ①`await getDoc(ref)` 呼叫存在、②`oldReply` 的
+ *             賦值語法明確來自 `freshSnap`（`const oldReply = (freshSnap...`），並把找不到
+ *             時的錯誤訊息方向修正過來（原訊息把「多打一次 Firestore 讀取」講成可疑訊號，
+ *             但這正是修法後的正確行為）。
+ *
+ * v19 新增（2026-07-10）：
+ *   S-SEC-31  initPushNotifications() 關鍵特徵（相對路徑註冊 fcm-sw.js、Firestore 寫入
+ *             路徑對應 rule.txt 的 request.auth.uid==userId、userAgent 截斷 200 字、
+ *             fire-and-forget 不擋登入）。對稱於 teacher_test.js 既有的 T-SEC-31，補齊
+ *             AI_推播系統說明.md 第六節 #11 記錄的測試覆蓋不對稱（老師端已有、學生端
+ *             缺）。直接取得 student.html 實際內容逐項核對後撰寫，不是照概念模型猜寫，
+ *             寫法特別避開「正規表達式誤命中函式內部解釋性註解文字」的陷阱（該函式註解
+ *             本身就提到 '/fcm-sw.js' 這個「壞」字串用來說明為何不能這樣寫）。
+ *
+ * v18 新增（2026-07-08）：
+ *   S-SEC-30  saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）
+ *             背景：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播子系統時，
+ *             rule.txt 一般編輯分支同步要求歸零的新欄位（跟 teacherComment／teacherReviewed／
+ *             reviewedAt／teacherCommentUnread／teacherCommentUpdated 同一組待遇），但
+ *             saveJournal() 當時漏了同步加上。saveJournal() 用 setDoc(...,{merge:true}) 寫入，
+ *             缺這個欄位時 merge 只會保留舊值——只要月記曾被老師留過評語，學生之後任何一次
+ *             一般編輯儲存都會撞上 rule.txt 的 == null 要求而被 Firestore 拒絕（403），整份
+ *             月記存檔失敗且無其他提示。2026-07-08 已在 saveJournal() 補上此欄位，這裡補上
+ *             對應回歸測試。⚠️ 純靜態分析，只能確認欄位存在、賦值為 null、且落在跟其餘老師
+ *             欄位歸零同一個 data 物件範圍內；無法像對 Firestore Emulator 真正用 merge:true
+ *             模擬「文件已有非 null 舊值」情境那樣驗證 rule.txt 真的會放行——這塊仍是已知
+ *             測試盲區（test-rules.js 目前全部用整份 .set() 覆蓋，從未用過 merge:true），
+ *             建議另外在 test-rules.js 補上對應的規則層級回歸測試。
+ *
+ * v17 新增（2026-07-06）：
+ *   S-SEC-29  saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）
+ *             背景：對稱於 teacher.html saveTeacherComment() 的 commentChanged 防護
+ *             （T-SEC-20／T-SEC-23）；rule.txt 同步新增 studentReplyContentAt 欄位
+ *             （create 必須為 null、一般編輯鎖定不變、回覆分支依內容是否改變分兩種條件）。
+ *
+ * v16 新增（2026-07-01）：
+ *   S-SEC-28  executeDeleteJournal() 補上 showLoading()/hideLoading()（2026-06-30）
+ *             背景：單筆月記刪除函式原本完全沒有 loading 遮罩，與結構幾乎相同的姊妹函式
+ *             executeBatchDeleteHistory()（批次刪除，同樣呼叫 deleteDoc()）行為不一致；
+ *             且不符合本專案 Checklist「是否有 try/catch/finally 確保 hideLoading() 執行」。
+ *             loading 遮罩（position:fixed;inset:0;z-index:9998，無 pointer-events:none）
+ *             會實際阻擋使用者在網路延遲期間重複點擊確認按鈕，不只是視覺回饋問題。
+ *             修法：try 開頭加 showLoading()，成功與失敗路徑各自呼叫 hideLoading()。
+ *             驗證：確認函式原始碼含 showLoading()、try 區塊含 hideLoading()、
+ *             catch 區塊也含 hideLoading()（三項特徵缺一即退化）。
+ *
+ * v15 新增（2026-06-29）：
+ *   S-SEC-27  完成度進度條／單筆摘要收合判斷的地址檢查補上格式驗證
+ *             背景：地址欄缺門牌「號」時，畫面顯示「完成度4/4可儲存」與單筆「✓完成」，
+ *             但按下「儲存月記」仍被 saveJournal() 的格式驗證正確擋下（資料完整性無虞），
+ *             純粹是 WORK_FIELD_CHECKS 與 isEntryComplete() 的地址檢查原本只查非空字串，
+ *             沒有套用 validateCompleteTaiwanAddress()，造成顯示跟實際存檔判斷不一致。
+ *             修法：兩處皆補上 && !validateCompleteTaiwanAddress(...)，與 saveJournal()
+ *             用同一套規則，地址格式不完整時進度條／收合徽章會正確顯示未完成。
+ *
+ * v14 新增（2026-06-28）：
+ *   S-SEC-22  getCommentBadgeState() 四狀態邏輯（State 1～4 + 無徽章）
+ *             驗證 getCommentBadgeState() 對每種 {teacherCommentUnread, teacherCommentUpdated,
+ *             teacherReviewed, teacherComment} 組合回傳正確的 state 值。
+ *             實際 API 回傳字串：'unread'/'updated_unread'/'reviewed'/'updated_read'/null，
+ *             測試使用探針（probe）自動偵測數字制或字串制，兩種實作皆可通過。
+ *             對應「評語測試系統」STEP 1～5 的狀態轉換總覽。
+ *   S-SEC-23  renderCommentBadgeHtml() 輸出對應正確的徽章文字與顏色
+ *             renderCommentBadgeHtml() 接收整個 j 物件（非 state 數字），
+ *             驗證 unread→🔴、updated_unread→🟠、reviewed→✅、updated_read→📖、null→空字串。
+ *   S-SEC-24  loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）
+ *             對應：切到歷史月記頁面時，凡 teacherCommentUnread===true 的月記，
+ *             應自動呼叫 updateDoc 把 teacherCommentUnread 設回 false。
+ *   S-SEC-25  saveTeacherComment() isCommentUpdate 邏輯（STEP 2 vs STEP 4）
+ *             （老師端靜態分析移至 T-SEC-20；此處從學生側驗證 Firestore Rules
+ *             第二分支：學生只能把 teacherCommentUnread 改為 false，不能自己設 true）
+ *   S-SEC-26  Firestore Rules：學生不能自行把 teacherCommentUpdated 設為 true（403）
+ *             對應 rule.txt 第二分支（teacherCommentUnread 已讀標記），
+ *             updateDoc 只允許 affectedKeys().hasOnly(['teacherCommentUnread'])，
+ *             夾帶 teacherCommentUpdated 欄位應被拒。
+ *
+ * v13 新增（2026-06-28）：
+ *   S-SEC-21  checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告
+ *             對應修正：checkMonthDeadline() 的 _currentJournalCache 原本沒有 studentReply
+ *             （跟 editJournal() 那條路徑不一致），導致一般填寫頁覆蓋當月月記時，
+ *             saveJournal() 的確認對話框無法提示「回覆會暫時看不到對應評語」。
+ *
+ * v12 新增（2026-06-27 第二次）：
+ *   S-RULES-09  journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）
+ *   S-RULES-10  journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）
+ *               對應 rule.txt 同日第二次補修：create/update 第一分支補上 seatNo 驗證／鎖定，
+ *               防止偽造 seatNo 把月記算到別的座號名下（污染老師端繳交/審閱/薪資統計）。
+ *               同時 _makeJournalDoc() 加入第三個參數 seatNo（改用 _getTestSeatNo() 動態讀取
+ *               studentBindings 真實值），所有既有呼叫點同步更新，否則會被新規則誤擋。
+ *
+ * v11 新增（2026-06-27）：
+ *   S-RULES-06  journals UPDATE 安全性：一般編輯路徑（第一分支）夾帶超長 studentReply
+ *               ＋偽造 studentReplyUnread:false 應被拒（403）
+ *   S-RULES-07  journals UPDATE 安全性：回覆內容為空字串應被拒（403）
+ *   S-RULES-08  journals UPDATE 安全性：studentReplyAt 塞入非字串型別應被拒（403）
+ *               對應 rule.txt 2026-06-27 三項補修（review 報告 #1/#4/#9）：
+ *               ① 第一分支補上 studentReply/studentReplyUnread/studentReplyAt 鎖定
+ *               ② 第三分支補 studentReply.size()>=1（禁空字串）
+ *               ③ 第三分支補 studentReplyAt 型別驗證
+ *
+ * v10 修正（2026-06-26）：
+ *   S-SEC-08  badge 渲染邏輯已抽成共用函式 getCommentBadgeState() /
+ *             renderCommentBadgeHtml()，不再直接出現在
+ *             renderJournalCardSelectable 本體，改為：
+ *             ① 確認共用函式本身含 teacherComment / teacherCommentUnread
+ *             ② 確認 renderJournalCardSelectable 有呼叫 renderCommentBadgeHtml()
+ *
+ * v9 新增（2026-06-23）：
+ *   S-SEC-19  editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標
+ *   S-SEC-20  showPage()／initWriteForm() 仍支援 _skipWriteInit／skipDeadlineCheck 跳過機制
+ *             （修正：editJournal() 載入舊月記填表後，showPage('s-write') 及
+ *             initWriteForm() 結尾都會非同步重新呼叫 checkMonthDeadline()（無 skipFill），
+ *             背景任務完成後會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容；
+ *             編輯非當前月份的舊月記時幾乎必然發生。已加 _skipWriteInit 旗標
+ *             + initWriteForm(skipDeadlineCheck) 參數兩處修正，拆成兩個測試
+ *             分別檢查，避免只修一半卻誤判通過。）
+ *
+ * v8 新增（2026-06-22）：
+ *   S-SEC-17  editJournal/checkMonthDeadline 正確還原「其他（補充說明）」型別
+ *             （2026-06-22 修正：型別靜默失效 bug 迴歸測試）
+ *   S-SEC-18  saveJournal() 照片上傳中存檔防呆邏輯存在
+ *             （2026-06-22 修正：上傳中按儲存會存入空白 URL）
  *
  * v7 修正（2026-06-17）：
  *   _captureFsCtx() 根本原因修正：
@@ -34,6 +170,10 @@
  *   S-17   _loginHandling 互斥旗標已宣告，handleLoginUser() 所有 return 路徑均清旗標
  *   S-17B  onAuthStateChanged 有 _loginHandling 輪詢等待邏輯（最多 15 秒）
  *   S-SEC-16  calcDistance() 的 addressError 插入 innerHTML 前有 escapeHtml()（2026-06-17 防禦性加固）
+ *
+ * ⚠️ S-SEC-19/20 為靜態分析（檢查原始碼字串），無法重現「編輯舊月記後表單
+ * 是否真的被背景任務蓋掉」這個實際 timing 行為（需要一筆非當前月份的月記
+ * 資料才能人工驗證），只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
  */
 
 const BASE_URL = 'https://ka-dot-dot.github.io/internship-journal/student.html';
@@ -331,20 +471,42 @@ async function runStudentTests(page, browserContext, log) {
               headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
               body: body ? JSON.stringify(body) : undefined,
             });
-            return { status: res.status };
+            // 2026-06-27 補修：額外回傳解析後的 body（既有呼叫只取 .status，不受影響；
+            // 新增的 _getTestSeatNo() 需要讀取 GET 回應內容）
+            let json = null;
+            try { json = await res.json(); } catch (_) {}
+            return { status: res.status, body: json };
           } catch (e) { return { status: -1, err: e.message }; }
         },
         { method, url, body, token: _fsToken }
       );
     };
 
-    const _makeJournalDoc = (uid, email) => ({
+    // 2026-06-27 新增：rule.txt create 規則補上 seatNo 必須等於 studentBindings 紀錄座號的驗證，
+    // 所有合成測試文件都要帶正確的 seatNo，否則會被新規則正確擋下（而不是被測項本來想驗證的原因擋下）。
+    // 直接讀 studentBindings/{emailKey} 真實值，不寫死任何座號，跟正式 saveJournal() 取值方式一致。
+    let _fsSeatNo = null;
+    const _getTestSeatNo = async () => {
+      if (_fsSeatNo) return _fsSeatNo;
+      await _captureFsCtx();
+      const emailKey = _fsUser.email.replace(/[@.]/g, '_');
+      const r = await _fsRequest('GET', '/studentBindings/' + emailKey);
+      const seatNo = r.body?.fields?.seatNo?.stringValue;
+      if (r.status !== 200 || !seatNo) {
+        throw new Error('[Rules測試前置失敗] 無法取得測試學生座號（studentBindings/' + emailKey + ' 讀取失敗或缺少 seatNo 欄位）');
+      }
+      _fsSeatNo = seatNo;
+      return _fsSeatNo;
+    };
+
+    const _makeJournalDoc = (uid, email, seatNo) => ({
       fields: {
         ownerUid:             { stringValue: uid },
         ownerEmail:           { stringValue: email },
         storagePath:          { stringValue: 'user' },
         semester:             { stringValue: 'test' },
         month:                { integerValue: 0 },
+        seatNo:               { stringValue: seatNo },
         teacherComment:       { nullValue: null },
         teacherReviewed:      { booleanValue: false },
         reviewedAt:           { nullValue: null },
@@ -355,9 +517,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-WRITE-REAL Firestore CREATE 規則驗證（學生身份 REST 直接寫入）', async () => {
       requireStudentSession();
       await _captureFsCtx(); // 失敗會 throw，不再靜默通過
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-create-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (r.status === 200) {
         await _fsRequest('DELETE', path + '/' + docId);
       }
@@ -392,9 +555,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-02 journals UPDATE 正常路徑（學生修改已有月記）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-update-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email);
+      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo);
       const cr = await _fsRequest('POST', path + '?documentId=' + docId, doc);
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），可能是 rule 問題導致無法建立測試文件，請先確認 S-WRITE-REAL');
@@ -413,6 +577,7 @@ async function runStudentTests(page, browserContext, log) {
       await _captureFsCtx();
       const docId = 'test-fake-teacher-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
+      const seatNo = await _getTestSeatNo();
       const fakeDoc = {
         fields: {
           ownerUid:        { stringValue: _fsUser.uid },
@@ -420,6 +585,7 @@ async function runStudentTests(page, browserContext, log) {
           storagePath:     { stringValue: 'user' },
           semester:        { stringValue: 'test' },
           month:           { integerValue: 0 },
+          seatNo:          { stringValue: seatNo },
           teacherComment:  { stringValue: 'FAKE TEACHER REVIEW' },
           teacherReviewed: { booleanValue: false },
           reviewedAt:      { nullValue: null },
@@ -443,14 +609,15 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-04 journals UPDATE 安全性：teacherReviewed 偽造應被拒（403）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-fake-review-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
         fields: {
-          ..._makeJournalDoc(_fsUser.uid, _fsUser.email).fields,
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo).fields,
           teacherReviewed: { booleanValue: true },
         }
       };
@@ -466,9 +633,10 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-05 journals DELETE 權限（學生可刪除自己的月記）', async () => {
       requireStudentSession();
       await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
       const docId = 'test-delete-' + Date.now();
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const dr = await _fsRequest('DELETE', path + '/' + docId);
@@ -477,6 +645,144 @@ async function runStudentTests(page, browserContext, log) {
         'journals DELETE 被拒（403）：DELETE rule 未允許學生刪除自己的月記。'
       );
       if (dr.status >= 400) throw new Error('journals DELETE 異常（HTTP ' + dr.status + '）');
+    });
+
+    await test('S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：rule.txt 修正前，第一分支（學生一般編輯月記）完全沒有限制
+      // studentReply / studentReplyUnread / studentReplyAt，只要其餘 teacher 欄位歸零、
+      // ownerUid/ownerEmail/storagePath 不變，這個分支就會放行——可在同一次寫入夾帶任意長度
+      // 的 studentReply，並把 studentReplyUnread 直接設為 false（偽造老師已讀）。
+      // 修正後第一分支要求這三個欄位必須維持原值不變，此測試驗證繞過已被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-reply-lock-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const fakeUpdate = {
+        fields: {
+          ownerUid:             { stringValue: _fsUser.uid },
+          ownerEmail:           { stringValue: _fsUser.email },
+          storagePath:          { stringValue: 'user' },
+          teacherComment:       { nullValue: null },
+          teacherReviewed:      { booleanValue: false },
+          reviewedAt:           { nullValue: null },
+          teacherCommentUnread: { booleanValue: false },
+          studentReply:         { stringValue: 'A'.repeat(500) },
+          studentReplyUnread:   { booleanValue: false },
+        }
+      };
+      const mask = ['ownerUid','ownerEmail','storagePath','teacherComment','teacherReviewed','reviewedAt','teacherCommentUnread','studentReply','studentReplyUnread'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：一般編輯路徑夾帶超長 studentReply＋偽造已讀未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 偽造回覆測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則 studentReply.size()<=50 沒有下限，size()==0 也會通過，
+      // 學生可送出內容為空字串的回覆。修正後加入 size()>=1，此測試驗證空字串回覆會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-reply-empty-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const replyUpdate = {
+        fields: {
+          studentReply:       { stringValue: '' },
+          studentReplyUnread: { booleanValue: true },
+          studentReplyAt:     { stringValue: new Date().toISOString() },
+        }
+      };
+      const mask = ['studentReply', 'studentReplyUnread', 'studentReplyAt'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, replyUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：空字串回覆未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 空字串回覆測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則沒有驗證 studentReplyAt 型別，可塞入任意型別的值。
+      // 修正後加入型別檢查（必須為 null 或字串），此測試驗證塞入數字會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-reply-badtype-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const replyUpdate = {
+        fields: {
+          studentReply:       { stringValue: '測試回覆內容' },
+          studentReplyUnread: { booleanValue: true },
+          studentReplyAt:     { integerValue: 12345 },
+        }
+      };
+      const mask = ['studentReply', 'studentReplyUnread', 'studentReplyAt'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, replyUpdate, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：studentReplyAt 塞入數字型別未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE studentReplyAt 型別測試回應異常（HTTP ' + ur.status + '，預期 403）');
+    });
+
+    await test('S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：原規則沒有驗證 seatNo，學生可在自己的 uid 路徑下建立月記，
+      // 但把 seatNo 欄位填成別的座號——老師端 collectionGroup('journals') 查詢直接信任這個欄位
+      // 來歸戶統計（本月已繳/已審閱/薪資統計皆是），會把這份月記誤算到別的座號名下。
+      // 修正後 create 規則要求 seatNo 必須等於 studentBindings 記錄的真實座號，此測試驗證偽造會被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const forgedSeatNo = seatNo + '_FORGED';
+      const docId = 'test-seatno-forge-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, forgedSeatNo));
+      if (r.status === 200) {
+        await _fsRequest('DELETE', path + '/' + docId);
+        throw new Error('journals CREATE 安全漏洞：偽造 seatNo 未被拒絕（HTTP 200）！');
+      }
+      if (r.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (r.status !== 403) throw new Error('journals CREATE 偽造 seatNo 測試回應異常（HTTP ' + r.status + '，預期 403）');
+    });
+
+    await test('S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）', async () => {
+      // 2026-06-27 修正回歸測試：第一分支（一般編輯）原本沒有鎖住 seatNo，建立時驗證過一次之後，
+      // 編輯時仍可被偽造改成別的座號。修正後第一分支要求 seatNo 必須維持原值不變，此測試驗證繞過已被擋下。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-seatno-change-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+      const fakeUpdate = {
+        fields: {
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo + '_CHANGED').fields,
+        }
+      };
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeUpdate);
+      await _fsRequest('DELETE', path + '/' + docId);
+      if (ur.status === 200) throw new Error(
+        'journals UPDATE 安全漏洞：一般編輯路徑偽造變更 seatNo 未被拒絕（HTTP 200）！'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error('journals UPDATE 偽造 seatNo 測試回應異常（HTTP ' + ur.status + '，預期 403）');
     });
 
     await test('S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）', async () => {
@@ -500,6 +806,44 @@ async function runStudentTests(page, browserContext, log) {
       if (loadingStuck) throw new Error('Firestore 失敗後 loading 遮罩殘留，finally 未執行 hideLoading()');
     });
 
+    await test('S-SEC-26 Firestore Rules：學生不能把 teacherCommentUpdated 設為 true（第二分支）', async () => {
+      // 對應 rule.txt 第二分支（學生標記已讀）：
+      //   affectedKeys().hasOnly(['teacherCommentUnread'])
+      //   && teacherCommentUnread == false
+      // 學生在第二分支只能修改 teacherCommentUnread 這一欄，且只能設為 false。
+      // 此測試驗證：夾帶 teacherCommentUpdated:true 的更新應被 Firestore 拒絕（403）。
+      requireStudentSession();
+      await _captureFsCtx();
+      const seatNo = await _getTestSeatNo();
+      const docId = 'test-badge-forge-' + Date.now();
+      const path = '/users/' + _fsUser.uid + '/journals';
+
+      // 先建立一筆正常月記（teacherCommentUnread:false, teacherCommentUpdated:false）
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
+
+      // 嘗試用「已讀清除」第二分支夾帶 teacherCommentUpdated:true
+      const fakeMarkRead = {
+        fields: {
+          teacherCommentUnread:  { booleanValue: false },
+          teacherCommentUpdated: { booleanValue: true },   // ← 學生不應能寫入 true
+        }
+      };
+      const mask = ['teacherCommentUnread', 'teacherCommentUpdated'];
+      const ur = await _fsRequest('PATCH', path + '/' + docId, fakeMarkRead, mask);
+      await _fsRequest('DELETE', path + '/' + docId);
+
+      if (ur.status === 200) throw new Error(
+        'Firestore Rules 漏洞：學生成功把 teacherCommentUpdated 設為 true（HTTP 200），' +
+        '應被第二分支 affectedKeys().hasOnly([\'teacherCommentUnread\']) 擋下'
+      );
+      if (ur.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
+      if (ur.status !== 403) throw new Error(
+        'Firestore Rules 測試回應異常（HTTP ' + ur.status + '，預期 403）'
+      );
+    });
+
     await studentPage.close();
     await studentContext.close();
 
@@ -520,7 +864,13 @@ async function runStudentTests(page, browserContext, log) {
       'S-RULES-03 journals CREATE 安全性：teacherComment 偽造應被拒（403）',
       'S-RULES-04 journals UPDATE 安全性：teacherReviewed 偽造應被拒（403）',
       'S-RULES-05 journals DELETE 權限（學生可刪除自己的月記）',
+      'S-RULES-06 journals UPDATE 安全性：一般編輯路徑夾帶回覆欄位應被拒（403）',
+      'S-RULES-07 journals UPDATE 安全性：空字串回覆應被拒（403）',
+      'S-RULES-08 journals UPDATE 安全性：studentReplyAt 非字串型別應被拒（403）',
+      'S-RULES-09 journals CREATE 安全性：seatNo 與 studentBindings 不一致應被拒（403）',
+      'S-RULES-10 journals UPDATE 安全性：一般編輯路徑變更 seatNo 應被拒（403）',
       'S-SEC-06B Firestore 失敗後 loading 遮罩不殘留（學生帳號 runtime 驗證）',
+      'S-SEC-26 Firestore Rules：學生不能把 teacherCommentUpdated 設為 true（第二分支）',
     ];
     skipped.forEach(name => {
       results.push({ name, pass: true, skipped: true });
@@ -656,10 +1006,24 @@ async function runStudentTests(page, browserContext, log) {
     const result = await page.evaluate(() => {
       if (typeof renderJournalCardSelectable !== 'function')
         return 'renderJournalCardSelectable 函式不可存取';
-      const src = renderJournalCardSelectable.toString();
-      if (!src.includes('teacherReviewed'))      return '缺少 teacherReviewed 渲染邏輯';
-      if (!src.includes('teacherComment'))       return '缺少 teacherComment 渲染邏輯';
-      if (!src.includes('teacherCommentUnread')) return '缺少 teacherCommentUnread 紅點渲染邏輯';
+      const cardSrc = renderJournalCardSelectable.toString();
+      if (!cardSrc.includes('teacherReviewed')) return '缺少 teacherReviewed 渲染邏輯';
+
+      // teacherComment / teacherCommentUnread 的徽章渲染邏輯已抽成共用函式
+      // getCommentBadgeState()/renderCommentBadgeHtml()/hasCommentBadge()，
+      // 不會逐字出現在 renderJournalCardSelectable 本體裡，改檢查這些共用函式本身。
+      if (typeof renderCommentBadgeHtml !== 'function')
+        return 'renderCommentBadgeHtml 函式不可存取';
+      if (typeof getCommentBadgeState !== 'function')
+        return 'getCommentBadgeState 函式不可存取';
+
+      const badgeSrc = renderCommentBadgeHtml.toString() + getCommentBadgeState.toString();
+      if (!badgeSrc.includes('teacherComment'))       return '缺少 teacherComment 渲染邏輯';
+      if (!badgeSrc.includes('teacherCommentUnread')) return '缺少 teacherCommentUnread 紅點渲染邏輯';
+
+      // 確認 renderJournalCardSelectable 真的有接到共用的徽章渲染函式（沒有漏接）
+      if (!cardSrc.includes('renderCommentBadgeHtml'))
+        return 'renderJournalCardSelectable 未呼叫 renderCommentBadgeHtml()';
       return 'ok';
     });
     if (result !== 'ok') throw new Error(result);
@@ -765,6 +1129,403 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.hasInnerHTML)   throw new Error('initWriteForm() 找不到 innerHTML 賦值');
     if (!result.hasEscapeLabel) throw new Error('initWriteForm() 的學期 label 未使用 escapeHtml()');
   });
+
+  // ════════════════════════════════════════
+  // S-SEC-17  「其他（補充說明）」型別 editJournal 載入修正（2026-06-22）
+  // 對應 AI_CONTEXT.md 2026-06-22 變更：
+  //   editJournal / checkMonthDeadline 載入 entry 時，
+  //   若 e.type 為「其他（XXX）」格式，需拆出補充說明分別填入
+  //   select（設為「其他」）與 other-input，並呼叫 showWorkTypeExample()
+  // ════════════════════════════════════════
+
+  await test('S-SEC-17 editJournal/checkMonthDeadline 正確還原「其他（補充說明）」型別', async () => {
+    const result = await page.evaluate(() => {
+      // 靜態分析：確認兩處 forEach 都有「其他（」的拆解邏輯
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      // 特徵1：以 startsWith('其他（') 或 match(/^其他（/) 判斷
+      const hasOtherDetect =
+        scripts.includes("startsWith('其他（')") ||
+        scripts.includes('startsWith("其他（")') ||
+        scripts.includes("match(/^其他（");
+
+      // 特徵2：拆出補充說明後設回 other-input
+      const hasOtherInput = scripts.includes('other-input') && scripts.includes('otherInputEl');
+
+      // 特徵3：拆解後呼叫 showWorkTypeExample
+      const hasShowExample = (scripts.match(/showWorkTypeExample\(/g) || []).length >= 2;
+
+      // 特徵4：兩處 forEach 都有處理（checkMonthDeadline + editJournal）
+      // 確認 showWorkTypeExample 在 type 判斷區塊內出現至少 2 次
+      const showExampleCount = (scripts.match(/showWorkTypeExample\(/g) || []).length;
+
+      return {
+        hasOtherDetect,
+        hasOtherInput,
+        hasShowExample,
+        showExampleCount,
+      };
+    });
+
+    if (!result.hasOtherDetect)
+      throw new Error('未偵測到「其他（」型別判斷邏輯，editJournal 載入「其他（補充說明）」時 type 會靜默失效');
+    if (!result.hasOtherInput)
+      throw new Error('未偵測到 otherInputEl 補充說明回填邏輯，other-input 欄位不會顯示補充說明');
+    if (!result.hasShowExample || result.showExampleCount < 2)
+      throw new Error(`showWorkTypeExample() 呼叫次數不足（${result.showExampleCount} 次），兩處 forEach 均需呼叫`);
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-18  照片上傳中存檔防呆（2026-06-22）
+  // 對應 AI_CONTEXT.md 2026-06-22 變更：
+  //   saveJournal() 儲存前偵測 .photo-uploading，
+  //   上傳中時阻擋儲存並提示；photos 陣列加 .filter(Boolean)
+  // ════════════════════════════════════════
+
+  await test('S-SEC-18 saveJournal() 照片上傳中存檔防呆邏輯存在', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵1：偵測 .photo-uploading 蓋板
+      const hasUploadingCheck = fnStr.includes('photo-uploading');
+
+      // 特徵2：uploadingCount > 0 時阻擋儲存（設定 photoError）
+      const hasUploadingBlock = fnStr.includes('uploadingCount') && fnStr.includes('photoError');
+
+      // 特徵3：photos 陣列有 .filter(Boolean) 防禦性過濾
+      const hasFilterBoolean = fnStr.includes('filter(Boolean)');
+
+      return { skip: false, hasUploadingCheck, hasUploadingBlock, hasFilterBoolean };
+    });
+
+    if (result.skip) return;
+    if (!result.hasUploadingCheck)
+      throw new Error('saveJournal() 未偵測 .photo-uploading 蓋板，照片上傳中按儲存會存入空白 URL');
+    if (!result.hasUploadingBlock)
+      throw new Error('saveJournal() 未阻擋上傳中的儲存（uploadingCount + photoError 邏輯不存在）');
+    if (!result.hasFilterBoolean)
+      throw new Error('saveJournal() 的 photos 陣列缺少 .filter(Boolean) 防禦性過濾');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-19 ～ S-SEC-20  editJournal() 競爭寫入修正（2026-06-23）
+  // 對應修正：editJournal() 載入舊月記填表後，showPage('s-write') 及
+  //   initWriteForm() 結尾都會非同步重新呼叫 checkMonthDeadline()（無 skipFill），
+  //   背景任務完成後會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容。
+  //   編輯非當前月份的舊月記時幾乎必然發生，不需使用者打字也會被蓋掉。
+  // 修法分兩半：
+  //   ①editJournal() 第一次呼叫改為 initWriteForm(true)，跳過內部背景的
+  //     checkMonthDeadline()；呼叫 showPage('s-write') 前設定 _skipWriteInit
+  //     旗標，讓 showPage 觸發的第二次 initWriteForm() 整個跳過。
+  //   ②showPage() 需檢查並消費 _skipWriteInit 旗標；initWriteForm() 需接受
+  //     skipDeadlineCheck 參數並據此決定要不要呼叫 checkMonthDeadline()。
+  //   只修一半（例如只設旗標但 showPage 沒檢查、或只傳參數但 initWriteForm
+  //   沒接）都無法真正解決問題，所以拆成兩個測試分別檢查。
+  // 以下為靜態分析（檢查原始碼字串），無法重現「編輯舊月記後表單是否被
+  // 背景蓋掉」這個實際 timing 行為本身（需要一筆非當前月份的月記資料才能
+  // 人工驗證），只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-19 editJournal() 跳過內部背景 checkMonthDeadline 並設定 _skipWriteInit 旗標', async () => {
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+      return {
+        skip: false,
+        hasSkippedInitCall: /initWriteForm\(\s*true\s*\)/.test(fnStr),
+        hasSkipFlagSet:     /_skipWriteInit\s*=\s*true/.test(fnStr),
+        hasSkipFillTrue:    /checkMonthDeadline\(\s*true\s*\)/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasSkippedInitCall)
+      throw new Error('editJournal() 第一次呼叫 initWriteForm() 沒有傳入 true，內部結尾的背景 checkMonthDeadline() 會用「目前真實學期/月份」的資料蓋掉剛載入的編輯內容');
+    if (!result.hasSkipFlagSet)
+      throw new Error('editJournal() 呼叫 showPage(\'s-write\') 前沒有設定 _skipWriteInit 旗標，showPage 觸發的第二次 initWriteForm() 仍會非同步重新填表蓋掉編輯內容');
+    if (!result.hasSkipFillTrue)
+      throw new Error('editJournal() 找不到 checkMonthDeadline(true) 呼叫，截止日狀態可能無法正確更新（這次修正不應動到這一行）');
+  });
+
+  await test('S-SEC-20 showPage()／initWriteForm() 仍支援 _skipWriteInit／skipDeadlineCheck 跳過機制', async () => {
+    const result = await page.evaluate(() => {
+      const showPageStr = (typeof showPage === 'function') ? showPage.toString() : '';
+      const initFormStr = (typeof initWriteForm === 'function') ? initWriteForm.toString() : '';
+      if (!showPageStr && !initFormStr) return { skip: true };
+      return {
+        skip: false,
+        showPageChecksFlag: showPageStr.includes('_skipWriteInit'),
+        showPageResetsFlag: /_skipWriteInit\s*=\s*false/.test(showPageStr),
+        initFormHasParam:   /initWriteForm\s*\(\s*skipDeadlineCheck/.test(initFormStr),
+        initFormUsesParam:  /if\s*\(\s*!skipDeadlineCheck\s*\)/.test(initFormStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.showPageChecksFlag)
+      throw new Error('showPage() 沒有檢查 _skipWriteInit 旗標，editJournal() 設的旗標不會有任何效果，第二次 initWriteForm() 還是會跑');
+    if (!result.showPageResetsFlag)
+      throw new Error('showPage() 沒有把 _skipWriteInit 重設為 false，旗標消費後沒清掉，可能讓下一次正常進入寫作頁也被跳過初始化');
+    if (!result.initFormHasParam)
+      throw new Error('initWriteForm() 找不到 skipDeadlineCheck 參數，editJournal() 傳的 true 沒有地方接收');
+    if (!result.initFormUsesParam)
+      throw new Error('initWriteForm() 沒有依 skipDeadlineCheck 決定是否呼叫 checkMonthDeadline()，背景覆蓋表單的問題仍然存在');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-21  checkMonthDeadline() 快取補上 studentReply（2026-06-28）
+  // 對應修正：checkMonthDeadline() 設定 _currentJournalCache 時原本沒有 studentReply
+  //   （editJournal() 那條路徑早就有，兩邊不一致），導致 saveJournal() 的覆蓋確認對話框
+  //   在「一般填寫頁覆蓋當月既有月記」這條最常見的路徑上，沒辦法提示學生「重新儲存後
+  //   回覆會暫時看不到對應評語」（studentReply 因 merge:true 原樣保留，但 teacherComment
+  //   會被歸零，變成孤兒狀態，見 AI_CONTEXT.md「studentReply 孤兒狀態」決策）。
+  // 修法：① checkMonthDeadline() 快取補上 studentReply；
+  //       ② saveJournal() 新增 replyWarning 變數，條件 wasReviewed && cached.studentReply，
+  //         只在即將觸發孤兒狀態的那次覆蓋才提示，已經是孤兒狀態的後續編輯不會重複提示。
+  // 以下為靜態分析（檢查原始碼字串），無法重現「確認對話框實際彈出的文字」這個
+  // runtime 結果（需要一筆「老師已審閱且學生已回覆」的月記資料才能人工驗證），
+  // 只能確認程式碼特徵仍存在、防止日後改動退回舊寫法。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-21 checkMonthDeadline() 快取補上 studentReply／saveJournal() 顯示回覆警告', async () => {
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const saveFnStr   = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!checkFnStr && !saveFnStr) return { skip: true };
+      return {
+        skip: false,
+        cacheHasStudentReply: /studentReply\s*:\s*journalSnap\.data\(\)\.studentReply/.test(checkFnStr),
+        saveHasReplyWarning:  /replyWarning/.test(saveFnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.cacheHasStudentReply)
+      throw new Error('checkMonthDeadline() 的 _currentJournalCache 找不到 studentReply 欄位，saveJournal() 的覆蓋確認對話框在這條路徑上無法判斷是否該提示回覆警告');
+    if (!result.saveHasReplyWarning)
+      throw new Error('saveJournal() 找不到 replyWarning 變數，覆蓋確認對話框不會提示學生「回覆會暫時看不到對應評語」');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-22 ～ S-SEC-26  評語徽章系統（2026-06-28）
+  // 對應「評語測試系統」STEP 1～5 及狀態轉換總覽：
+  //
+  //   State 0  無徽章    （初始：尚未審閱）
+  //   State 1  🔴 有新評語    Unread=true,  Updated=false
+  //   State 2  🟠 評語已更新  Unread=true,  Updated=true
+  //   State 3  ✅ 已審閱     Unread=false, Updated=false
+  //   State 4  📖 評語已閱讀  Unread=false, Updated=true
+  //
+  // S-SEC-22/23 為純邏輯靜態分析（不需學生 session，老師帳號即可）；
+  // S-SEC-24 為靜態分析（確認 updateDoc teacherCommentUnread:false 邏輯存在）；
+  // S-SEC-25 為靜態分析（確認學生只能把 teacherCommentUnread 設為 false）；
+  // S-SEC-26 為 Firestore Rules 端對端測試（需學生 session）。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-22 getCommentBadgeState() 四狀態 + 無徽章邏輯正確', async () => {
+    // 驗證 getCommentBadgeState() 對每種旗標組合回傳正確的 state 值。
+    // 實際回傳型別為字串（'unread'/'updated_unread'/'reviewed'/'updated_read'）或 null（無徽章）。
+    // 對應 STEP 1～5 所有狀態轉換節點。
+    const result = await page.evaluate(() => {
+      if (typeof getCommentBadgeState !== 'function') return { skip: true };
+
+      // 先用一個已知組合探測回傳型別，判斷是字串制還是數字制
+      const probe = getCommentBadgeState({
+        teacherCommentUnread: true, teacherCommentUpdated: false,
+        teacherReviewed: true, teacherComment: '測試'
+      });
+      const isNumeric = typeof probe === 'number';
+      const isString  = typeof probe === 'string';
+      const isNull    = probe === null;
+
+      // 根據探測結果決定各 state 的期望值
+      // 數字制：1/2/3/4/0（或 null 表示無徽章）
+      // 字串制：'unread'/'updated_unread'/'reviewed'/'updated_read'/null
+      let E;
+      if (isNumeric) {
+        E = { s1: 1, s2: 2, s3: 3, s4: 4, s0: [0, null] };
+      } else {
+        // 字串制或其他型別：接受 'unread'、任何含「有新評語」「unread」的字串
+        E = {
+          s1: ['unread'],
+          s2: ['updated_unread', 'updated'],
+          s3: ['reviewed'],
+          s4: ['updated_read'],
+          s0: [null, '', 0, false],
+        };
+      }
+
+      const match = (actual, expected) => {
+        if (Array.isArray(expected)) return expected.includes(actual);
+        return actual === expected;
+      };
+
+      const cases = [
+        // STEP 2：老師第一次存有文字評語 → 🔴 有新評語（State 1 / 'unread'）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, key: 's1', label: 'STEP2 有新評語' },
+        // STEP 4：老師第二次改評語 → 🟠 評語已更新（State 2 / 'updated_unread'）
+        { j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, key: 's2', label: 'STEP4 評語已更新' },
+        // STEP 1：老師存空評語審閱 → ✅ 已審閱（State 3 / 'reviewed'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: ''           }, key: 's3', label: 'STEP1 已審閱(空評語)' },
+        // STEP 3：學生進歷史頁後 → ✅ 已審閱（State 3 / 'reviewed'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' }, key: 's3', label: 'STEP3 已審閱(有評語)' },
+        // STEP 5：學生再次進歷史頁後 → 📖 評語已閱讀（State 4 / 'updated_read'）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' }, key: 's4', label: 'STEP5 評語已閱讀' },
+        // 初始：建立月記但尚未審閱 → 無徽章（State 0 / null）
+        { j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: false, teacherComment: null        }, key: 's0', label: '初始 無徽章' },
+      ];
+
+      const failures = [];
+      for (const { j, key, label } of cases) {
+        const actual = getCommentBadgeState(j);
+        if (!match(actual, E[key])) {
+          failures.push(
+            `[${label}] ` +
+            `Unread=${j.teacherCommentUnread} Updated=${j.teacherCommentUpdated} ` +
+            `Reviewed=${j.teacherReviewed} Comment="${j.teacherComment ?? 'null'}" ` +
+            `→ 期望 ${JSON.stringify(E[key])}，實際 ${JSON.stringify(actual)}`
+          );
+        }
+      }
+      return { skip: false, failures, probeType: typeof probe, probeValue: String(probe) };
+    });
+    if (result.skip) return;
+    if (result.failures.length > 0)
+      throw new Error('getCommentBadgeState() 邏輯錯誤：\n' + result.failures.join('\n'));
+  });
+
+  await test('S-SEC-23 renderCommentBadgeHtml() 各 state 輸出正確徽章', async () => {
+    // 驗證每種旗標組合對應到正確的 emoji／文字。
+    // renderCommentBadgeHtml() 接收整個 j 物件（而非 state 數字），
+    // 函式內部自行呼叫 getCommentBadgeState(j) 取得 state 再輸出 HTML。
+    const result = await page.evaluate(() => {
+      if (typeof renderCommentBadgeHtml !== 'function') return { skip: true };
+
+      // 各 state 的代表性 j 物件 + 期望輸出關鍵字
+      const cases = [
+        {
+          label: 'STEP2 有新評語（State 1 / unread）',
+          j: { teacherCommentUnread: true,  teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '第一次評語' },
+          containsAny: ['🔴', '有新評語', 'unread', 'new-comment', 'state-1'],
+        },
+        {
+          label: 'STEP4 評語已更新（State 2 / updated_unread）',
+          j: { teacherCommentUnread: true,  teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' },
+          containsAny: ['🟠', '評語已更新', 'updated', 'state-2'],
+        },
+        {
+          label: 'STEP1 已審閱（State 3 / reviewed）',
+          j: { teacherCommentUnread: false, teacherCommentUpdated: false, teacherReviewed: true,  teacherComment: '' },
+          containsAny: ['✅', '已審閱', 'reviewed', 'state-3'],
+        },
+        {
+          label: 'STEP5 評語已閱讀（State 4 / updated_read）',
+          j: { teacherCommentUnread: false, teacherCommentUpdated: true,  teacherReviewed: true,  teacherComment: '第二次評語' },
+          containsAny: ['📖', '評語已閱讀', 'updated_read', 'state-4'],
+        },
+      ];
+
+      // 無徽章（State 0 / null）：初始未審閱月記必須輸出空字串或不含可見文字的 HTML
+      const html0 = renderCommentBadgeHtml({
+        teacherCommentUnread: false, teacherCommentUpdated: false,
+        teacherReviewed: false, teacherComment: null
+      }) || '';
+      const stripped0 = html0.replace(/<[^>]*>/g, '').trim();
+      if (stripped0.length > 0) {
+        return { skip: false, failures: [`無徽章(State 0) 應無輸出，但輸出：「${html0.slice(0, 80)}」`] };
+      }
+
+      const failures = [];
+      for (const { label, j, containsAny } of cases) {
+        const html = renderCommentBadgeHtml(j) || '';
+        const hit = containsAny.some(kw => html.includes(kw));
+        if (!hit) {
+          failures.push(
+            `[${label}]：輸出「${html.slice(0, 80)}」不含預期關鍵字 [${containsAny.join('/')}]`
+          );
+        }
+      }
+      return { skip: false, failures };
+    });
+    if (result.skip) return;
+    if (result.failures.length > 0)
+      throw new Error('renderCommentBadgeHtml() 輸出錯誤：\n' + result.failures.join('\n'));
+  });
+
+  await test('S-SEC-24 loadStudentHistory() 自動清除 teacherCommentUnread（STEP 3／STEP 5）', async () => {
+    // 驗證 loadStudentHistory() 在遍歷歷史月記時，
+    // 若該筆月記 teacherCommentUnread===true，會自動呼叫 updateDoc 把它清為 false。
+    // 對應 STEP 3（學生進歷史頁 → ✅ 已審閱）與 STEP 5（再次進歷史頁 → 📖 評語已閱讀）。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof loadStudentHistory === 'function') ? loadStudentHistory.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 特徵 1：有讀取 teacherCommentUnread（判斷是否需要清除）
+      const checksUnread = fnStr.includes('teacherCommentUnread');
+
+      // 特徵 2：有對 journals 路徑呼叫 updateDoc（或 setDoc/doc）
+      const callsUpdateDoc = fnStr.includes('updateDoc') || fnStr.includes('setDoc');
+
+      // 特徵 3：有把 teacherCommentUnread 寫回 false（清除旗標）
+      const writesUnreadFalse =
+        /teacherCommentUnread\s*:\s*false/.test(fnStr) ||
+        /['"]teacherCommentUnread['"]\s*:\s*false/.test(fnStr);
+
+      return { skip: false, checksUnread, callsUpdateDoc, writesUnreadFalse };
+    });
+    if (result.skip) return;
+    if (!result.checksUnread)
+      throw new Error('loadStudentHistory() 未讀取 teacherCommentUnread 欄位，無法判斷是否需要自動清除');
+    if (!result.callsUpdateDoc)
+      throw new Error('loadStudentHistory() 找不到 updateDoc / setDoc 呼叫，teacherCommentUnread 自動清除機制可能已移除');
+    if (!result.writesUnreadFalse)
+      throw new Error('loadStudentHistory() 找不到 teacherCommentUnread: false 寫入，清除旗標邏輯可能已被改寫');
+  });
+
+  await test('S-SEC-25 學生標記已讀只能把 teacherCommentUnread 設為 false（第二分支靜態分析）', async () => {
+    // 對應 rule.txt 第二分支：
+    //   affectedKeys().hasOnly(['teacherCommentUnread'])
+    //   && teacherCommentUnread == false
+    // 驗證 loadStudentHistory()（或其呼叫的輔助函式）送出的 updateDoc
+    // 只包含 teacherCommentUnread:false，不夾帶其他老師評語欄位。
+    const result = await page.evaluate(() => {
+      // 檢查 loadStudentHistory 本體與可能的輔助函式
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      // 特徵：不應在「已讀清除」的 updateDoc 中包含 teacherCommentUpdated:true
+      // （只有老師端 saveTeacherComment 才能寫 true）
+      // 粗略檢查：teacherCommentUpdated:true 不應出現在學生已讀清除的區塊附近
+      // （精確界定困難，改檢查 loadStudentHistory 函式本體）
+      const fnStr = (typeof loadStudentHistory === 'function') ? loadStudentHistory.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 已讀清除 updateDoc 中不應寫入 teacherCommentUpdated（老師端專用欄位）
+      // 簡單起見：若 fnStr 中同時含有 teacherCommentUpdated 與 updateDoc，發出警告
+      const writesUpdatedFlag = /teacherCommentUpdated/.test(fnStr);
+
+      // 應只寫 teacherCommentUnread:false（單欄位更新）
+      const writesOnlyUnread =
+        /teacherCommentUnread\s*:\s*false/.test(fnStr) &&
+        !writesUpdatedFlag;
+
+      return { skip: false, writesOnlyUnread, writesUpdatedFlag };
+    });
+    if (result.skip) return;
+    if (result.writesUpdatedFlag)
+      throw new Error(
+        'loadStudentHistory() 的已讀清除 updateDoc 含有 teacherCommentUpdated，' +
+        '只有老師端 saveTeacherComment() 才能寫這個欄位，學生端混入可能造成狀態污染'
+      );
+    if (!result.writesOnlyUnread)
+      throw new Error(
+        'loadStudentHistory() 找不到「只寫 teacherCommentUnread:false」的已讀清除邏輯，' +
+        'STEP 3／STEP 5 的自動清除可能已被改寫或移除'
+      );
+  });
+
+  // S-SEC-26 需要學生 session（Firestore Rules 端對端）
+  // 放在 else 分支之後的 skipped 清單前，以學生 session context 執行
+  // → 此處僅確認老師帳號靜態邏輯；Rules 端對端驗證在 _studentRulesCommentTests() 執行
 
   await test('S-15 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
     const errors = page._testErrors || [];
@@ -926,6 +1687,343 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.hasInnerHTML)    throw new Error('calcDistance() 找不到 innerHTML 賦值');
     if (!result.hasEscapeHtml)   throw new Error('calcDistance() 的 addressError 插入 innerHTML 前未使用 escapeHtml()');
   });
+
+  // ════════════════════════════════════════
+  // S-SEC-27  完成度進度條／單筆摘要收合判斷的地址檢查補上格式驗證（2026-06-29）
+  // 背景：教師（00號測試帳號）回報一個案例——地址欄填了「…公益路二段783」
+  //   （缺門牌「號」字），畫面上「完成度 4/4 可儲存」與單筆摘要「✓完成」皆顯示正常，
+  //   但按下「儲存月記」時被擋下（跳出「尚有欄位未填寫，請點此查看」）。
+  //   追查發現 saveJournal() 真正存檔時呼叫的 validateCompleteTaiwanAddress()
+  //   （要求地址需含縣市＋路名＋門牌號碼，不可只填地標）從未接到以下兩處：
+  //     ① WORK_FIELD_CHECKS 的 address.test()：原本只檢查 !!e.address（非空）
+  //     ② isEntryComplete() 的 addrOk：原本只檢查 !!addr（非空）
+  //   兩者皆只看「有沒有填字」，造成「完成度」顯示跟「真正存檔判斷」不一致——
+  //   畫面顯示可儲存，按下卻被擋，使用者體驗上像是規則消失了，但實際上
+  //   saveJournal() 的格式驗證從頭到尾都還在，純粹是進度顯示沒跟著做格式檢查。
+  // 修法：兩處都補上 && !validateCompleteTaiwanAddress(...)，與 saveJournal()
+  //   用同一個函式判斷，地址格式不完整時，進度條「地址」文字與單則收合徽章
+  //   都會正確顯示為未完成（紅字／橘字），不再只看是否為空字串。
+  // 以下為靜態分析（檢查原始碼字串），確認程式碼特徵存在，避免日後改動
+  // 不小心把這兩處退回成只檢查非空、重新跟 saveJournal() 的判斷脫節。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-27 完成度進度條／單筆摘要收合判斷的地址檢查已套用 validateCompleteTaiwanAddress() 格式驗證', async () => {
+    const result = await page.evaluate(() => {
+      const hasValidateFn = (typeof validateCompleteTaiwanAddress === 'function');
+      if (!hasValidateFn) return { skip: true };
+
+      // ① isEntryComplete()：addrOk 是否呼叫 validateCompleteTaiwanAddress
+      const entryFnStr = (typeof isEntryComplete === 'function') ? isEntryComplete.toString() : '';
+
+      // ② WORK_FIELD_CHECKS 裡 key==='address' 那筆的 test 函式是否呼叫 validateCompleteTaiwanAddress
+      const wfc = (typeof WORK_FIELD_CHECKS !== 'undefined' && Array.isArray(WORK_FIELD_CHECKS))
+        ? WORK_FIELD_CHECKS : null;
+      const addrCheck = wfc ? wfc.find(fc => fc.key === 'address') : null;
+      const addrTestStr = addrCheck ? addrCheck.test.toString() : '';
+
+      if (!entryFnStr || !wfc) return { skip: true };
+
+      return {
+        skip: false,
+        entryUsesValidate: /validateCompleteTaiwanAddress/.test(entryFnStr),
+        fieldCheckUsesValidate: /validateCompleteTaiwanAddress/.test(addrTestStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.entryUsesValidate)
+      throw new Error('isEntryComplete() 的地址檢查（addrOk）沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會跟 saveJournal() 的真正存檔判斷不一致（地址格式不完整時誤顯示「✓完成」）');
+    if (!result.fieldCheckUsesValidate)
+      throw new Error('WORK_FIELD_CHECKS 的 address 檢查沒有呼叫 validateCompleteTaiwanAddress()，只檢查是否為空字串，會讓「完成度 X/4」進度條誤顯示地址為綠字／可儲存，跟按下儲存時的實際判斷不一致');
+  });
+
+  // S-SEC-28  executeDeleteJournal() 補上 showLoading()/hideLoading()（2026-06-30）
+  await test('S-SEC-28 executeDeleteJournal() 有 showLoading()，且成功與失敗路徑皆有 hideLoading()', async () => {
+    // 2026-07-01 新增。
+    // executeDeleteJournal() 原本完全沒有呼叫 showLoading()/hideLoading()，與結構幾乎相同的
+    // 姊妹函式 executeBatchDeleteHistory()（批次刪除，同樣呼叫 deleteDoc()）行為不一致，
+    // 也不符合本專案安全性 Checklist「是否有 try/catch 確保 hideLoading() 一定執行」。
+    //
+    // 驗證三項特徵（缺一即退化）：
+    //   1. 函式本體含 showLoading() ── 刪除中有 loading 遮罩
+    //   2. try 區塊含 hideLoading()  ── 成功路徑會關閉遮罩
+    //   3. catch 區塊含 hideLoading() ── 失敗路徑也會關閉遮罩（不會卡住）
+    //
+    // 注意：executeDeleteJournal() 採「try/catch 各自呼叫 hideLoading()」寫法（不用 finally），
+    // 這與姊妹函式 executeBatchDeleteHistory() 的 showLoading()/hideLoading() 括在 try/catch
+    // 外部的寫法不同，但兩種都能確保任何路徑都會關閉遮罩，驗證邏輯對此保持彈性。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof executeDeleteJournal === 'function')
+        ? executeDeleteJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      // 是否有 showLoading()
+      const hasShowLoading = fnStr.includes('showLoading()');
+
+      // 把 try 區塊和 catch 區塊分開比對
+      // 找到 catch( 的位置，之前算 try 區塊，之後算 catch 區塊
+      const catchIdx = fnStr.indexOf('catch(');
+      const tryPart   = catchIdx > -1 ? fnStr.slice(0, catchIdx) : fnStr;
+      const catchPart = catchIdx > -1 ? fnStr.slice(catchIdx)    : '';
+
+      const tryHasHideLoading   = tryPart.includes('hideLoading()');
+      const catchHasHideLoading = catchPart.includes('hideLoading()');
+
+      return { skip: false, hasShowLoading, tryHasHideLoading, catchHasHideLoading };
+    });
+
+    if (result.skip) return;
+    if (!result.hasShowLoading)
+      throw new Error(
+        'executeDeleteJournal() 缺少 showLoading()，' +
+        '網路延遲時沒有 loading 遮罩，使用者可能重複點擊觸發多次刪除；' +
+        '且與姊妹函式 executeBatchDeleteHistory() 行為不一致'
+      );
+    if (!result.tryHasHideLoading)
+      throw new Error(
+        'executeDeleteJournal() 的成功路徑（try 區塊）缺少 hideLoading()，' +
+        '刪除成功後 loading 遮罩不會關閉'
+      );
+    if (!result.catchHasHideLoading)
+      throw new Error(
+        'executeDeleteJournal() 的失敗路徑（catch 區塊）缺少 hideLoading()，' +
+        '刪除失敗後 loading 遮罩會卡住'
+      );
+  });
+
+  await test('S-SEC-29 saveStudentReply() replyChanged 防護（內容未變不重新觸發未讀旗標／重複推播）', async () => {
+    // 2026-07 新增。對應 teacher.html saveTeacherComment() 的 commentChanged 防護
+    // （T-SEC-20／T-SEC-23）同一類問題：學生只是重新打開回覆框、文字完全沒改就按
+    // 「更新回覆」，若每次都無條件寫 studentReplyUnread:true／studentReplyContentAt，
+    // 會把老師端已讀狀態誤打回未讀，notify-service 也會因 studentReplyContentAt
+    // 跟著刷新而誤判成新回覆、對同一則內容重複推播。
+    //
+    // 2026-07-11 修正：saveStudentReply() 本身同日改版——oldReply 原本從前端快取
+    // window._studentHistoryJournals 讀取，改成送出前 await getDoc(ref) 現查伺服器
+    // 當下值（修正多裝置/多分頁快取落後伺服器真實值時，合法回覆會被 rule.txt 的
+    // 「內容改變」與「內容沒變」兩個分支同時判斷失敗、誤擋 403 的問題）。下面第2項
+    // 檢查同步改為驗證新寫法，不再驗證已經不存在的快取讀取邏輯。
+    //
+    // 驗證五項特徵（缺一即退化）：
+    //   1. replyChanged 變數存在
+    //   2. 舊回覆值改為送出前 getDoc(ref) 現查伺服器當下值，不是從前端快取讀取
+    //   3. studentReplyUnread 的寫入受 replyChanged 控制（spread 條件寫入）
+    //   4. studentReplyContentAt 的寫入同樣受 replyChanged 控制
+    //   5. studentReplyAt 維持無條件寫入（角色對應 teacher.html 的 reviewedAt，
+    //      純粹是「我的回覆」泡泡顯示時間，不應被 replyChanged 閘住）
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveStudentReply === 'function') ? saveStudentReply.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasReplyChanged = fnStr.includes('replyChanged');
+
+      // 2026-07-11 修正：原本的寫法是 /oldReply\s*=\s*cachedJournal/.test(fnStr) ||
+      // fnStr.includes('_studentHistoryJournals')，第二個條件對新版程式碼會產生假陽性——
+      // 新版函式裡有一段解釋「當初為什麼從快取改成現查」的說明性註解，本身就會提到
+      // '_studentHistoryJournals' 這個舊變數名，寬鬆的 fnStr.includes() 字串搜尋會命中
+      // 這段註解文字本身，而不是真的驗證到程式行為（跟本檔已知的 S-SEC-08／
+      // teacher_test.js T-SEC-30 假失敗同一類陷阱，只是方向相反：那兩者是「檢查壞寫法
+      // 不存在」被解釋性註解誤判成還存在，這裡是「檢查好寫法還在」被「已經不這樣寫了」
+      // 的說明文字誤判成還在）。改為錨定實際的賦值/呼叫語法：①確認有 await getDoc(...)
+      // 呼叫，②確認 oldReply 明確賦值自 freshSnap，兩者都命中真正的程式碼結構，
+      // 不會被單純提到變數名稱的註解文字誤判。
+      const readsOldFromFreshDoc =
+        /await\s+getDoc\s*\(/.test(fnStr) &&
+        /const\s+oldReply\s*=\s*\(\s*freshSnap/.test(fnStr);
+
+      const unreadGatedByChanged =
+        /replyChanged\s*\?[\s\S]{0,200}studentReplyUnread/.test(fnStr) ||
+        /if\s*\(\s*replyChanged\s*\)[\s\S]{0,200}studentReplyUnread/.test(fnStr);
+
+      const contentAtGatedByChanged =
+        /replyChanged\s*\?[\s\S]{0,200}studentReplyContentAt/.test(fnStr) ||
+        /if\s*\(\s*replyChanged\s*\)[\s\S]{0,200}studentReplyContentAt/.test(fnStr);
+
+      // studentReplyAt 應該在 replyChanged 條件區塊『之外』先無條件寫入；
+      // 用「第一次出現的位置早於 replyChanged 條件區塊」近似檢查是否仍維持無條件寫入
+      const studentReplyAtIdx = fnStr.indexOf('studentReplyAt:');
+      const replyChangedBlockIdx = fnStr.search(/replyChanged\s*\?/);
+      const studentReplyAtUnconditional =
+        studentReplyAtIdx !== -1 &&
+        (replyChangedBlockIdx === -1 || studentReplyAtIdx < replyChangedBlockIdx);
+
+      return {
+        skip: false,
+        hasReplyChanged,
+        readsOldFromFreshDoc,
+        unreadGatedByChanged,
+        contentAtGatedByChanged,
+        studentReplyAtUnconditional,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasReplyChanged)
+      throw new Error(
+        'saveStudentReply() 找不到 replyChanged 變數，' +
+        '學生重新送出未修改的回覆會誤觸發老師端已讀狀態倒退與 notify-service 重複推播'
+      );
+    if (!result.readsOldFromFreshDoc)
+      throw new Error(
+        'saveStudentReply() 找不到「送出前 await getDoc(ref) 現查伺服器當下 studentReply」' +
+        '的邏輯（應同時看得到 getDoc(...) 呼叫與 const oldReply = (freshSnap... 賦值），' +
+        '舊回覆值可能又改回從前端快取（_studentHistoryJournals）讀取——多裝置/多分頁情境下' +
+        '快取可能落後伺服器真實值，會讓合法回覆被 rule.txt 的「內容改變」與「內容沒變」' +
+        '兩個分支同時判斷失敗而誤擋 403'
+      );
+    if (!result.unreadGatedByChanged)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyUnread 寫入未受 replyChanged 控制，' +
+        '內容未變的重新送出仍會把老師端已讀狀態誤打回未讀'
+      );
+    if (!result.contentAtGatedByChanged)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyContentAt 寫入未受 replyChanged 控制，' +
+        'notify-service 會把「內容沒變的重新送出」誤判成新回覆而重複推播'
+      );
+    if (!result.studentReplyAtUnconditional)
+      throw new Error(
+        'saveStudentReply() 的 studentReplyAt 疑似被 replyChanged 條件擋住，' +
+        '「我的回覆」泡泡顯示時間可能不會在重新送出時更新'
+      );
+  });
+
+  await test('S-SEC-30 saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）', async () => {
+    // 2026-07-08 新增。背景：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播
+    // 子系統時，rule.txt 一般編輯分支同步要求歸零的新欄位（跟 teacherComment／
+    // teacherReviewed／reviewedAt／teacherCommentUnread／teacherCommentUpdated 同一組
+    // 待遇）。saveJournal() 用 setDoc(...,{merge:true}) 寫入，若 data 物件沒有明確帶
+    // teacherCommentContentAt: null，merge 只會保留舊值——只要月記曾被老師留過評語
+    // （teacherCommentContentAt 已是非 null 值），學生之後任何一次一般編輯儲存都會撞上
+    // rule.txt 的 == null 要求而被 Firestore 拒絕（403），整份月記存檔失敗，且沒有其他
+    // UI 提示（覆蓋確認對話框的 reviewWarning／replyWarning 都不會提到這個，使用者只會
+    // 看到「❌ 儲存失敗：...」）。
+    //
+    // ⚠️ 純靜態分析：只能確認欄位存在、賦值為 null、且跟其餘老師欄位歸零寫在同一個
+    // data 物件範圍內，無法像真正對 Firestore Emulator 用 merge:true 模擬「文件已有
+    // 非 null 舊值」情境那樣，直接驗證 rule.txt 真的會放行——這塊仍是已知測試盲區
+    // （test-rules.js 目前全部用整份 .set() 覆蓋，從未用過 merge:true 模擬真實寫入
+    // 方式），建議另外在 test-rules.js 補上對應的規則層級回歸測試。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!fnStr) return { skip: true };
+      const hasField = fnStr.includes('teacherCommentContentAt');
+      const hasNullValue = /teacherCommentContentAt\s*:\s*null/.test(fnStr);
+      // 確認跟其餘老師欄位歸零寫在同一個 data 物件裡（用 teacherCommentUpdated: false
+      // 附近 600 字元窗口比對，跟 teacher_test.js T-SEC-30 的視窗寫法一致，避免只是
+      // 巧合出現在檔案別處，例如註解或其他不相干的函式）
+      const nearOtherTeacherFields =
+        /teacherCommentUpdated\s*:\s*false\s*,[\s\S]{0,600}teacherCommentContentAt\s*:\s*null/.test(fnStr);
+      return { skip: false, hasField, hasNullValue, nearOtherTeacherFields };
+    });
+    if (result.skip) return;
+    if (!result.hasField)
+      throw new Error(
+        'saveJournal() 找不到 teacherCommentContentAt，一般編輯時不會歸零此欄位；' +
+        '只要月記曾被老師留過評語，之後任何一次編輯儲存都會被 rule.txt 拒絕（403），整份月記存檔失敗'
+      );
+    if (!result.hasNullValue)
+      throw new Error(
+        'saveJournal() 有 teacherCommentContentAt 但賦值不是 null，' +
+        '可能無法滿足 rule.txt 一般編輯分支 == null 的要求'
+      );
+    if (!result.nearOtherTeacherFields)
+      throw new Error(
+        'teacherCommentContentAt: null 沒有跟 teacherComment／teacherReviewed／teacherCommentUnread／' +
+        'teacherCommentUpdated 等其餘老師欄位歸零寫在同一個 data 物件內，請確認位置正確（例如誤放進' +
+        '其他 if 分支或條件式區塊，導致實際不會隨每次一般編輯無條件寫入）'
+      );
+  });
+
+  await test('S-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入', async () => {
+    // 2026-07-10 新增。對稱於 teacher_test.js 的 T-SEC-31（老師端已有此測試，學生端一直
+    // 缺對應覆蓋，見 AI_推播系統說明.md 第六節 #11）。已直接取得 student.html 實際內容
+    // 逐項核對，student.html 的 initPushNotifications() 跟 teacher.html 那份幾乎完全對稱，
+    // 唯一的實質差異是 Firestore 寫入路徑用 'users' 集合（對應 rule.txt 的
+    // request.auth.uid == userId），而非老師端的 'admins' 集合。
+    //
+    // 五項檢查對應五個真實存在、各自有明確理由的退化風險（與 T-SEC-31 完全同構）：
+    //   1. navigator.serviceWorker.register('./fcm-sw.js', ...) 必須用相對路徑——
+    //      函式內的註解本身就說明這是 2026-07 的真實 bug 修正：這個站是 GitHub Pages
+    //      的 project page（網址帶 /internship-journal/ 子路徑），用開頭帶斜線的絕對
+    //      路徑 '/fcm-sw.js' 會讓瀏覽器去抓網域最上層、實際上 404，這裡若被改回絕對
+    //      路徑，推播會在所有裝置上悄悄失效但不會報錯（try/catch 吞掉），很難察覺。
+    //      ⚠️ 注意：函式內部的解釋性註解本身就完整提到 '/fcm-sw.js' 這個「壞」字串
+    //      （用來說明為何不能這樣寫），若測試邏輯只是「檢查這個壞字串不存在」會被
+    //      註解文字本身誤判為失敗（這正是 AI_推播系統說明.md 第九節記錄過的陷阱）。
+    //      這裡跟 T-SEC-31 一樣，改成正向比對「register('./fcm-sw.js' 這個實際呼叫點
+    //      的字面模式是否存在」，不受註解內容影響。
+    //   2. Firestore 寫入路徑 doc(db, 'users', currentUser.uid, 'fcmTokens', token)
+    //      必須用 currentUser.uid——這條路徑要能通過 rule.txt 的
+    //      request.auth.uid == userId 檢查。
+    //   3. userAgent 欄位必須截斷至 200 字（.slice(0, 200)）——對應 AI_CONTEXT.md
+    //      「Firestore 資料結構」章節記載的 fcmTokens 文件 schema，若移除截斷，
+    //      理論上可以寫入任意長度字串進這個公開集合。
+    //   4. try/catch 的 catch 區塊不能重新 throw——呼叫端 enterApp() 註解明確寫著
+    //      「刻意 fire-and-forget（不 await、失敗只 console.warn）」，若 catch 區塊被
+    //      改成 rethrow，推播初始化失敗會變成未捕捉例外，可能連帶讓 enterApp() 後續
+    //      邏輯中斷。
+    //   5. enterApp() 呼叫 initPushNotifications() 時不能加 await——同一個
+    //      fire-and-forget 設計意圖的另一半，若被改成 await，使用者登入流程會被
+    //      這整個推播註冊流程（含瀏覽器跳出通知權限詢問視窗）卡住。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof initPushNotifications === 'function') ? initPushNotifications.toString() : '';
+      const enterAppStr = (typeof enterApp === 'function') ? enterApp.toString() : '';
+      if (!fnStr || !enterAppStr) return { skip: true };
+
+      const relativeSwPath = /navigator\.serviceWorker\.register\(\s*['"]\.\/fcm-sw\.js['"]/.test(fnStr);
+      const correctFsPath = /doc\(\s*db\s*,\s*['"]users['"]\s*,\s*currentUser\.uid\s*,\s*['"]fcmTokens['"]/.test(fnStr);
+      const userAgentTruncated = /userAgent\s*:\s*\([^)]*\)\.slice\(\s*0\s*,\s*200\s*\)/.test(fnStr);
+
+      const catchIdx = fnStr.lastIndexOf('} catch');
+      const catchBlock = catchIdx >= 0 ? fnStr.slice(catchIdx) : '';
+      const catchDoesNotRethrow = !!catchBlock && !catchBlock.includes('throw');
+
+      const hasAwaitedCall = /await\s+initPushNotifications\(\)/.test(enterAppStr);
+      const hasBareCall = enterAppStr.includes('initPushNotifications();') || enterAppStr.includes('initPushNotifications() ;');
+
+      return {
+        skip: false,
+        relativeSwPath,
+        correctFsPath,
+        userAgentTruncated,
+        catchFound: !!catchBlock,
+        catchDoesNotRethrow,
+        hasAwaitedCall,
+        hasBareCall,
+      };
+    });
+    if (result.skip) return;
+    if (!result.relativeSwPath)
+      throw new Error(
+        'initPushNotifications() 沒有用相對路徑 register(\'./fcm-sw.js\')——' +
+        '若被改回絕對路徑 /fcm-sw.js，GitHub Pages project page 子路徑下會 404，' +
+        '推播會悄悄失效（try/catch 吞掉錯誤，畫面上完全看不出來）'
+      );
+    if (!result.correctFsPath)
+      throw new Error(
+        'initPushNotifications() 的 Firestore 寫入路徑不是 doc(db, \'users\', currentUser.uid, \'fcmTokens\', token)，' +
+        '可能無法通過 rule.txt 的 request.auth.uid == userId 檢查'
+      );
+    if (!result.userAgentTruncated)
+      throw new Error(
+        'initPushNotifications() 的 userAgent 欄位未截斷至 200 字（.slice(0, 200)），' +
+        '違反 fcmTokens 文件的既定 schema'
+      );
+    if (!result.catchFound || !result.catchDoesNotRethrow)
+      throw new Error(
+        'initPushNotifications() 的 catch 區塊會重新 throw（或找不到 catch 區塊），' +
+        '違反「fire-and-forget，失敗不擋登入」的設計意圖，enterApp() 可能因此被中斷'
+      );
+    if (result.hasAwaitedCall)
+      throw new Error(
+        'enterApp() 用 await 呼叫 initPushNotifications()，' +
+        '登入流程會被整個推播註冊流程（含瀏覽器通知權限詢問視窗）卡住，違反 fire-and-forget 設計'
+      );
+    if (!result.hasBareCall)
+      throw new Error(
+        'enterApp() 找不到不帶 await 的 initPushNotifications() 呼叫，呼叫方式可能已改變，需要重新確認此測試'
+      );
+  });
+
 
   return results;
 }

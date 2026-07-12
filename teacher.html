@@ -20,6 +20,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getMessaging, getToken, deleteToken, onMessage, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -39,6 +40,8 @@
 
   window._firebase = { db, collection, collectionGroup, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider, setPersistence, browserLocalPersistence };
+  // 2026-07 新增：Web Push 通知用，比照 window._auth 的暴露方式
+  window._messaging = { app, getMessaging, getToken, deleteToken, onMessage, isMessagingSupported };
 </script>
 
 <style>
@@ -498,7 +501,19 @@ tr:last-child td { border-bottom: none; }
   .company-filter-panel { left:0; right:0; width:100%; min-width:0; }
 }
 @media (max-width: 520px) {
-  .stats-tab { padding:10px 12px; font-size:13px; }
+  /* 2026-07 補修：「✅繳交狀況／📍地點統計／💰薪資統計／🗂️工作類型」4個頁籤在窄螢幕
+     下被擠壓換行，換行點常切在詞語中間（例如「繳交狀」/「況」、「工作類」/「型」），
+     改為文字不換行、頁籤列可橫向捲動，寧可讓使用者左右滑動查看，也不要把詞語截斷。
+     只在此斷點內調整，不影響電腦版（僅套用 max-width:520px 既有斷點）。*/
+  /* 2026-07（第二次）補修：手機/PWA 版用手指滑動頁籤列時，原本只設 overflow-x:auto，
+     沒有明確指定 overflow-y，CSS 規範規定「一軸設非 visible、另一軸仍是 visible」時會
+     被瀏覽器自動computed成 auto，導致這個容器同時具備垂直捲動能力，手指滑動角度稍微
+     不是正橫向時會被判讀成上下捲動，頁籤列跟著跑位。補上 overflow-y:hidden 明確關閉
+     垂直捲動，並用 touch-action:pan-x 限制觸控手勢只能水平平移，兩者一起確保頁籤列
+     只能左右移動，不會再上下跑掉。 */
+  .stats-tab-bar { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; touch-action: pan-x; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .stats-tab-bar::-webkit-scrollbar { display: none; }
+  .stats-tab { padding:10px 12px; font-size:13px; white-space: nowrap; flex: 0 0 auto; }
   .stats-control-stack { gap:10px; }
   .stats-control-stack > * { flex:none !important; min-width:0 !important; width:100% !important; align-self:stretch !important; }
   .stats-control-actions { flex-direction:column; }
@@ -520,6 +535,18 @@ tr:last-child td { border-bottom: none; }
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
 .comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere; }
+/* 對話串（老師端月記卡片用） */
+.journal-thread { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.journal-thread-title { font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 12px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+.thread-bubble { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.thread-bubble:last-child { border-bottom: none; }
+.thread-bubble-label { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 3px; }
+.thread-bubble-label.label-teacher { color: #22c55e; }
+.thread-bubble-label.label-student { color: var(--accent-red); }
+.thread-bubble-label.label-student-read { color: var(--text2); }
+.thread-bubble-body { font-size: 13px; color: var(--text); line-height: 1.65; word-break: break-all; overflow-wrap: anywhere; }
+.thread-bubble-body.text-muted { color: var(--text2); font-size: 12px; }
+.thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
 .badge-reviewed { background:rgba(34,197,94,0.15);color:var(--accent-green);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 .badge-comment  { background:rgba(239,68,68,0.12);color:var(--accent-red);border:1px solid rgba(239,68,68,0.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px; }
 
@@ -784,6 +811,7 @@ tr:last-child td { border-bottom: none; }
               <div style="font-size:13px;font-weight:700;color:var(--accent-red)">📋 本月未繳名單</div>
               <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
             </div>
+            <div id="stat-missing-warn-bars" style="margin-bottom:8px"></div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
@@ -807,6 +835,10 @@ tr:last-child td { border-bottom: none; }
             <div class="stat-label">有評語 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
             <div class="stat-value" style="color:var(--accent2)" id="stat-commented">-</div>
           </div>
+          <div class="stat-card" onclick="toggleStatList('student-reply')" style="cursor:pointer;user-select:none" title="點擊查看回覆名單">
+            <div class="stat-label">有新回覆 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
+            <div class="stat-value" id="stat-student-reply">-</div>
+          </div>
         </div>
         <div id="stat-list-panel-reviewed" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-green);padding:14px 18px">
@@ -824,6 +856,12 @@ tr:last-child td { border-bottom: none; }
           <div class="card" style="border-left:3px solid var(--accent2);padding:14px 18px">
             <div style="font-size:13px;font-weight:700;color:var(--accent2);margin-bottom:10px">📋 本月有評語名單</div>
             <div id="stat-list-names-commented" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+        <div id="stat-list-panel-student-reply" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
+            <div style="font-size:13px;font-weight:700;color:var(--accent-red);margin-bottom:10px">🔴 學生有新回覆名單</div>
+            <div id="stat-list-names-student-reply" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
         </div>
         <div style="font-size:15px;font-weight:700;margin:18px 0 12px">🔄 跨月待複審</div>
@@ -1004,6 +1042,7 @@ tr:last-child td { border-bottom: none; }
               <button class="stats-tab active" id="stats-tab-submit" onclick="switchStatsTab('submit')">✅ 繳交狀況</button>
               <button class="stats-tab" id="stats-tab-location" onclick="switchStatsTab('location')">📍 地點統計</button>
               <button class="stats-tab" id="stats-tab-salary" onclick="switchStatsTab('salary')">💰 薪資統計</button>
+              <button class="stats-tab" id="stats-tab-worktype" onclick="switchStatsTab('worktype')">🗂️ 工作類型</button>
             </div>
             <div id="stats-panel-submit"><div class="card"><div id="submit-stats-content"><div class="empty-state"><div class="icon">📊</div><p>請輸入日期區間後按查詢</p></div></div></div></div>
             <div id="stats-panel-location" class="hidden">
@@ -1123,6 +1162,22 @@ tr:last-child td { border-bottom: none; }
                 </div>
               </div>
             </div>
+
+            <div id="stats-panel-worktype" class="hidden">
+              <div class="card" style="margin-bottom:16px">
+                <div style="font-size:15px;font-weight:700;margin-bottom:4px">🗂️ 工作類型分佈</div>
+                <div style="font-size:11px;color:var(--text3);margin-bottom:12px">各類工作在篩選期間內的記錄次數（「其他（補充說明）」統一歸入「其他」）；點擊橫條查看做過該類工作的學生名單</div>
+                <div id="worktype-summary" style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:6px">查詢後顯示</div>
+                <div id="worktype-chart" class="chart-bar-wrap"><div class="empty-state"><div class="icon">🗂️</div><p>查詢後顯示</p></div></div>
+              </div>
+              <div id="worktype-detail-panel" style="display:none">
+                <div class="card">
+                  <div style="font-size:14px;font-weight:700;margin-bottom:10px" id="worktype-detail-title">做過這類工作的學生</div>
+                  <div id="worktype-detail-names" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -1414,6 +1469,7 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="modal-body">
       <div id="comment-modal-info" style="background:var(--bg3);padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;color:var(--text2);line-height:1.8"></div>
+      <div id="comment-modal-student-reply" style="display:none;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25);padding:10px 14px;border-radius:8px;margin-bottom:14px"></div>
       <div class="form-group">
         <label>老師評語</label>
         <textarea id="comment-modal-textarea" rows="5" placeholder="請輸入對本份月記的評語與建議..."></textarea>
@@ -1909,14 +1965,21 @@ async function loadRosterStudentsForSemesters(semesters, journals = []) {
   const groups = await Promise.all(unique.map(async sem => {
     let roster = await loadTermRoster(sem, { fallbackRoot: sem === active });
     if (!roster.length) {
+      // 2026-07-02 補修：此學期沒有存過名冊快照時，直接從月記反推出一份「名冊」，
+      // name/company 這時候其實還是學生自己填的 j.studentName/j.company 原始欄位，
+      // 只是繞了一手，並不是「來自老師端輸入」的安全資料——T-SEC-26/27/28 三輪的
+      // sanitizeExcelCell() 防護都建立在「studentMap 資料來自名冊、安全」這個假設上，
+      // 這個假設在這個分支下不成立。在根源補上 sanitizeExcelCell()，讓所有透過
+      // students/studentMap 取值的下游（含未來新增的統計/匯出功能）都自動繼承防護，
+      // 不需要每次新增功能都重新掃一遍。
       const bySeat = {};
       journals.filter(j => j.semester === sem).forEach(j => {
         const seatNo = String(j.seatNo || '').padStart(2, '0');
         if (!seatNo || bySeat[seatNo]) return;
         bySeat[seatNo] = normalizeRosterStudent({
           seatNo,
-          name: j.studentName || '',
-          company: j.company || ''
+          name: sanitizeExcelCell(j.studentName || ''),
+          company: sanitizeExcelCell(j.company || '')
         }, sem);
       });
       roster = Object.values(bySeat);
@@ -2098,10 +2161,106 @@ function enterApp() {
   document.getElementById('header-user-role').textContent = '👨‍🏫 教師';
   loadExportStudents();
   showPage('t-dashboard');
+  // 2026-07 新增：Web Push 通知註冊。fire-and-forget，失敗不擋登入。
+  initPushNotifications();
+}
+
+// ============ Web Push 通知（2026-07 新增） ============
+// 學生回覆評語時，由伺服器端排程腳本（notify-service/send-push-notifications.js，透過
+// GitHub Actions 每 5 分鐘輪詢一次，見 .github/workflows/push-notify.yml；不是 Cloud
+// Functions，本專案未升級 Blaze 方案）推播到這裡註冊的裝置。
+// token 存在 /admins/{uid}/fcmTokens/ 底下，跟 student.html 的 /users/{uid}/fcmTokens/ 對稱。
+const FCM_VAPID_KEY = 'BOUmDJyMxKobgdMBrq1wtf5y6bHoRa8voW7Lm2FDaNDQW0dLA0TtrMfNpPqba_PO4swUOL-pUp7h0p0NevtsI7Y'; // Firebase Console > Cloud Messaging > Web Push 憑證（2026-07-05 產生，跟 student.html 同一把）
+let _fcmSwRegistration = null;
+
+async function initPushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) return;
+    if (!window._messaging) return;
+    const { isMessagingSupported } = window._messaging;
+    if (isMessagingSupported && !(await isMessagingSupported())) return;
+    if (Notification.permission === 'denied') return;
+
+    if (!_fcmSwRegistration) {
+      // 2026-07 修正：這個站是 GitHub Pages 的 project page（網址帶 /internship-journal/
+      // 子路徑），不是 repo 名稱本身就是 xxx.github.io 的 user/org page。用 '/fcm-sw.js'
+      // 這種開頭帶斜線的絕對路徑，瀏覽器一律會去抓網域最上層（https://xxx.github.io/fcm-sw.js），
+      // 但檔案實際上在子路徑下（.../internship-journal/fcm-sw.js），註冊會直接 404 失敗——
+      // 跟下面既有的 './sw.js' 用同一種相對路徑寫法，才能正確對應到目前頁面所在的子路徑。
+      _fcmSwRegistration = await navigator.serviceWorker.register('./fcm-sw.js', {
+        scope: './firebase-cloud-messaging-push-scope'
+      });
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const { getMessaging, getToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    });
+    if (!token) return;
+
+    const { doc, setDoc } = firebase_funcs;
+    await setDoc(doc(db, 'admins', currentUser.uid, 'fcmTokens', token), {
+      createdAt: localISOStr(),
+      userAgent: (navigator.userAgent || '').slice(0, 200)
+    });
+  } catch (e) {
+    console.warn('[Push] 推播初始化失敗（不影響其他功能）：', e.message || e);
+  }
+}
+
+// 2026-07-06 修正：改讀 payload.data.title/body，不再讀 payload.notification.title/body，
+// 跟 fcm-sw.js／send-push-notifications.js 同日修正同步（後端改成只送 data，不再送
+// notification 頂層欄位，避免 FCM SDK 自動顯示與 onBackgroundMessage 手動顯示各跳一次、
+// 同一則收到兩次的問題）。這裡不同步改的話，前景 toast 會變成只顯示「📩」空白訊息。
+try {
+  if (window._messaging) {
+    const { getMessaging, onMessage } = window._messaging;
+    onMessage(getMessaging(window._messaging.app), (payload) => {
+      toast(`📩 ${payload.data?.title || ''} ${payload.data?.body || ''}`.trim(), 'success');
+    });
+  }
+} catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }
+
+// 2026-07（稽核修正）：登出時清除推播 token，避免共用裝置（例如辦公室共用電腦）換人登入後，
+// 前一位老師的推播內容（含學生回覆文字片段）繼續顯示在同一台裝置上。原本 logout() 只
+// signOut()，從未刪除 /admins/{uid}/fcmTokens/ 底下的 token 文件，也沒呼叫 FCM 的
+// deleteToken()——Firebase 官方文件本來就建議在使用者登出時呼叫 deleteToken()，正是為了
+// 這個情境。必須在 signOut() 之前執行：rule.txt 對 fcmTokens 的 delete 規則要求
+// isAdmin() && (adminId == request.auth.uid || adminId == emailKey())，一旦先登出，
+// request.auth 就會變 null，isAdmin() 也會跟著失敗，屆時想刪也刪不了。任何一步失敗
+// （例如從未成功註冊過推播、瀏覽器不支援等）都只記錄警告、不擋登出本身。
+async function disablePushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!window._messaging || !_fcmSwRegistration) return; // 從未成功註冊過推播，沒有 token 可清
+    const { getMessaging, getToken, deleteToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    }).catch(() => null);
+    if (token) {
+      const { doc, deleteDoc } = firebase_funcs;
+      await deleteDoc(doc(db, 'admins', currentUser.uid, 'fcmTokens', token)).catch(() => {});
+    }
+    // 連同瀏覽器本身的推播訂閱一併取消，下次登入（不論同一人或換別人）都會重新走一次
+    // getToken()，不會沿用舊的訂閱，也就不會有「Firestore 文件刪了、但裝置底層訂閱還在」
+    // 這種殘留狀態。
+    if (deleteToken) await deleteToken(messaging).catch(() => {});
+  } catch (e) {
+    console.warn('[Push] 登出時清除推播 token 失敗（不影響登出本身）：', e.message || e);
+  }
 }
 
 // ============ 登出 ============
 async function logout() {
+  await disablePushNotifications(); // 必須在 signOut() 之前，才有權限刪除自己的 token 文件
   try {
     const { auth, signOut } = window._auth;
     await signOut(auth);
@@ -2266,7 +2425,8 @@ async function bindStudent() {
       studentName: stuSnap.data().name || '',
       boundAt: localISOStr(),
       boundBy: currentUser.email
-    });
+    }, { merge: true }); // 2026-06-29 補修：保留學生已登入時寫入的 uid 欄位，
+                          // 與 syncActiveRootFromRoster() 的 merge:true 行為對齊
     hideLoading();
     document.getElementById('bind-email').value = '';
     document.getElementById('bind-seat').value = '';
@@ -2348,30 +2508,67 @@ async function loadTeacherDashboard() {
   const reviewed = activeJournals.filter(j => !!j.teacherReviewed).length;
   const commented = activeJournals.filter(j => (j.teacherComment || '').trim()).length;
   const unreviewed = Math.max(submitted - reviewed, 0);
+  // 全班所有月記中有學生未讀回覆的（不限本月，老師隨時要能看到）
+  const allJournals = userJournalData(jSnap);
+  const studentReplies = allJournals.filter(j => j.studentReplyUnread);
   document.getElementById('stat-submitted').textContent = submitted;
   document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-rate').textContent = total ? Math.round(submitted/total*100) + '%' : '0%';
   document.getElementById('stat-reviewed').textContent = reviewed;
   document.getElementById('stat-unreviewed').textContent = unreviewed;
   document.getElementById('stat-commented').textContent = commented;
+  const replyEl = document.getElementById('stat-student-reply');
+  if (replyEl) {
+    replyEl.textContent = studentReplies.length;
+    replyEl.style.color = studentReplies.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
+  }
   // 各名單（供點擊展開）
   const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
   const missingStudents = activeStuDocs.filter(d => {
     const sno = d.data().seatNo || d.id.slice(semPrefix.length);
     return !submittedSeats.has(sno);
   });
+  // 計算每位未繳學生本學期累計缺繳月數（含本月）
+  const semMonths = getSemesterMonths(sem);
+  const thisMonthIdx = semMonths.indexOf(thisMonth);
+  // 本學期到目前為止（含本月）已有 journal 的月份，依座號建 Map
+  // 限定 activeSeatNos（本班在籍名單）避免跨班舊資料干擾
+  const semJournalsBySeq = {};
+  const openedMonthsInSem = new Set();
+  userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem).forEach(j => {
+    if (!semJournalsBySeq[j.seatNo]) semJournalsBySeq[j.seatNo] = new Set();
+    semJournalsBySeq[j.seatNo].add(j.month);
+    openedMonthsInSem.add(j.month);
+  });
+  // 只計「班上有人繳交（老師實際開放過）」且「不晚於當月」的月份
+  // 一律包含本月（本月未繳名單的來源），避免本月無人繳交時誤判為未開放
+  const monthsToCheck = thisMonthIdx >= 0
+    ? semMonths.filter((m, i) => i <= thisMonthIdx && (m === thisMonth || openedMonthsInSem.has(m)))
+    : [thisMonth];
+  window._missingWithCount = missingStudents.map(d => {
+    const sno = d.data().seatNo || d.id.slice(semPrefix.length);
+    const name = d.data().name || sno;
+    const submitted = semJournalsBySeq[sno] || new Set();
+    const missCount = monthsToCheck.filter(m => !submitted.has(m)).length;
+    return { label: `${sno} ${name}`, sno, name, missCount };
+  });
   window._statLists = {
-    missing:    missingStudents.map(d => { const sno = d.data().seatNo || d.id.slice(semPrefix.length); return `${sno} ${d.data().name || sno}`; }),
+    missing:    window._missingWithCount.map(s => s.label),
     submitted:  activeJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
   };
-  // 本月未審閱的可點擊資料（供審閱隊列使用）
+  // 學生回覆可點擊資料（供展開面板使用）
+  window._studentReplyClickData = studentReplies.map(j => ({
+    seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester, month: j.month, ownerUid: j.ownerUid || ''
+  }));
   window._unreviewedClickData = activeJournals.filter(j => !j.teacherReviewed).map(j => ({
     seatNo: j.seatNo, name: j.studentName || j.seatNo, semester: j.semester
   }));
-  // 跨月待複審：非本月、teacherReviewed 為 false 的月記（不限學期格式，userJournalData 已過濾本班）
+  // 跨月待複審：非本月、teacherReviewed 為 false 的月記
+  // （userJournalData 只過濾路徑結構為 users/ 的文件，不限本班；
+  //  實際影響有限，因刪除學生時其月記一併刪除，不會長期殘留非本班資料）
   const crossMonthJournals = userJournalData(jSnap).filter(j =>
     !j.teacherReviewed &&
     !(j.semester === sem && j.month === thisMonth)
@@ -2403,7 +2600,7 @@ async function loadTeacherDashboard() {
     crossMonthEl.style.color = crossMonthJournals.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
   }
   // 重設所有展開面板
-  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2417,7 +2614,7 @@ async function loadTeacherDashboard() {
   } catch(e) {
     console.error('主頁資料載入失敗', e);
     toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
-    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-cross-month'].forEach(id => {
+    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-student-reply','stat-cross-month'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '-';
     });
     document.getElementById('stat-rate').textContent = '-';
@@ -2452,7 +2649,13 @@ async function copyMissingList() {
   const deadlineLine = deadlineStr
     ? `請於 ${deadlineStr} 前完成：`
     : '請盡快完成：';
-  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${list.map(n => n).join('\n')}`;
+  const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
+  const lines = data.map(s => {
+    if (s.missCount >= 3) return `${s.label}　🔴 本學期已缺${s.missCount}個月`;
+    if (s.missCount === 2) return `${s.label}　⚠ 本學期已缺2個月`;
+    return s.label;
+  });
+  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
   const btn = document.getElementById('copy-missing-btn');
   navigator.clipboard.writeText(text).then(() => {
     if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
@@ -2464,39 +2667,88 @@ async function copyMissingList() {
 
 function toggleStatList(key) {
   const cfg = {
-    missing:    { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
-    submitted:  { color:'var(--accent-green)',  empty:'本月尚無學生繳交月記。' },
-    reviewed:   { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
-    unreviewed: { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
-    commented:  { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' }
+    missing:        { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
+    submitted:      { color:'var(--accent-green)',  empty:'本月尚無學生繳交月記。' },
+    reviewed:       { color:'var(--accent-green)',  empty:'目前尚無已審閱月記。' },
+    unreviewed:     { color:'var(--accent-yellow)', empty:'✅ 本月所有已繳月記均已審閱！' },
+    commented:      { color:'var(--accent2)',       empty:'目前尚無有評語的月記。' },
+    'student-reply':{ color:'var(--accent-red)',    empty:'✅ 目前沒有學生待讀回覆！' }
   };
   const panel = document.getElementById(`stat-list-panel-${key}`);
   const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
   // 關閉其他面板
-  ['missing','submitted','reviewed','unreviewed','commented','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
     if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
   });
   const isHidden = panel.style.display === 'none';
   if (isHidden) {
-    const list = (window._statLists || {})[key] || [];
     const c = cfg[key];
-    if (list.length === 0) {
-      namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
-    } else if (key === 'unreviewed') {
-      // 未審閱 badge 可點擊，進入審閱隊列
+    if (key === 'unreviewed') {
       const clickData = window._unreviewedClickData || [];
-      namesEl.innerHTML = clickData.map((s, idx) => {
-        const display = escapeHtml(s.seatNo + ' ' + s.name);
-        return `<span onclick="goFromUnreviewed(${idx})" style="background:rgba(234,179,8,0.12);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
-      }).join('');
+      if (clickData.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+      } else {
+        namesEl.innerHTML = clickData.map((s, idx) => {
+          const display = escapeHtml(s.seatNo + ' ' + s.name);
+          return `<span onclick="goFromUnreviewed(${idx})" style="background:rgba(234,179,8,0.12);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+        }).join('');
+      }
+    } else if (key === 'student-reply') {
+      // 學生回覆：可點擊，直接開啟對應月記的評語視窗
+      const clickData = window._studentReplyClickData || [];
+      if (clickData.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+      } else {
+        const semLabel = s => (s.semester || '').replace('-1','第1學期').replace('-2','第2學期');
+        namesEl.innerHTML = clickData.map((s, idx) => {
+          const display = escapeHtml(`${s.seatNo} ${s.name}｜${semLabel(s)}${s.month}月份月記 有新回覆`);
+          return `<span onclick="goFromStudentReply(${idx})" style="background:rgba(239,68,68,0.10);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block;margin-bottom:2px" title="點擊開啟評語視窗">${display}</span>`;
+        }).join('');
+      }
     } else {
-      namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+      const list = (window._statLists || {})[key] || [];
+      if (list.length === 0) {
+        namesEl.innerHTML = `<span style="color:var(--accent-green)">${c.empty}</span>`;
+        const warnEl = document.getElementById('stat-missing-warn-bars');
+        if (key === 'missing' && warnEl) warnEl.innerHTML = '';
+      } else if (key === 'missing') {
+        // 未繳名單：用 _missingWithCount 渲染，有徽章的帶缺繳月數
+        const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
+        const high = data.filter(s => s.missCount >= 3).length;
+        const mid  = data.filter(s => s.missCount === 2).length;
+        const warnEl = document.getElementById('stat-missing-warn-bars');
+        if (warnEl) {
+          let bars = '';
+          if (high > 0) bars += `<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--accent-red);margin-bottom:4px">🔴 ${high} 位學生本學期已缺繳 3 個月以上，建議優先聯繫</div>`;
+          if (mid  > 0) bars += `<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--accent-yellow);margin-bottom:4px">🟠 ${mid} 位學生本學期已缺繳 2 個月</div>`;
+          warnEl.innerHTML = bars;
+        }
+        namesEl.innerHTML = data.map(s => {
+          let badge = '';
+          if (s.missCount >= 3) {
+            badge = `<span style="background:rgba(239,68,68,0.15);color:var(--accent-red);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺${s.missCount}個月</span>`;
+          } else if (s.missCount === 2) {
+            badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2個月</span>`;
+          }
+          return `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
+        }).join('');
+      } else {
+        namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
+      }
     }
     panel.style.display = 'block';
   } else {
     panel.style.display = 'none';
   }
+}
+
+function goFromStudentReply(idx) {
+  const items = window._studentReplyClickData || [];
+  const i = Number(idx);
+  if (!items[i]) return;
+  const s = items[i];
+  openCommentModal(s.seatNo, s.semester, s.month, s.ownerUid);
 }
 
 function toggleCrossMonthPanel() {
@@ -2838,7 +3090,7 @@ async function saveStudent() {
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
-  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將會刪除該學生所有學期的月記資料，此操作無法復原。`)) return;
+  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將刪除該學生在本學期綁定信箱下的月記資料（其他學期若已重新分配座號則不受影響），此操作無法復原。`)) return;
   const { collectionGroup, getDocs, deleteDoc, doc } = firebase_funcs;
   showLoading();
   try {
@@ -3421,14 +3673,14 @@ function statusSymbolForJournal(j, deadlineMap) {
 }
 
 function switchStatsTab(tab) {
-  ['submit','location','salary'].forEach(t => {
+  ['submit','location','salary','worktype'].forEach(t => {
     document.getElementById(`stats-tab-${t}`).classList.toggle('active', t===tab);
     document.getElementById(`stats-panel-${t}`).classList.toggle('hidden', t!==tab);
   });
 }
 
 async function loadAllStats() {
-  await Promise.all([loadSubmitStats(), loadLocationStats(), loadSalaryStats()]);
+  await Promise.all([loadSubmitStats(), loadLocationStats(), loadSalaryStats(), loadWorkTypeStats()]);
 }
 
 let _statsCompanyLoading = false;
@@ -3552,7 +3804,7 @@ async function exportAllStatsExcel() {
       return statusSymbolForJournal(j, deadlineMap);
     });
     const totalSlots = monthSlots.filter(slot => slot.sem === s.semester).length;
-    submitAoA.push([`${s.semester} ${s.seatNo}`, s.name || '', ...cells, `${submitted}/${totalSlots}`]);
+    submitAoA.push([`${s.semester} ${s.seatNo}`, sanitizeExcelCell(s.name || ''), ...cells, `${submitted}/${totalSlots}`]);
   });
 
   const locationRows = [];
@@ -3562,14 +3814,31 @@ async function exportAllStatsExcel() {
       const address = (e.address || '').trim();
       if (!address) return;
       const city = extractCityFromAddress(address);
+      // 2026-07-01 補修：distance 語意上為數字欄位，但 rule.txt 對 entries[] 陣列元素
+      // 沒有型別驗證（Firestore Rules 無法對變動長度陣列逐項驗證），技術使用者可繞過
+      // UI 的 parseFloat()/isNaN() 檢查、直接呼叫 API 寫入任意字串（含公式注入攻擊）。
+      // 用 Number() 強制轉型：非數字一律變成空字串，從根本上排除注入可能性，
+      // 比套用 sanitizeExcelCell() 的字串跳脫更適合本來就該是數字的欄位。
+      // 注意：null/undefined/空字串（saveJournal() 未填距離時的合法初始值，見
+      // student.html entries.map() 的 distance: e.distance??null）必須維持顯示空白，
+      // 不可先做 Number() 轉型再判斷——Number(null)===0 且 Number.isFinite(0)===true，
+      // 會誤把「未填距離」顯示成「距離 0km」，是不同語意，須先排除才轉型。
+      const distRaw = e.distance;
+      const distNum = Number(distRaw);
+      const distanceCell = (distRaw === null || distRaw === undefined || distRaw === '')
+        ? '' : (Number.isFinite(distNum) ? distNum : '');
+      // 2026-07-01 補修（同批次，根因與上方 distance 相同）：
+      // 姓名 fallback 到 j.studentName、日期(entries[].date)、公司 fallback 到 j.company
+      // 皆為未經 rule.txt 驗證的欄位，技術使用者可直接 API 寫入任意字串繞過正常路徑，
+      // 補上 sanitizeExcelCell() 防護。
       locationRows.push({
-        公司: s.company || j.company || '',
+        公司: sanitizeExcelCell(s.company || j.company || ''),
         座號: j.seatNo || '',
-        姓名: s.name || j.studentName || '',
-        日期: e.date || '',
+        姓名: sanitizeExcelCell(s.name || j.studentName || ''),
+        日期: sanitizeExcelCell(e.date || ''),
         縣市: city,
-        工作地址: address,
-        '距學校(km)': e.distance ?? ''
+        工作地址: sanitizeExcelCell(address),
+        '距學校(km)': distanceCell
       });
     });
   });
@@ -3596,13 +3865,14 @@ async function exportAllStatsExcel() {
     .filter(j => j.salary !== null && j.salary !== undefined && j.salary !== '')
     .map(j => {
       const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
+      // 2026-07-01 補修（同批次）：姓名 fallback、公司 fallback、月份同樣未經 rule.txt 驗證，補上防護
       return {
         座號: j.seatNo || '',
-        姓名: s.name || j.studentName || '',
-        公司: s.company || j.company || '',
-        月份: `${j.month}月`,
+        姓名: sanitizeExcelCell(s.name || j.studentName || ''),
+        公司: sanitizeExcelCell(s.company || j.company || ''),
+        月份: sanitizeExcelCell(`${j.month}月`),
         '薪資(元)': Number(j.salary) || 0,
-        '師傅/學長姐': j.mentor || ''
+        '師傅/學長姐': sanitizeExcelCell(j.mentor || '')
       };
     });
 
@@ -3612,18 +3882,18 @@ async function exportAllStatsExcel() {
     const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)));
     const salaries = sJournals.map(j => Number(j.salary));
     const avg = salaryAvg(salaries) || '';
-    return { 座號: s.seatNo || s.id, 姓名: s.name || '', 公司: s.company || '', 月數: sJournals.length, '平均薪資(元)': avg };
+    return { 座號: s.seatNo || s.id, 姓名: sanitizeExcelCell(s.name || ''), 公司: sanitizeExcelCell(s.company || ''), 月數: sJournals.length, '平均薪資(元)': avg };
   });
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
   journals.filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary))).forEach(j => {
-    const c = (studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫';
+    const c = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
     companyAggMap[c].studentSet.add(j.seatNo);
     companyAggMap[c].salaries.push(Number(j.salary));
   });
   const companyRows2 = Object.entries(companyAggMap).sort((a,b) => b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length - a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)
-    .map(([name, d]) => ({ 公司名稱: name, 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
+    .map(([name, d]) => ({ 公司名稱: sanitizeExcelCell(name), 學生數: d.studentSet.size, '平均薪資(元)': Math.round(d.salaries.reduce((a,b)=>a+b,0)/d.salaries.length) }));
 
   // ── 薪資摘要與異常提醒，和頁面判斷口徑一致 ──
   const salaryStudentList = stuSalaryRows
@@ -3645,23 +3915,25 @@ async function exportAllStatsExcel() {
     { 項目:'全班薪資平均', 內容: salaryClassAvg || '' },
     { 項目:'最高單筆薪資', 內容: allSalaryNums.length ? Math.max(...allSalaryNums) : '' },
     { 項目:'最低單筆薪資', 內容: allSalaryNums.length ? Math.min(...allSalaryNums) : '' },
-    { 項目:'最高平均學生', 內容: topSalaryStudent ? `${topSalaryStudent.seatNo} ${topSalaryStudent.name}｜${topSalaryStudent.company}｜${topSalaryStudent.avg}` : '' },
-    { 項目:'最低平均學生', 內容: lowSalaryStudent ? `${lowSalaryStudent.seatNo} ${lowSalaryStudent.name}｜${lowSalaryStudent.company}｜${lowSalaryStudent.avg}` : '' },
-    { 項目:'最高平均公司', 內容: topSalaryCompany ? `${topSalaryCompany.name}｜${topSalaryCompany.studentCount}人｜${topSalaryCompany.avg}` : '' },
-    { 項目:'最低平均公司', 內容: lowSalaryCompany ? `${lowSalaryCompany.name}｜${lowSalaryCompany.studentCount}人｜${lowSalaryCompany.avg}` : '' }
+    { 項目:'最高平均學生', 內容: topSalaryStudent ? sanitizeExcelCell(`${topSalaryStudent.seatNo} ${topSalaryStudent.name}｜${topSalaryStudent.company}｜${topSalaryStudent.avg}`) : '' },
+    { 項目:'最低平均學生', 內容: lowSalaryStudent ? sanitizeExcelCell(`${lowSalaryStudent.seatNo} ${lowSalaryStudent.name}｜${lowSalaryStudent.company}｜${lowSalaryStudent.avg}`) : '' },
+    { 項目:'最高平均公司', 內容: topSalaryCompany ? sanitizeExcelCell(`${topSalaryCompany.name}｜${topSalaryCompany.studentCount}人｜${topSalaryCompany.avg}`) : '' },
+    { 項目:'最低平均公司', 內容: lowSalaryCompany ? sanitizeExcelCell(`${lowSalaryCompany.name}｜${lowSalaryCompany.studentCount}人｜${lowSalaryCompany.avg}`) : '' }
   ];
   const lowThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 0.8) : 0;
   const highThreshold = salaryClassAvg ? Math.round(salaryClassAvg * 1.3) : 0;
   const salaryAlertRows = [];
   salaryStudentList.filter(s => lowThreshold && s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg).forEach(s => {
-    salaryAlertRows.push({ 類型:'低於平均20%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，低於門檻 ${lowThreshold}` });
+    salaryAlertRows.push({ 類型:'低於平均20%', 座號:s.seatNo, 姓名:sanitizeExcelCell(s.name), 公司:sanitizeExcelCell(s.company), 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，低於門檻 ${lowThreshold}` });
   });
   salaryStudentList.filter(s => highThreshold && s.avg > highThreshold).sort((a,b)=>b.avg-a.avg).forEach(s => {
-    salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:s.name, 公司:s.company, 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
+    salaryAlertRows.push({ 類型:'高於平均30%', 座號:s.seatNo, 姓名:sanitizeExcelCell(s.name), 公司:sanitizeExcelCell(s.company), 月數:s.monthCount, 平均薪資:s.avg, 說明:`全班平均 ${salaryClassAvg}，高於門檻 ${highThreshold}` });
   });
   journals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))).forEach(j => {
     const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
-    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:s.name || j.studentName || '', 公司:s.company || j.company || '', 月數:'', 平均薪資:'', 說明:`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白` });
+    // 2026-07-01 補修（同批次）：姓名／公司 fallback 同上；說明欄內嵌 j.semester 且無任何前置字元，
+    // 是四項裡風險最直接的一處，整串套 sanitizeExcelCell() 防護
+    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:sanitizeExcelCell(s.company || j.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
   });
   salaryCompanyList.map(c => {
     const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
@@ -3671,21 +3943,52 @@ async function exportAllStatsExcel() {
     const pct = max ? Math.round(gap / max * 100) : 0;
     return { ...c, max, min, gap, pct };
   }).filter(c => c.studentCount >= 2 && c.gap >= 5000 && c.pct >= 25).sort((a,b)=>b.gap-a.gap).forEach(c => {
-    salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:c.name, 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
+    salaryAlertRows.push({ 類型:'公司內部落差', 座號:'', 姓名:'', 公司:sanitizeExcelCell(c.name), 月數:'', 平均薪資:c.avg, 說明:`最高 ${c.max}，最低 ${c.min}，差 ${c.gap} (${c.pct}%)` });
   });
   // ── 工作表 4：月記清單（含評語、已審閱）──
   let journalListSource = userJournalData(jSnap);
   if (start && end) journalListSource = journalListSource.filter(j => journalMonthInRange(j, start, end));
+  // 2026-07-01 補修（同批次）：姓名/學期/月份/繳交時間/最後更新皆源自月記頂層欄位，
+  // rule.txt 未驗證格式，補上 sanitizeExcelCell() 防護。老師評語/已審閱來自老師端輸入，
+  // 信任邊界不同，不在本次範圍內（沿用既有判斷）。
   const journalListRows = journalListSource.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
     座號: j.seatNo || '',
-    姓名: (studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || '',
-    學期: (j.semester || '').replace('-1','第1學期').replace('-2','第2學期'),
-    月份: `${j.month}月`,
-    繳交時間: j.submittedAt ? j.submittedAt.slice(0,10) : '',
-    最後更新: (j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : '',
+    姓名: sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || ''),
+    學期: sanitizeExcelCell((j.semester || '').replace('-1','第1學期').replace('-2','第2學期')),
+    月份: sanitizeExcelCell(`${j.month}月`),
+    繳交時間: sanitizeExcelCell(j.submittedAt ? j.submittedAt.slice(0,10) : ''),
+    最後更新: sanitizeExcelCell((j.updatedAt && j.updatedAt !== j.submittedAt) ? j.updatedAt.slice(0,10) : ''),
     老師評語: j.teacherComment || '',
     已審閱: j.teacherReviewed ? '✓' : ''
   }));
+
+  // ── 公司 × 工作類型統計 ──
+  const companyWorktypeMap = {};
+  journals.forEach(j => {
+    const company = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
+    (j.entries || []).forEach(e => {
+      const raw = (e.type || '').trim();
+      // 2026-07-01 補修：正常 UI 流程下 type 只會是 WORK_TYPES 固定選項之一，或符合
+      // 「其他（說明）」格式（已被下行的 test() 收斂成固定字串 '其他'）。但 rule.txt
+      // 對 entries[] 陣列元素沒有型別/格式驗證，技術使用者可直接 API 寫入任意字串
+      // 繞過此正規表達式，該字串會直接變成 companyWorktypeMap 的 key，進而成為
+      // 「各公司工作類型」工作表的欄位標題（header），與 address/mentor 同屬未經清洗
+      // 字串進入 json_to_sheet() 的公式注入風險，套用 sanitizeExcelCell() 防護。
+      const type = sanitizeExcelCell(/^其他（.*）$/.test(raw) ? '其他' : (raw || '未填寫'));
+      if (!companyWorktypeMap[company]) companyWorktypeMap[company] = {};
+      companyWorktypeMap[company][type] = (companyWorktypeMap[company][type] || 0) + 1;
+    });
+  });
+  const allWorkTypes = [...new Set(
+    Object.values(companyWorktypeMap).flatMap(t => Object.keys(t))
+  )].sort((a, b) => a.localeCompare(b, 'zh-TW'));
+  const companyWorktypeRows = Object.entries(companyWorktypeMap)
+    .sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'))
+    .map(([company, typeMap]) => {
+      const row = { 公司名稱: sanitizeExcelCell(company) };
+      allWorkTypes.forEach(t => { row[t] = typeMap[t] || 0; });
+      return row;
+    });
 
   const wb = XLSX.utils.book_new();
   const submitWs = XLSX.utils.aoa_to_sheet(submitAoA);
@@ -3697,6 +4000,7 @@ async function exportAllStatsExcel() {
   const journalWs = XLSX.utils.json_to_sheet(journalListRows.length ? journalListRows : [{ 座號:'', 姓名:'', 學期:'', 月份:'', 繳交時間:'', 最後更新:'', 老師評語:'', 已審閱:'' }]);
   const locationWs = XLSX.utils.json_to_sheet(locationRows.length ? locationRows : [{ 公司:'', 座號:'', 姓名:'', 日期:'', 縣市:'', 工作地址:'', '距學校(km)':'' }]);
   const companyDistWs = XLSX.utils.json_to_sheet(companyDistRows.length ? companyDistRows : [{ 公司名稱:'', 地址筆數:'', '平均距學校(km)':'' }]);
+  const companyWorktypeWs = XLSX.utils.json_to_sheet(companyWorktypeRows.length ? companyWorktypeRows : [{ 公司名稱:'', 說明:'無工作類型資料' }]);
 
   submitWs['!cols'] = [{ wch: 8 }, { wch: 12 }, ...monthSlots.map(() => ({ wch: 10 })), { wch: 10 }];
   salarySummaryWs['!cols'] = [{ wch: 16 }, { wch: 46 }];
@@ -3707,6 +4011,7 @@ async function exportAllStatsExcel() {
   journalWs['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 40 }, { wch: 8 }];
   locationWs['!cols'] = [{ wch: 18 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 34 }, { wch: 12 }];
   companyDistWs['!cols'] = [{ wch: 24 }, { wch: 10 }, { wch: 20 }];
+  companyWorktypeWs['!cols'] = [{ wch: 24 }, ...allWorkTypes.map(() => ({ wch: 12 }))];
 
   XLSX.utils.book_append_sheet(wb, submitWs, '繳交狀況');
   XLSX.utils.book_append_sheet(wb, salarySummaryWs, '薪資摘要');
@@ -3717,10 +4022,11 @@ async function exportAllStatsExcel() {
   XLSX.utils.book_append_sheet(wb, journalWs, '月記清單');
   XLSX.utils.book_append_sheet(wb, locationWs, '出勤地點');
   XLSX.utils.book_append_sheet(wb, companyDistWs, '各公司平均距離');
+  XLSX.utils.book_append_sheet(wb, companyWorktypeWs, '各公司工作類型');
 
   const suffix = start && end ? `_${start}-${end}` : '';
   XLSX.writeFile(wb, `統計報表${suffix}.xlsx`);
-  toast('✅ 已下載 Excel（9 張工作表，含薪資摘要、異常提醒與各公司平均距離）', 'success');
+  toast('✅ 已下載 Excel（10 張工作表，含公司工作類型分佈）', 'success');
   } catch(e) {
     console.error('匯出 Excel 失敗', e);
     toast('Excel 匯出失敗：' + (e.message || '請確認網路或重試') + '。可重新整理頁面後再試', 'error');
@@ -3843,6 +4149,17 @@ function safeDomIdPart(v) {
 function safeNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// 2026-06-30 新增：Excel/CSV 公式注入防護。
+// 學生自由輸入文字（工作地址 entries[].address、師傅/學長姐 mentor）會原樣寫入
+// XLSX.utils.json_to_sheet() 產生的儲存格，若字串開頭為 =、+、-、@，部分 Excel
+// 版本（尤其是舊版、或資料被二次轉存成 CSV 後再開啟）有機率將其當成公式執行
+// （OWASP「CSV/Excel 公式注入」）。比照 calcDistance() escapeHtml() 防禦性加固的
+// 同等標準，補上前置單引號讓字串強制以純文字顯示。
+function sanitizeExcelCell(v) {
+  const s = String(v ?? '');
+  return /^[=+\-@]/.test(s) ? `'${s}` : s;
 }
 
 function renderLocationDetailTable(journals, selectedCompanies) {
@@ -4082,6 +4399,118 @@ function renderSalaryStatsFromCache(cache) {
   renderSalaryBarChart(journals, stuCompanyMap);
   switchSalaryDetailTab('student');
 }
+
+// 工作類型統計
+async function loadWorkTypeStats() {
+  const { collection, collectionGroup, getDocs } = firebase_funcs;
+  const { start, end } = getStatsDateRange('worktype-stats');
+  showLoading();
+  try {
+    const [snap, stuSnap] = await Promise.all([
+      getDocs(collectionGroup(db, 'journals')),
+      getDocs(collection(db, 'students'))
+    ]);
+    const studentMap = {};
+    stuSnap.docs.forEach(d => {
+      const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+      studentMap[sno] = d.data();
+    });
+    let journals = userJournalData(snap).map(j => ({
+      ...j,
+      studentName: j.studentName || studentMap[j.seatNo]?.name || '',
+      company: j.company || studentMap[j.seatNo]?.company || ''
+    }));
+    if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
+    const selectedCompanies = getSelectedCompanies();
+    renderWorkTypeStats(journals, selectedCompanies);
+  } catch(e) {
+    toast('工作類型統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function normalizeWorkType(rawType) {
+  const t = (rawType || '').trim();
+  // 「其他（補充說明）」格式 → 統一歸「其他」
+  if (/^其他（.*）$/.test(t)) return '其他';
+  return t || '未填寫';
+}
+
+function renderWorkTypeStats(journals, selectedCompanies) {
+  const chartEl   = document.getElementById('worktype-chart');
+  const summaryEl = document.getElementById('worktype-summary');
+  const detailPanel = document.getElementById('worktype-detail-panel');
+  if (!chartEl) return;
+  if (detailPanel) detailPanel.style.display = 'none';
+
+  // 統計：typeMap[typeName] = { count(人次), students: Set(seatNo), studentList: [{seatNo,name}] }
+  const typeMap = {};
+  journals.forEach(j => {
+    if (!isCompanySelected(j.company, selectedCompanies)) return;
+    (j.entries || []).forEach(e => {
+      const type = normalizeWorkType(e.type);
+      if (!typeMap[type]) typeMap[type] = { count: 0, students: new Set(), studentList: [] };
+      typeMap[type].count++;
+      if (!typeMap[type].students.has(j.seatNo)) {
+        typeMap[type].students.add(j.seatNo);
+        typeMap[type].studentList.push({ seatNo: j.seatNo, name: j.studentName || j.seatNo });
+      }
+    });
+  });
+
+  const sorted = Object.entries(typeMap).sort((a, b) => b[1].count - a[1].count);
+  const totalCount = sorted.reduce((s, x) => s + x[1].count, 0);
+  // 儲存供 toggleWorktypeDetail 使用
+  window._worktypeMap = typeMap;
+
+  if (summaryEl) summaryEl.textContent = sorted.length
+    ? `共 ${totalCount} 筆工作記錄，${sorted.length} 種類型；點擊橫條查看學生名單`
+    : '篩選範圍內無工作記錄';
+
+  const WORKTYPE_COLORS = ['#378ADD','#1D9E75','#BA7517','#D4537E','#7F77DD','#888780','#D85A30','#639922','#E24B4A','#0F6E56'];
+
+  if (!sorted.length) {
+    chartEl.innerHTML = '<div class="empty-state"><div class="icon">🗂️</div><p>篩選範圍內無資料</p></div>';
+    return;
+  }
+  chartEl.innerHTML = sorted.map(([type, d], i) => {
+    const pct  = totalCount ? Math.round(d.count / totalCount * 100) : 0;
+    const color = WORKTYPE_COLORS[i % WORKTYPE_COLORS.length];
+    const safeType = escapeHtml(type);
+    return `<div class="chart-bar-item" onclick="toggleWorktypeDetail(${jsArg(type)})" style="cursor:pointer;padding:4px 0" title="點擊查看${safeType}的學生名單">
+      <div class="chart-bar-label" style="width:88px;font-size:12px">${safeType}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="chart-bar-pct">${pct}%</div>
+      <div style="font-size:11px;color:var(--text2);white-space:nowrap;min-width:72px;text-align:right">${d.count}次・${d.students.size}人</div>
+    </div>`;
+  }).join('');
+}
+
+window.toggleWorktypeDetail = function(typeName) {
+  const panel  = document.getElementById('worktype-detail-panel');
+  const title  = document.getElementById('worktype-detail-title');
+  const names  = document.getElementById('worktype-detail-names');
+  const typeMap = window._worktypeMap || {};
+  if (!panel || !typeMap[typeName]) return;
+  // 點同一個再按一次就收起
+  if (panel.style.display !== 'none' && panel.dataset.openType === typeName) {
+    panel.style.display = 'none';
+    panel.dataset.openType = '';
+    return;
+  }
+  const d = typeMap[typeName];
+  if (title) title.textContent = `「${typeName}」— ${d.students.size} 位學生做過這類工作`;
+  if (names) {
+    names.innerHTML = d.studentList
+      .sort((a, b) => a.seatNo.localeCompare(b.seatNo))
+      .map(s => `<span style="background:rgba(0,0,0,0.08);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.seatNo + ' ' + s.name)}</span>`)
+      .join('');
+  }
+  panel.style.display = 'block';
+  panel.dataset.openType = typeName;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
 
 // 薪資統計
 async function loadSalaryStats() {
@@ -4369,7 +4798,13 @@ async function exportSemesterPDF() {
   const endStr = endVal.replace(/-/g,'');
   const { collection, collectionGroup } = firebase_funcs;
   // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // ★ 2026-07 補修：PWA（手機加到主畫面）standalone 模式下，window.open() 常會脫離 App
+  //   本身另開系統瀏覽器分頁，導致原本的 App 分頁被系統背景回收；使用者看完 PDF 切回
+  //   App 時，該分頁的 JS 執行環境已被系統終止並重新載入，表現為「被登出、要求重新登入」。
+  //   standalone 模式改為完全不開新視窗（win 維持 null），printJournalsPDF()／
+  //   openPdfBlob() 原本就有 win 為 null/已關閉時改用 <a download> 直接下載的
+  //   fallback，這裡只是主動採用它，不必等 window.open() 失敗才觸發。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }
@@ -4401,7 +4836,8 @@ async function exportStudentPDF() {
   const [seat, semester] = val.split('|');
   const { collectionGroup } = firebase_funcs;
   // ★ iOS Safari 要求 window.open 必須在使用者點擊的同步執行流中呼叫，await 之後會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // ★ 2026-07 補修：理由同 exportSemesterPDF()，standalone 模式改為完全不開新視窗。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p></body></html>');
   }
@@ -4687,8 +5123,37 @@ function renderJournalCard(j, isTeacher) {
     ${salaryPhotoHtml}
     <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;word-break:break-all;overflow-wrap:anywhere"><strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}</div>
     ${entryHtml ? `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${entryHtml}</div>` : ''}
-    ${(isTeacher && hasComment)
-      ? `<div class="comment-section-teacher"><strong style="font-size:12px;color:var(--accent-green)">💬 老師評語</strong><br>${escapeHtml(j.teacherComment)}</div>`
+    ${(isTeacher && (hasComment || j.studentReply))
+      ? (() => {
+          function fmtTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d)) return '';
+            const pad = n => String(n).padStart(2,'0');
+            return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          }
+          const tTime = fmtTime(j.reviewedAt);
+          const sTime = fmtTime(j.studentReplyAt);
+          // 2026-06-27 補修：學生重新儲存月記會把 teacherComment 歸零，但 studentReply 因 merge:true
+          // 原樣保留，變成「有回覆、評語卻已消失」的孤兒狀態（已知邊界案例，見 AI_CONTEXT.md）。
+          // 不再用 hasComment 單獨決定整個對話串區塊要不要顯示，避免孤兒回覆完全不可見、
+          // 老師主頁紅點點進去卻找不到任何上下文。
+          const orphanReply = !hasComment && j.studentReply;
+          return `<div class="journal-thread">
+          <div class="journal-thread-title">評語與回覆</div>
+          ${orphanReply ? `<div style="font-size:12px;color:var(--accent-yellow);margin-bottom:8px">⚠️ 學生有回覆，但對應評語已被清除（月記重新儲存後評語會歸零，這則回覆已失去原始上下文）</div>` : ''}
+          ${hasComment ? `<div class="thread-bubble">
+            <div class="thread-bubble-label label-teacher">老師${tTime ? `<span class="thread-bubble-time">${escapeHtml(tTime)}</span>` : ''}</div>
+            <div class="thread-bubble-body">${escapeHtml(j.teacherComment)}</div>
+          </div>` : ''}
+          ${j.studentReply
+            ? `<div class="thread-bubble">
+                <div class="thread-bubble-label ${j.studentReplyUnread ? 'label-student' : 'label-student-read'}">${j.studentReplyUnread ? '🔴 學生（未讀）' : '學生'}${sTime ? `<span class="thread-bubble-time">${escapeHtml(sTime)}</span>` : ''}</div>
+                <div class="thread-bubble-body">${escapeHtml(j.studentReply)}</div>
+              </div>`
+            : ''}
+        </div>`;
+        })()
       : ''}
   </div>`;
 }
@@ -4959,24 +5424,6 @@ function pdfJournalBlock(j, idx) {
     },
     margin: [0, 0, 0, 7]
   });
-  if (j.teacherReviewed || j.teacherComment) {
-    content.push({
-      table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
-        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
-      ] }]] },
-      layout: {
-        fillColor: () => '#f0fdf4',
-        hLineColor: () => '#86efac',
-        vLineColor: () => '#86efac',
-        paddingLeft: () => 8,
-        paddingRight: () => 8,
-        paddingTop: () => 7,
-        paddingBottom: () => 7
-      },
-      margin: [0, 0, 0, 8]
-    });
-  }
   return content;
 }
 
@@ -5067,25 +5514,50 @@ function toggleLocDetail(subId) {
 // ===== 老師評語功能 ==========================================
 // ============================================================
 
-function openCommentModal(seatNo, semester, month) {
-  // ★ 快取競爭防護：快取未就緒時拒絕操作
-  if (!window._teacherJournalsCache) {
+function openCommentModal(seatNo, semester, month, knownOwnerUid) {
+  const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
+  // 優先用傳入的 ownerUid；其次從快取取；都沒有才顯示錯誤
+  const cachedJournal = window._teacherJournalsCache ? findTeacherJournal(seatNo, semester, month) : null;
+  const ownerUid = knownOwnerUid || cachedJournal?.ownerUid || '';
+  if (!ownerUid) {
     toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
     return;
   }
-  const cachedJournal = findTeacherJournal(seatNo, semester, month);
-  _currentCommentJournal = { seatNo, semester, month, ownerUid: cachedJournal?.ownerUid || "" };
-  const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
+  _currentCommentJournal = { seatNo, semester, month, ownerUid };
+  _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel);
+}
+
+function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
   const { doc, getDoc } = firebase_funcs;
-  getDoc(getTeacherJournalRef(seatNo, semester, month)).then(snap => {
+  getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
     const data = snap.exists() ? snap.data() : {};
+    // 2026-07-11 清理：原本這裡會設定 _currentCommentJournal.oldComment（搭配
+    // seatNo/semester/month 三重身份比對，防同分頁快速切換月記時設錯舊評語），
+    // 供 saveTeacherComment() 計算 commentChanged 用。saveTeacherComment() 本身
+    // 同日改版為送出前 await getDoc() 現查伺服器當下值（不只防同分頁快速切換，
+    // 還一併防多裝置/多分頁競態，是舊機制防不到的範圍），不再讀這個快照，這裡的
+    // 賦值因此變成死碼一併移除。詳見 saveTeacherComment() 對應註解與 T-SEC-24。
     document.getElementById('comment-modal-title').textContent = '✏️ 老師評語';
     document.getElementById('comment-modal-info').innerHTML =
       `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(data.studentName || seatNo)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
     document.getElementById('comment-modal-textarea').value = data.teacherComment || '';
+    // 顯示學生回覆
+    const replyBlock = document.getElementById('comment-modal-student-reply');
+    if (replyBlock) {
+      if (data.studentReply) {
+        replyBlock.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--accent-red);margin-bottom:4px">${data.studentReplyUnread ? '🔴 學生有新回覆' : '💬 學生回覆'}</div><div style="font-size:13px;color:var(--text);line-height:1.6;word-break:break-all">${escapeHtml(data.studentReply)}</div>`;
+        replyBlock.style.display = 'block';
+      } else {
+        replyBlock.style.display = 'none';
+      }
+    }
     openModal('comment-modal');
   }).catch(() => {
+    // 2026-07-11 清理：原本這裡會把 _currentCommentJournal.oldComment 設為空字串，
+    // 理由同上方 .then() 分支的說明——saveTeacherComment() 已不再讀這個欄位，一併移除。
     document.getElementById('comment-modal-textarea').value = '';
+    const replyBlock = document.getElementById('comment-modal-student-reply');
+    if (replyBlock) replyBlock.style.display = 'none';
     openModal('comment-modal');
   });
 }
@@ -5094,19 +5566,63 @@ async function saveTeacherComment() {
   if (!_currentCommentJournal) return;
   const { seatNo, semester, month, ownerUid } = _currentCommentJournal;
   const comment = document.getElementById('comment-modal-textarea').value.trim();
-  // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
-  const { doc, updateDoc } = firebase_funcs;
+  const { doc, getDoc, updateDoc } = firebase_funcs;
   showLoading();
   try {
-    await updateDoc(getTeacherJournalRef(seatNo, semester, month, ownerUid), {
+    const ref = getTeacherJournalRef(seatNo, semester, month, ownerUid);
+    // 2026-07-11 補修（多裝置/多分頁競態）：oldComment 原本直接讀 Modal 開啟當下由
+    // _openCommentModalWithUid() 存進 _currentCommentJournal.oldComment 的快照。若同一則
+    // 月記同時在另一分頁/裝置被開啟並儲存過（伺服器 teacherComment 已經改變），沿用這個舊
+    // 快照會跟伺服器當下真正的值不同步，讓 commentChanged／isCommentUpdate 算錯，寫入錯誤的
+    // teacherCommentUnread／teacherCommentUpdated／teacherCommentContentAt，造成學生端徽章
+    // 顯示異常狀態（例如該是「有新評語」🔴卻顯示成「評語已更新」🟠）。rule.txt 對老師的寫入
+    // 是 isAdmin() 直接放行、沒有格式或一致性驗證兜底（不像學生端 studentReplyContentAt 有
+    // rule.txt 擋著），完全只能靠前端自己算對，故比照 saveStudentReply() 同款修法：送出前先
+    // await getDoc(ref) 現查伺服器當下值，取代 Modal 開啟當下的舊快照。沒有用 transaction
+    // 完全消除競態窗口（getDoc 之後、updateDoc 之前仍有極短暫窗口可能被別的分頁搶先寫入），
+    // 評估為低機率邊界案例，可接受（跟 saveStudentReply() 的取捨一致）。
+    // _currentCommentJournal.oldComment（原本由 _openCommentModalWithUid() 設定，供這裡
+    // 讀取）已確認不再被任何函式讀取，_openCommentModalWithUid() 對應的賦值程式碼
+    // （.then() 三重身份比對＋.catch() 空字串保底）已一併移除，不留下死碼。
+    const freshSnap = await getDoc(ref);
+    // 允許老師清空評語（空字串視為「僅標記已審閱，無文字評語」）
+    // 計算 teacherCommentUpdated：只有「之前已有評語、且本次仍有新評語文字」才視為「再次留言/更新評語」
+    const oldComment = (freshSnap.exists() ? freshSnap.data().teacherComment : '') || '';
+    // 2026-06-28 補修：比對新舊內容是否真正不同，
+    // 避免「只讀取回覆後直接儲存」誤判為已更新（State 3→2 錯誤轉換）
+    const commentChanged = comment !== oldComment;
+    const isCommentUpdate = !!(oldComment && comment.length > 0 && commentChanged);
+    await updateDoc(ref, {
       teacherComment: comment, teacherReviewed: true, reviewedAt: localISOStr(),
-      // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
-      teacherCommentUnread: comment.length > 0
+      // 老師儲存評語時，同步清除學生回覆的未讀旗標
+      studentReplyUnread: false,
+      // 評語內容真正改變時，才重新觸發「有新評語／評語已更新」旗標；
+      // 評語未改（老師只讀取學生回覆後直接按儲存）→ 不寫入這兩欄，
+      // Firestore 原值保持不變，避免學生已閱讀的月記被誤推回 State 2 🟠
+      ...(commentChanged ? {
+        // 只標記已審閱、未寫評語文字時，不應顯示「有新評語」紅點
+        teacherCommentUnread: comment.length > 0,
+        // 老師第一次留言 → false；覆蓋舊評語（兩者皆非空）→ true；清空評語 → false
+        teacherCommentUpdated: isCommentUpdate,
+        // 2026-07-06 新增：獨立於 reviewedAt 之外，專門給 notify-service 判斷「這則評語
+        // 是否已經推播過」用的時間戳。reviewedAt 在畫面上另有「教師評語泡泡顯示時間」的
+        // 用途，即使評語內容沒變、老師只是重新打開 modal 按一次儲存，上面的
+        // reviewedAt: localISOStr() 仍會無條件更新（不受 commentChanged 影響）——若
+        // notify-service 拿 reviewedAt 當「內容是否真的改變」的依據，會在「內容沒變、
+        // 只是重按儲存」時被誤判成新內容，對同一則、學生可能都還沒讀到的評語重複推播
+        // 一次（且因為 tag 也是拿這個時間戳組的，連 tag 防重複機制都攔不住，會顯示成
+        // 一則全新通知）。teacherCommentContentAt 只在 commentChanged 為真時才更新，
+        // 才能真正代表「評語內容最後一次真正改變的時間」；notify-service/
+        // send-push-notifications.js 同日改成拿這欄位（而非 reviewedAt）判斷已通知與否、
+        // 以及組 tag。
+        teacherCommentContentAt: localISOStr(),
+      } : {})
     });
     hideLoading();
     closeModal('comment-modal');
     toast('✅ 評語已儲存，月記標記為已審閱', 'success');
     loadTeacherJournals();
+    loadTeacherDashboard();
   } catch(e) {
     toast('❌ 儲存失敗：' + (e.message || '請重試'), 'error');
     hideLoading();
@@ -5139,7 +5655,7 @@ async function executeBatchReview() {
   try {
     const now = localISOStr();
     await Promise.all(_batchReviewJournals.map(j =>
-      updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now })
+      updateDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid), { teacherReviewed: true, reviewedAt: now, studentReplyUnread: false })
     ));
     hideLoading();
     closeModal('batch-review-modal');

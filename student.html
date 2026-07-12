@@ -16,6 +16,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getFirestore, initializeFirestore, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
   import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getMessaging, getToken, deleteToken, onMessage, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 
   const firebaseConfig = {
     apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
@@ -35,6 +36,8 @@
 
   window._firebase = { db, collection, doc, setDoc, getDoc, getDocs, getDocsFromServer, query, where, orderBy, updateDoc, deleteDoc, Timestamp };
   window._auth = { auth, provider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, GoogleAuthProvider, setPersistence, browserLocalPersistence };
+  // 2026-07 新增：Web Push 通知用，比照 window._auth 的暴露方式
+  window._messaging = { app, getMessaging, getToken, deleteToken, onMessage, isMessagingSupported };
 </script>
 
 <style>
@@ -209,13 +212,23 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .journal-card-toprow { flex-wrap: wrap !important; padding-right: 0 !important; }
   .journal-unread-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
   .journal-reviewed-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
+  .journal-updated-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
+  .journal-updated-read-badge { position: static !important; display: flex !important; width: fit-content; margin: 0 0 10px 0 !important; top: auto !important; right: auto !important; }
+  .thread-input-field { font-size: 16px; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, auto); gap: 10px; margin-bottom: 16px; align-items: stretch; }
-  .stat-card { height: 100%; min-height: 96px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr) !important; grid-template-rows: auto; gap: 10px; margin-bottom: 16px; align-items: stretch; }
+  .stat-card { height: auto !important; min-height: 72px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
   .stat-card .stat-label { font-size: 11px; line-height: 1.3; margin-bottom: 6px; }
   .stat-value { font-size: 22px; }
-  .stat-card-detail { max-height: 160px; overflow-y: auto; }
+  .stat-card-detail { max-height: none; overflow-y: hidden; overflow-x: auto; display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; padding-bottom: 2px; scrollbar-width: none; -ms-overflow-style: none; }
+  .stat-card-detail::-webkit-scrollbar { display: none; }
+  .stat-card-detail .stat-detail-row { flex-shrink: 0; background: var(--bg3); border-radius: 20px; padding: 4px 10px; white-space: nowrap; margin: 0; }
+  .stat-card-detail .stat-detail-row.clickable { padding: 4px 10px; margin: 0; }
+  .stat-card-detail .stat-detail-row .journal-unread-badge,
+  .stat-card-detail .stat-detail-row .journal-reviewed-badge,
+  .stat-card-detail .stat-detail-row .journal-updated-badge,
+  .stat-card-detail .stat-detail-row .journal-updated-read-badge { min-width: auto; margin-right: 4px !important; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   .entry-item { padding: 10px; }
@@ -231,11 +244,15 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 .stat-card-clickable { cursor: pointer; user-select: none; }
-.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; }
+.stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; overflow-x: hidden; }
 .stat-card-detail.hidden { display: none; }
-.stat-detail-row { display: flex; align-items: center; gap: 8px; }
+.stat-detail-row { display: flex; align-items: center; gap: 8px; border-radius: 6px; transition: background 0.15s; }
+.stat-detail-row.clickable { cursor: pointer; padding: 2px 4px; margin: 0 -4px; }
+.stat-detail-row.clickable:hover { background: var(--bg3); }
 .stat-detail-row .journal-unread-badge,
-.stat-detail-row .journal-reviewed-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
+.stat-detail-row .journal-reviewed-badge,
+.stat-detail-row .journal-updated-badge,
+.stat-detail-row .journal-updated-read-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
 .stat-detail-empty { color: var(--text2); font-size: 12px; }
 
 /* 歷史月記：三欄篩選格（起始日｜結束日｜工作類型）RWD；日期區間與工作類型為兩組獨立篩選條件，日期兩欄相鄰，工作類型獨立放最後 */
@@ -281,6 +298,38 @@ tr:last-child td { border-bottom: none; }
 .journal-card-actions { flex-shrink: 0; display: flex; gap: 8px; }
 .journal-unread-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
 .journal-reviewed-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
+.journal-updated-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(249,115,22,0.12); color: #f97316; border: 1px solid rgba(249,115,22,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
+.journal-updated-read-badge { position: absolute; top: 18px; right: 20px; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; background: rgba(59,130,246,0.12); color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); border-radius: 10px; padding: 2px 7px; font-weight: 600; white-space: nowrap; z-index: 1; }
+/* 對話串容器 */
+.journal-thread { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.journal-thread-title { font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 12px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+/* 對話氣泡列 */
+.thread-bubble { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.thread-bubble:last-child { border-bottom: none; }
+.thread-bubble-label { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 3px; }
+.thread-bubble-label.label-teacher { color: #22c55e; }
+.thread-bubble-label.label-me { color: var(--accent2); }
+.thread-bubble-body { font-size: 13px; color: var(--text); line-height: 1.65; word-break: break-all; overflow-wrap: anywhere; }
+.thread-bubble-body.text-muted { color: var(--text2); font-size: 12px; }
+/* 等待老師讀取的提示 */
+.thread-waiting { font-size: 11px; color: var(--accent-yellow); margin-top: 3px; }
+/* 老師已閱讀的提示 */
+.thread-read-confirm { font-size: 11px; color: #22c55e; margin-top: 3px; }
+/* 輸入列 */
+.thread-input-row { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; background: var(--bg3); border-top: 1px solid var(--border); }
+.thread-input-label { font-size: 11px; font-weight: 700; color: var(--accent2); }
+.thread-input-field { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 15px; background: var(--card); color: var(--text); outline: none; resize: none; min-height: 60px; line-height: 1.5; font-family: inherit; }
+.thread-input-field:disabled { background: var(--bg2); color: var(--text2); cursor: not-allowed; }
+.thread-input-bottom { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.thread-char-count { font-size: 11px; color: var(--text2); }
+.thread-char-count.at-limit { color: var(--accent-red); }
+/* 鎖定提示 */
+.thread-locked-hint { font-size: 12px; color: var(--text2); padding: 7px 12px 9px; background: var(--bg3); border-top: 1px solid var(--border); }
+/* 時間戳 */
+.thread-bubble-time { font-size: 10px; color: var(--text2); margin-left: 6px; font-weight: 400; }
+/* 相容舊 class（保留讓其他地方不壞） */
+.student-reply-area { margin-top: 0; }
+.student-reply-area .reply-input { font-size: 15px; }
 .journal-month { font-size: 15px; font-weight: 700; }
 .journal-meta { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .journal-entries { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
@@ -853,6 +902,16 @@ function isStoragePartitionedEnv() {
   return false;
 }
 
+// 2026-07 補修：PWA（手機加到主畫面）standalone 模式下 signInWithPopup 不可靠——
+// standalone 網頁應用不支援真正獨立的彈出視窗，實測表現為按下登入後短暫出現載入畫面，
+// 隨即又默默回到登入畫面（popup 沒有成功建立可通訊的視窗，Promise 最終被 reject 或
+// 卡住後落入非預期的錯誤處理分支）。teacher.html 已有此判斷並在 standalone 模式一律
+// 改走 signInWithRedirect，這裡補上對稱的判斷式，供 googleStudentLogin() 使用。
+function isStandaloneApp() {
+  return window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator.standalone === true;
+}
+
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('studentRedirectLoginPending', '1');
@@ -894,7 +953,7 @@ function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;
   const sems = getSemesters();
-  el.innerHTML = sems.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  el.innerHTML = sems.map(s => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.label)}</option>`).join('');
   const cur = getCurrentSemester();
   if (sems.find(s => s.key === cur)) el.value = cur;
 }
@@ -1075,6 +1134,22 @@ async function googleStudentLogin() {
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
+    // 2026-07 補修：standalone（PWA 加到主畫面）模式一律直接走 redirect，
+    // 不先嘗試 signInWithPopup——比照 teacher.html googleTeacherLogin() 的既有作法。
+    if (isStandaloneApp()) {
+      if (isStoragePartitionedEnv()) {
+        hideLoading();
+        toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+        return;
+      }
+      try {
+        await startStudentRedirectLogin();
+      } catch(re) {
+        hideLoading();
+        toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
+      }
+      return;
+    }
     const { auth, provider, signInWithPopup } = window._auth;
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
@@ -1162,10 +1237,111 @@ function enterApp() {
   bindWriteProgressFloat();
   updateWriteProgress();
   showPage('s-dashboard');
+  // 2026-07 新增：Web Push 通知註冊。刻意 fire-and-forget（不 await、失敗只 console.warn），
+  // 推播設定本身失敗（使用者拒絕權限、瀏覽器不支援等）絕對不能擋住正常登入流程。
+  initPushNotifications();
+}
+
+// ============ Web Push 通知（2026-07 新增） ============
+// 老師留評語 / 更新評語時，由伺服器端排程腳本（notify-service/send-push-notifications.js，
+// 透過 GitHub Actions 每 5 分鐘輪詢一次，見 .github/workflows/push-notify.yml；不是
+// Cloud Functions，本專案未升級 Blaze 方案）推播到這裡註冊的裝置。這裡只負責「取得 token
+// 並存到 Firestore」，實際送出通知的邏輯完全在後端腳本，前端這邊看不到、也不需要知道
+// 其他人的 token。
+const FCM_VAPID_KEY = 'BOUmDJyMxKobgdMBrq1wtf5y6bHoRa8voW7Lm2FDaNDQW0dLA0TtrMfNpPqba_PO4swUOL-pUp7h0p0NevtsI7Y'; // Firebase Console > Cloud Messaging > Web Push 憑證（2026-07-05 產生）
+let _fcmSwRegistration = null;
+
+async function initPushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) return; // 環境不支援，安靜跳過
+    if (!window._messaging) return;
+    const { isMessagingSupported } = window._messaging;
+    if (isMessagingSupported && !(await isMessagingSupported())) return; // 例如 iOS 未加到主畫面的 Safari 分頁
+    if (Notification.permission === 'denied') return; // 使用者已明確拒絕過，不重複打擾
+
+    // 專用的 FCM service worker，跟主要的 sw.js（PWA 離線快取）完全分開註冊在不同 scope，
+    // 不會互相干擾，也完全不需要修改既有 sw.js 的 BYPASS_DOMAINS / 快取邏輯。
+    if (!_fcmSwRegistration) {
+      // 2026-07 修正：這個站是 GitHub Pages 的 project page（網址帶 /internship-journal/
+      // 子路徑），不是 repo 名稱本身就是 xxx.github.io 的 user/org page。用 '/fcm-sw.js'
+      // 這種開頭帶斜線的絕對路徑，瀏覽器一律會去抓網域最上層（https://xxx.github.io/fcm-sw.js），
+      // 但檔案實際上在子路徑下（.../internship-journal/fcm-sw.js），註冊會直接 404 失敗——
+      // 跟下面既有的 './sw.js' 用同一種相對路徑寫法，才能正確對應到目前頁面所在的子路徑。
+      _fcmSwRegistration = await navigator.serviceWorker.register('./fcm-sw.js', {
+        scope: './firebase-cloud-messaging-push-scope'
+      });
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const { getMessaging, getToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    });
+    if (!token) return;
+
+    const { doc, setDoc } = firebase_funcs;
+    await setDoc(doc(db, 'users', currentUser.uid, 'fcmTokens', token), {
+      createdAt: localISOStr(),
+      userAgent: (navigator.userAgent || '').slice(0, 200)
+    });
+  } catch (e) {
+    console.warn('[Push] 推播初始化失敗（不影響其他功能）：', e.message || e);
+  }
+}
+
+// App 開著、收到推播時（前景訊息），FCM 預設不會自動跳系統通知，改用既有的 toast() 顯示
+// 2026-07-06 修正：改讀 payload.data.title/body，不再讀 payload.notification.title/body。
+// 原因見 fcm-sw.js 同日修正的說明——後端 send-push-notifications.js 已經改成只送 data，
+// 不再送 notification 頂層欄位（避免 FCM SDK 自動顯示與 onBackgroundMessage 手動顯示各跳一次
+// 造成同一則收到兩次的問題）。這裡的前景 toast 跟背景通知讀的是同一份 payload 結構，
+// 兩處必須同步改，否則前景時 toast 會變成只顯示「📩」空白訊息。
+try {
+  if (window._messaging) {
+    const { getMessaging, onMessage } = window._messaging;
+    onMessage(getMessaging(window._messaging.app), (payload) => {
+      toast(`📩 ${payload.data?.title || ''} ${payload.data?.body || ''}`.trim(), 'success');
+    });
+  }
+} catch (e) { console.warn('[Push] 前景訊息監聽設定失敗', e); }
+
+// 2026-07（稽核修正）：登出時清除推播 token，避免共用裝置（例如電腦教室）換人登入後，
+// 前一位使用者的推播內容（含老師評語文字片段）繼續顯示在同一台裝置上。原本 logout() 只
+// signOut()，從未刪除 /users/{uid}/fcmTokens/ 底下的 token 文件，也沒呼叫 FCM 的
+// deleteToken()——Firebase 官方文件本來就建議在使用者登出時呼叫 deleteToken()，正是為了
+// 這個情境。必須在 signOut() 之前執行：rule.txt 對 fcmTokens 的 delete 規則要求
+// request.auth.uid == userId，一旦先登出，request.auth 就會變 null，屆時想刪也刪不了。
+// 任何一步失敗（例如從未成功註冊過推播、瀏覽器不支援等）都只記錄警告、不擋登出本身。
+async function disablePushNotifications() {
+  try {
+    if (!currentUser?.uid) return;
+    if (!window._messaging || !_fcmSwRegistration) return; // 從未成功註冊過推播，沒有 token 可清
+    const { getMessaging, getToken, deleteToken } = window._messaging;
+    const messaging = getMessaging(window._messaging.app);
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: _fcmSwRegistration
+    }).catch(() => null);
+    if (token) {
+      const { doc, deleteDoc } = firebase_funcs;
+      await deleteDoc(doc(db, 'users', currentUser.uid, 'fcmTokens', token)).catch(() => {});
+    }
+    // 連同瀏覽器本身的推播訂閱一併取消，下次登入（不論同一人或換別人）都會重新走一次
+    // getToken()，不會沿用舊的訂閱，也就不會有「Firestore 文件刪了、但裝置底層訂閱還在」
+    // 這種殘留狀態。
+    if (deleteToken) await deleteToken(messaging).catch(() => {});
+  } catch (e) {
+    console.warn('[Push] 登出時清除推播 token 失敗（不影響登出本身）：', e.message || e);
+  }
 }
 
 // ============ 登出 ============
 async function logout() {
+  await disablePushNotifications(); // 必須在 signOut() 之前，才有權限刪除自己的 token 文件
   try { const { auth, signOut } = window._auth; await signOut(auth); } catch(e) {}
   currentUser = null;
   window._enteringApp = false;
@@ -1205,15 +1381,10 @@ function semMonthToLabel(semester, month) {
 }
 
 function syncStatCardHeights() {
-  // 只在手機版（≤768px）同步高度，電腦版不動
-  if (window.innerWidth > 768) return;
+  // 手機版改為4列單欄，每張卡片各自 auto 高度，不需要等高對齊。
+  // 電腦版同樣不操作 inline style，讓 CSS grid 自然處理。
   const cards = document.querySelectorAll('#page-s-dashboard .stat-card');
-  cards.forEach(c => c.style.height = '');          // 先清除，讓內容自然撐開
-  requestAnimationFrame(() => {
-    let max = 0;
-    cards.forEach(c => { max = Math.max(max, c.offsetHeight); });
-    cards.forEach(c => { c.style.height = max + 'px'; });
-  });
+  cards.forEach(c => { c.style.height = ''; });
 }
 
 function toggleStatDetail(key) {
@@ -1227,24 +1398,48 @@ function toggleStatDetail(key) {
 function renderSubmittedMonthsDetail(journals) {
   if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
   const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
-  return sorted.map(j => `<div class="stat-detail-row">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
+  return sorted.map(j => `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
 }
+
+// ── 評語狀態 badge 共用判斷（紅/橘/綠/藍 4 種狀態，與 teacher.html 對稱維護）──
+// 'unread'：有新評語（第一次，未讀）；'updated_unread'：評語已更新（再次留言，未讀）
+// 'reviewed'：已審閱（無評語或評語已讀完且非更新）；'updated_read'：評語已更新（已讀完）
+function getCommentBadgeState(j) {
+  const hasUnreadComment = !!(j.teacherCommentUnread && j.teacherComment);
+  if (hasUnreadComment) return j.teacherCommentUpdated ? 'updated_unread' : 'unread';
+  if (j.teacherReviewed) return j.teacherCommentUpdated ? 'updated_read' : 'reviewed';
+  return null;
+}
+function renderCommentBadgeHtml(j) {
+  const state = getCommentBadgeState(j);
+  if (state === 'unread') return '<span class="journal-unread-badge">● 有新評語</span>';
+  if (state === 'updated_unread') return '<span class="journal-updated-badge">● 評語已更新</span>';
+  if (state === 'reviewed') return '<span class="journal-reviewed-badge">✅ 已審閱</span>';
+  if (state === 'updated_read') return '<span class="journal-updated-read-badge">📖 評語已閱讀</span>';
+  return '';
+}
+function hasCommentBadge(j) { return !!getCommentBadgeState(j); }
 
 // 將「老師已審閱」與「有新評語」合併為單一清單，依老師審閱時間新到舊排序
 function getTeacherStatusJournals(journals) {
   return journals
-    .filter(j => (j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed)
-    .map(j => ({ ...j, _statStatus: (j.teacherCommentUnread && j.teacherComment) ? 'unread' : 'reviewed' }))
+    .map(j => ({ ...j, _statStatus: getCommentBadgeState(j) }))
+    .filter(j => j._statStatus)
     .sort((a,b) => new Date(b.reviewedAt || 0) - new Date(a.reviewedAt || 0));
 }
 
 function renderTeacherStatusDetail(list) {
   if (!list.length) return '<div class="stat-detail-empty">尚無老師審閱紀錄</div>';
+  const badgeMap = {
+    unread: '<span class="journal-unread-badge">● 有新評語</span>',
+    updated_unread: '<span class="journal-updated-badge">● 評語已更新</span>',
+    reviewed: '<span class="journal-reviewed-badge">✅ 已審閱</span>',
+    updated_read: '<span class="journal-updated-read-badge">📖 評語已閱讀</span>'
+  };
   return list.map(j => {
     const label = escapeHtml(semMonthToLabel(j.semester, j.month));
-    return j._statStatus === 'unread'
-      ? `<div class="stat-detail-row"><span class="journal-unread-badge">● 有新評語</span>${label}</div>`
-      : `<div class="stat-detail-row"><span class="journal-reviewed-badge">✅ 已審閱</span>${label}</div>`;
+    const badge = badgeMap[j._statStatus] || '';
+    return `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">${badge}${label}</div>`;
   }).join('');
 }
 
@@ -1299,7 +1494,7 @@ async function loadStudentDashboard() {
     const overdueMonths = await getOverdueMonths(sem, journals);
     document.getElementById('s-overdue-count').textContent = overdueMonths.length;
     document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
-      ? overdueMonths.map(m => `<div class="stat-detail-row">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
+      ? overdueMonths.map(m => `<div class="stat-detail-row clickable" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
       : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
     syncStatCardHeights();
   } catch (e) {
@@ -1649,8 +1844,8 @@ async function initWriteForm(skipDeadlineCheck = false) {
   writeDeadlineDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   snap.docs.forEach(d => {
     const dd = d.data();
-    const openDate = new Date(dd.openDate);
-    const closeDate = new Date(dd.closeDate);
+    const openDate = new Date(dd.openDate + 'T00:00:00+08:00');   // 補台灣時區，與 checkMonthDeadline() 一致
+    const closeDate = new Date(dd.closeDate + 'T23:59:59+08:00'); // 補台灣時區
     if (dd.semester && dd.month) {
       // 收錄所有有截止日設定的學期（含未開放），未開放月份由 checkMonthDeadline() 鎖定儲存
       if (!semMap[dd.semester]) semMap[dd.semester] = { label: dd.semesterLabel || dd.semester, latestOpen: openDate };
@@ -1717,8 +1912,11 @@ async function checkMonthDeadline(skipFill = false) {
   if (skipFill) return;
   const journalSnap = await getDoc(doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`));
   // 快取查詢結果供 saveJournal 直接使用，避免儲存時重複 Firestore 讀取
+  // 2026-06-28 補修：補上 studentReply（跟 editJournal() 的快取對齊，原本只有那條路徑有），
+  // 讓 saveJournal() 的覆蓋確認對話框也能在這條路徑（一般填寫頁覆蓋當月既有月記）
+  // 正確判斷「有回覆會暫時看不見」並顯示對應警告。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment }
+    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
     : { exists: false };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -2001,7 +2199,7 @@ function isEntryComplete(id) {
   const noPhoto = !!document.getElementById(`${id}-nophoto`)?.checked;
   const photoCount = document.querySelectorAll(`#${id}-photos .photo-thumb-wrap`).length;
   const typeOk  = !!type && (type !== '其他' || !!other);
-  const addrOk  = !!addr;
+  const addrOk  = !!addr && !validateCompleteTaiwanAddress(addr);
   const distOk  = !!dist && !isNaN(parseFloat(dist));
   const contOk  = cont.length >= 10;
   const photoOk = noPhoto || photoCount > 0;
@@ -2160,7 +2358,25 @@ function openGoogleMapsDistance(addr) {
   const origin = encodeURIComponent('402臺中市南區高工路191號');
   const dest = encodeURIComponent(addr);
   const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
-  window.open(url, '_blank');
+  // 2026-07 補修：standalone（PWA 加到主畫面）模式下 window.open() 常會讓內容脫離 App
+  // 本身、跳到系統瀏覽器，原本的 App 分頁因此被系統背景回收，從 Google Maps 切回來時
+  // 看起來像被登出（跟 PDF 匯出是同一類問題，已在 exportMyPDF()/teacher.html 匯出 PDF
+  // 驗證過「避免產生新的瀏覽情境」有效）。這裡沒辦法完全不跳出去（本來就是要帶學生去看
+  // 地圖），改用真正的 <a> 元素觸發導航，讓 iOS/Android 有機會透過 Universal Link／
+  // App Link 直接切換到原生 Google 地圖 App（真正的「切到另一個 App」），而不是在瀏覽器
+  // 裡另開一個分頁——用 window.open() 這種純 JS 觸發的導航，部分手機瀏覽器不會做這層
+  // App Link 判斷。一般瀏覽器分頁模式維持原行為不變。
+  if (isStandaloneApp()) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } else {
+    window.open(url, '_blank');
+  }
 }
 
 // 計算距離：直接開啟 Google Maps 導航（學校→工作地址），距離由學生查看後手動填入下方欄位
@@ -2452,7 +2668,7 @@ function initWriteDraftAutoSave() {
 // 工作摘要的 4 個檢查項目，順序固定供逐筆/逐欄位判斷與顯示共用
 const WORK_FIELD_CHECKS = [
   { key: 'type', label: '類型', test: e => !!e.type && (e.type !== '其他' || !!e.other) },
-  { key: 'address', label: '地址', test: e => !!e.address },
+  { key: 'address', label: '地址', test: e => !!e.address && !validateCompleteTaiwanAddress(e.address) },
   { key: 'distance', label: '距離', test: e => !!e.distance },
   { key: 'content', label: '內容10字+', test: e => e.content.length >= 10 }
 ];
@@ -2995,15 +3211,19 @@ async function saveJournal() {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     return toast('⚠️ ' + (e.message || '工作照片上傳失敗，請稍後再試'), 'error');
   }
+  // 2026-07 新增：是否為「這份月記第一次被儲存」，跟 submittedAt 的判斷條件完全共用
+  // 同一個布林值——「第一次才記錄當下時間」這句話本身就是「journalSubmitNotifiedAt
+  // 這個推播用標記欄位，第一次才需要明確寫成 null」的同一件事，不另外重算一次條件。
+  const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name, company: currentUser.company || '',
     city: currentUser.city || '', semester: sem, month,
     salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
-    submittedAt: (window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt)
-      ? window._currentJournalCache.submittedAt   // 保留第一次繳交時間
-      : localISOStr(),                             // 第一次才記錄當下時間
+    submittedAt: isFirstSubmit
+      ? localISOStr()                              // 第一次才記錄當下時間
+      : window._currentJournalCache.submittedAt,    // 保留第一次繳交時間
     updatedAt: localISOStr(),                      // 每次儲存都更新
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
@@ -3012,7 +3232,31 @@ async function saveJournal() {
     teacherComment: null,
     teacherReviewed: false,
     reviewedAt: null,
-    teacherCommentUnread: false
+    teacherCommentUnread: false,
+    teacherCommentUpdated: false,
+    // 2026-07-08 補修：teacherCommentContentAt 是 2026-07-06 新增 Web Push 推播子系統時
+    // 一併加入的欄位（供 notify-service/send-push-notifications.js 判斷評語是否已推播過），
+    // rule.txt 的一般編輯分支同日同步要求此欄位歸零（跟 teacherComment 等其餘老師專屬欄位
+    // 處理方式一致），但這裡當時漏了同步加上，導致任何「老師已留過評語」的月記，學生
+    // 之後只要再次編輯儲存，merge:true 會讓這個欄位保留舊的非 null 值，撞上 rule.txt
+    // 要求 == null 而被 Firestore 拒絕（整份月記存檔失敗）。補上歸零後與其餘老師欄位
+    // 處理方式一致，rule.txt 不需要修改。
+    teacherCommentContentAt: null,
+    // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬標記
+    // 欄位（notify-service/send-push-notifications.js 的 checkNewJournals() 寫入，判斷邏輯
+    // 見該函式開頭註解）。刻意只在 isFirstSubmit 為真時才把這個 key 塞進 payload——
+    // 一般編輯（isFirstSubmit=false）完全不提這個欄位，靠 merge:true 讓 Firestore 保留
+    // 後端寫入的既有值不動；這跟 studentReplyContentAt 的處理方式是同一個道理（「維持
+    // 原值不變」不能靠省略達成 create 語意，但可以靠省略達成 update 語意）。如果無條件
+    // 把 journalSubmitNotifiedAt: null 放進 data（不分 create/update 都送），會導致學生
+    // 每次編輯月記內容（哪怕只是改個錯字）都把這個欄位打回 null，讓 notify-service
+    // 誤判成「還沒推播過」而重新通知一次，完全違背「只在第一次繳交時推播一次」的設計。
+    // 另一個好處：只有真正的第一次建立才會讓這個欄位「存在且為 null」，此功能上線前的
+    // 所有歷史月記從來沒有這個欄位、也永遠不會有，讓後端可以直接用 Firestore 的
+    // where('journalSubmitNotifiedAt','==',null) 查詢安全排除全部舊資料，不需要額外的
+    // 部署日期分界線或一次性遷移腳本，完整理由見 rule.txt 對應段落與
+    // send-push-notifications.js 的 checkNewJournals() 註解。
+    ...(isFirstSubmit ? { journalSubmitNotifiedAt: null } : {})
   };
   if (JSON.stringify(data).length > 900000) {
     hideLoading();
@@ -3036,8 +3280,14 @@ async function saveJournal() {
       const reviewWarning = wasReviewed
         ? '\n\n⚠️ 老師已審閱此份月記，重新儲存後評語將自動清除，需請老師重新批閱。'
         : '';
+      // 2026-06-28 補修：覆蓋會把 teacherComment 歸零，但 studentReply 因 merge:true 原樣保留，
+      // 變成「有回覆、評語卻已消失」的孤兒狀態（見 AI_CONTEXT.md）。只在 wasReviewed 為真時才提示，
+      // 因為這正是即將觸發孤兒狀態的那次覆蓋；若評語已經被清過（已是孤兒），這裡不會誤判重複提示。
+      const replyWarning = (wasReviewed && cached.studentReply)
+        ? '\n\n📩 你已回覆過老師評語，重新儲存後回覆仍會保留，但在老師重新批閱前會暫時看不到對應的評語內容。'
+        : '';
       hideLoading();
-      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}\n\n確定要覆蓋原本的資料嗎？`);
+      const confirmed = window.confirm(`⚠️ 注意：${sem.replace('-1','第1學期').replace('-2','第2學期')} ${month}月份的月記已存在！\n（原本繳交日期：${submittedDate}）${reviewWarning}${replyWarning}\n\n確定要覆蓋原本的資料嗎？`);
       if (!confirmed) {
         toast('已取消，原本月記保留', 'info');
         return;
@@ -3056,6 +3306,30 @@ async function saveJournal() {
     hideLoading();
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
   }
+}
+
+// 從首頁審閱紀錄列點擊跳轉到對應歷史月記卡片
+function goToJournalCard(sem, month) {
+  window._pendingScrollToJournal = { sem: String(sem), month: Number(month) };
+  // 清除日期篩選，確保目標卡片不會被過濾掉
+  const startEl = document.getElementById('s-history-date-start');
+  const endEl   = document.getElementById('s-history-date-end');
+  if (startEl) startEl.value = '';
+  if (endEl)   endEl.value   = '';
+  showPage('s-history');
+}
+
+// 逾期未繳：跳到填寫頁並預選對應學期和月份
+async function goToWriteMonth(sem, month) {
+  _skipWriteInit = true;
+  showPage('s-write');
+  await initWriteForm(true);
+  const semEl = document.getElementById('write-semester');
+  if (semEl) { semEl.value = String(sem); }
+  initWriteMonths();
+  const mEl = document.getElementById('write-month');
+  if (mEl) { mEl.value = Number(month); }
+  checkMonthDeadline();
 }
 
 async function loadStudentHistory() {
@@ -3088,6 +3362,39 @@ async function loadStudentHistory() {
       ? journals.map(j => renderJournalCardSelectable(j)).join('')
       : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
     updateHistoryBatchBar();
+    // ── 自動標記已讀：學生進入歷史月記頁面即視為已讀取老師評語 ──
+    // 只要 teacherCommentUnread=true（且確實有評語文字），一律於背景靜默清除，
+    // 同時立即更新 DOM badge，讓狀態1(🔴)→🟢，狀態2(🟠)→🔵，
+    // 再等所有 Firestore 寫入完成後刷新首頁審閱紀錄。
+    const _unreadOnView = journals.filter(j => j.teacherCommentUnread && j.teacherComment);
+    if (_unreadOnView.length > 0) {
+      const { doc: _doc, updateDoc: _upd } = firebase_funcs;
+      const _updatePs = _unreadOnView.map(j => {
+        const _sm = safeNumber(j.month);
+        j.teacherCommentUnread = false;
+        const _card = document.getElementById(`jcard-${j.semester||''}-${_sm}`);
+        if (_card) {
+          const _ob = _card.querySelector('.journal-unread-badge, .journal-updated-badge');
+          if (_ob) _ob.outerHTML = renderCommentBadgeHtml(j);
+        }
+        return _upd(_doc(db, 'users', currentUser.uid, 'journals', `${j.seatNo}-${j.semester}-${_sm}`), { teacherCommentUnread: false }).catch(() => {});
+      });
+      Promise.all(_updatePs).then(() => loadStudentDashboard()).catch(() => {});
+    }
+    // 從首頁點擊跳轉：捲動到目標卡片並短暫高亮
+    if (window._pendingScrollToJournal) {
+      const { sem, month } = window._pendingScrollToJournal;
+      window._pendingScrollToJournal = null;
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`jcard-${sem}-${month}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.style.outline = '2px solid var(--accent)';
+          el.style.transition = 'outline 0.3s';
+          setTimeout(() => { el.style.outline = ''; }, 2000);
+        }
+      });
+    }
   } catch (e) {
     console.error('載入歷史月記失敗', e);
     document.getElementById('s-history-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>月記資料載入失敗，請重新整理或稍後再試</p></div>';
@@ -3120,12 +3427,12 @@ function renderJournalCardSelectable(j) {
     ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
     : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  return `<div class="journal-card journal-card-selectable"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
+  return `<div class="journal-card journal-card-selectable" id="jcard-${escapeHtml(j.semester||'')}-${safeMonth}"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
     ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
     ${cbHtml}
-    ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
+    ${renderCommentBadgeHtml(j)}
     <div class="journal-card-header">
-      <div class="journal-card-toprow" style="${((j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed) ? 'padding-right:92px' : ''}">
+      <div class="journal-card-toprow" style="${hasCommentBadge(j) ? 'padding-right:92px' : ''}">
         <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
         <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml((j.semester||'').replace('-1','第1學期').replace('-2','第2學期'))}</span>
         <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
@@ -3139,10 +3446,7 @@ function renderJournalCardSelectable(j) {
       <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
-      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
-    </div>` : ''}
+    ${j.teacherReviewed ? renderStudentReplyArea(j) : ''}
   </div>`;
 }
 
@@ -3249,7 +3553,12 @@ async function exportMyPDF() {
     if (!ok) return;
   }
   // iOS 必須在使用者點擊當下立即開視窗，await 之後再開會被封鎖
-  const win = window.open('', '_blank', 'width=900,height=700');
+  // 2026-07 補修：standalone（PWA 加到主畫面）模式下 window.open() 常會讓內容脫離 App
+  // 本身、跳到系統瀏覽器，原本的 App 分頁因此被系統背景回收，切回來時看起來像被登出
+  // （比照 teacher.html 匯出 PDF 的同一項修正，已實機驗證有效）。standalone 模式改為
+  // 完全不開新視窗，printJournalsPDF()／openPdfBlob() 本來就支援 win 為 null 時改用
+  // <a download> 直接下載，這裡只是主動採用它。
+  const win = isStandaloneApp() ? null : window.open('', '_blank', 'width=900,height=700');
   if (win) {
     win.document.write('<html><head><meta charset="UTF-8"><title>載入中...</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">⏳ 載入月記資料中，請稍候...</p><p style="font-size:13px;color:#777;">若 30 秒內沒有完成，系統會自動顯示錯誤原因。</p></body></html>');
   }
@@ -3312,7 +3621,9 @@ async function editJournal(seatNo, sem, month) {
     submittedAt: j.submittedAt,
     updatedAt: j.updatedAt,
     teacherReviewed: j.teacherReviewed,
-    teacherComment: j.teacherComment
+    teacherComment: j.teacherComment,
+    studentReply: j.studentReply || null,
+    studentReplyUnread: j.studentReplyUnread || false
   };
   // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
   if (j.teacherCommentUnread) {
@@ -3498,9 +3809,9 @@ function renderJournalCard(j, isTeacher) {
   const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   return `<div class="journal-card"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
     ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
-    ${(j.teacherCommentUnread && j.teacherComment) ? '<span class="journal-unread-badge">● 有新評語</span>' : (j.teacherReviewed ? '<span class="journal-reviewed-badge">✅ 已審閱</span>' : '')}
+    ${renderCommentBadgeHtml(j)}
     <div class="journal-card-header">
-      <div class="journal-card-toprow" style="${((j.teacherCommentUnread && j.teacherComment) || j.teacherReviewed) ? 'padding-right:92px' : ''}">
+      <div class="journal-card-toprow" style="${hasCommentBadge(j) ? 'padding-right:92px' : ''}">
         <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
         <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml(j.semester?.replace('-1','第1學期').replace('-2','第2學期') || '')}</span>
         <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
@@ -3514,11 +3825,142 @@ function renderJournalCard(j, isTeacher) {
       <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
     </div>
     ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? `<div style="font-size:13px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:8px;margin-top:8px">
-      <strong style="font-size:12px;color:#22c55e;display:block;margin-bottom:6px">💬 老師評語</strong>
-      ${j.teacherComment ? `<span style="color:var(--text)">${escapeHtml(j.teacherComment)}</span>` : '<span style="color:var(--text2);font-size:12px">（老師已閱讀，無文字評語）</span>'}
-    </div>` : ''}
+    ${j.teacherReviewed ? renderStudentReplyArea(j) : ''}
   </div>`;
+}
+
+// ---- 學生回覆評語（對話串版）----
+function renderStudentReplyArea(j) {
+  const seatNo = escapeHtml(j.seatNo || '');
+  const sem    = escapeHtml(j.semester || '');
+  const month  = Number(j.month) || 0;
+  // 2026-06-26 更新：移除「老師讀取前鎖定」限制——只要老師還沒讀取（studentReplyUnread===true），
+  // 學生一樣可以繼續編輯／重新送出回覆內容；老師讀取後（studentReplyUnread===false）也能再送出新的回覆。
+  // hasUnreadReply 只用來決定顯示文字（⏳/✅、按鈕文字），不再用來隱藏輸入框。
+  const hasUnreadReply = !!(j.studentReply && j.studentReplyUnread);
+  const replyText = j.studentReply || '';
+  const charCount = replyText.length;
+
+  // 時間格式輔助：把 ISO 字串轉成「YYYY/MM/DD HH:MM」
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // 老師評語氣泡（附 reviewedAt 時間）
+  const teacherTimeStr = fmtTime(j.reviewedAt);
+  const teacherBubble = `<div class="thread-bubble">
+    <div class="thread-bubble-label label-teacher">老師${teacherTimeStr ? `<span class="thread-bubble-time">${escapeHtml(teacherTimeStr)}</span>` : ''}</div>
+    <div class="thread-bubble-body${j.teacherComment ? '' : ' text-muted'}">${j.teacherComment ? escapeHtml(j.teacherComment) : '（老師已閱讀，無文字評語）'}</div>
+  </div>`;
+
+  // 學生已回覆：顯示已送出的內容（附 studentReplyAt 時間）
+  const replyTimeStr = fmtTime(j.studentReplyAt);
+  const existingReplyBubble = replyText
+    ? `<div class="thread-bubble">
+        <div class="thread-bubble-label label-me">我${replyTimeStr ? `<span class="thread-bubble-time">${escapeHtml(replyTimeStr)}</span>` : ''}</div>
+        <div class="thread-bubble-body">${escapeHtml(replyText)}</div>
+        ${hasUnreadReply
+          ? '<div class="thread-waiting">⏳ 等待老師閱讀（仍可修改）</div>'
+          : '<div class="thread-read-confirm">✅ 老師已閱讀</div>'}
+      </div>`
+    : '';
+
+  // 輸入區（textarea 可換行，50字上限）—— 不論老師是否已讀取，一律可編輯／重新送出
+  const inputSection = `<div class="thread-input-row">
+      <div class="thread-input-label">${hasUnreadReply ? '修改我的回覆' : '我的回覆'}</div>
+      <textarea class="thread-input-field" maxlength="50"
+        placeholder="回覆老師評語（最多 50 字）…"
+        id="reply-ta-${seatNo}-${sem}-${month}"
+        oninput="syncReplyCharCount(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})"
+        rows="2">${escapeHtml(replyText)}</textarea>
+      <div class="thread-input-bottom">
+        <span class="thread-char-count${charCount >= 50 ? ' at-limit' : ''}" id="reply-cc-${seatNo}-${sem}-${month}">${charCount}/50</span>
+        <button class="btn btn-sm" style="background:var(--accent2);color:#fff;padding:4px 14px;font-size:12px" onclick="saveStudentReply(${jsArg(j.seatNo)},${jsArg(j.semester)},${month})">${hasUnreadReply ? '更新回覆' : '送出'}</button>
+      </div>
+    </div>`;
+
+  return `<div class="journal-thread">
+    <div class="journal-thread-title">評語與回覆</div>
+    ${teacherBubble}
+    ${existingReplyBubble}
+    ${inputSection}
+  </div>`;
+}
+
+function syncReplyCharCount(seatNo, sem, month) {
+  const ta = document.getElementById(`reply-ta-${seatNo}-${sem}-${month}`);
+  const cc = document.getElementById(`reply-cc-${seatNo}-${sem}-${month}`);
+  if (!ta || !cc) return;
+  const len = ta.value.length;
+  cc.textContent = `${len} / 50`;
+  cc.classList.toggle('at-limit', len >= 50);
+}
+
+async function saveStudentReply(seatNo, sem, month) {
+  if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能回覆自己的月記', 'error');
+  const ta = document.getElementById(`reply-ta-${seatNo}-${sem}-${month}`);
+  if (!ta) return;
+  const reply = ta.value.trim();
+  if (!reply) return toast('請輸入回覆內容', 'warning');
+  if (reply.length > 50) return toast('回覆不可超過 50 字', 'warning');
+  // 2026-07 補修：跟 teacher.html saveTeacherComment() 的 commentChanged 防護同一類問題——
+  // 原本這裡每次送出都無條件寫 studentReplyUnread:true / studentReplyAt，如果學生只是重新
+  // 打開回覆框、文字完全沒改就按一次「更新回覆」，會把老師端已讀狀態誤打回未讀，
+  // notify-service 也會因為 studentReplyAt 跟著刷新而誤判成新回覆、重複推播同一則。
+  const { doc, getDoc, updateDoc } = firebase_funcs;
+  showLoading();
+  try {
+    const ref = doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${sem}-${month}`);
+    // 2026-07 補修（多裝置/多分頁競態）：oldReply 原本直接讀 window._studentHistoryJournals
+    // （歷史頁「渲染當下」的快照），如果同一學生同時在另一分頁/裝置開著同一份歷史頁
+    // （例如手機跟電腦都開著），對方已經送出新回覆、伺服器值已經改變，但這一頁的快取
+    // 還停在更早的舊值——此時若這頁送出的文字剛好等於「這份過期快取認知的舊值」，
+    // 前端會誤判 replyChanged=false（不送 studentReplyUnread/studentReplyContentAt），
+    // 但 rule.txt 的回覆分支是拿伺服器當下真正的 resource.data.studentReply 比較，
+    // 兩邊資料來源不同步時，「內容改變」與「內容沒變」兩個分支會同時判斷失敗，導致這次
+    // 合法的送出被 403 擋下（不是安全漏洞，是資料一致性問題，沒有越權或外洩）。
+    // 改成送出前才用 getDoc() 現查一次伺服器當下的 studentReply，跟 editJournal() 既有的
+    // 「動作前先 getDoc 現查」是同一種寫法——把「快取可能過期多久」收斂到「這次讀取到
+    // 送出前的極短時間差」，不特別引入 transaction（transaction 能完全消除這個窗口，
+    // 但這是低機率的多裝置邊界案例，評估後不需要上到這個等級的改動）。找不到文件時
+    // （理論上不會發生，這個輸入框本來就是從歷史列表渲染出來的）保守視為「有改變」，
+    // 寧可多通知不要漏掉。
+    const freshSnap = await getDoc(ref);
+    const oldReply = (freshSnap.exists() ? freshSnap.data().studentReply : '') || '';
+    const replyChanged = reply !== oldReply;
+    // 2026-07 補修：studentReplyAt／studentReplyContentAt 只呼叫一次 localISOStr()、
+    // 共用同一個字串，而不是分別呼叫兩次——理論上兩次呼叫幾乎必定同秒（localISOStr()
+    // 只有秒級精度），但仍可能剛好跨秒導致兩個欄位不相等。rule.txt 新增了
+    // 「內容改變時 studentReplyContentAt 必須等於 studentReplyAt」的驗證（防止
+    // studentReplyContentAt 被單獨竄改成未來時間造成 notify-service 無限重推），
+    // 這裡改成只算一次時間戳，從根源確保正常寫入一定滿足新規則，不依賴「幾乎不會跨秒」
+    // 這種機率性假設。
+    const nowStr = localISOStr();
+    await updateDoc(ref, {
+      studentReply: reply,
+      // studentReplyAt 維持每次都無條件更新（純粹用於畫面上「我的回覆」泡泡顯示時間，
+      // 角色對應 teacher.html 那邊維持無條件更新的 reviewedAt，不受 replyChanged 影響）
+      studentReplyAt: nowStr,
+      // studentReplyUnread／studentReplyContentAt 只在內容真的改變時才寫入；
+      // 內容沒變（重新按送出但文字沒改）時完全不寫這兩欄，Firestore 原值維持不變，
+      // 避免把老師的已讀狀態誤打回未讀、避免 notify-service 重複推播同一則回覆。
+      ...(replyChanged ? {
+        studentReplyUnread: true,
+        studentReplyContentAt: nowStr,
+      } : {})
+    });
+    hideLoading();
+    toast('✅ 回覆已送出', 'success');
+    loadStudentHistory();
+    loadStudentDashboard();
+  } catch(e) {
+    toast('❌ 送出失敗：' + (e.message || '請重試'), 'error');
+    hideLoading();
+  }
 }
 
 function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
@@ -3532,13 +3974,16 @@ function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
 async function executeDeleteJournal(seatNo, semester, month, isTeacher) {
   if (String(seatNo) !== String(currentUser?.seatNo)) return toast('只能刪除自己的月記', 'error');
   const { doc, deleteDoc } = firebase_funcs;
+  showLoading();
   try {
     await deleteDoc(doc(db, 'users', currentUser.uid, 'journals', `${seatNo}-${semester}-${month}`));
+    hideLoading();
     closeModal('delete-journal-modal');
     toast('✅ 月記已刪除', 'success');
     loadStudentHistory();
     loadStudentDashboard();
   } catch(e) {
+    hideLoading();
     toast('刪除失敗：' + (e.message || '請重試'), 'error');
     closeModal('delete-journal-modal');
   }
@@ -3745,24 +4190,6 @@ function pdfJournalBlock(j, idx) {
     },
     margin: [0, 0, 0, 7]
   });
-  if (j.teacherReviewed || j.teacherComment) {
-    content.push({
-      table: { widths: ['*'], body: [[{ stack: [
-        { text: '老師評語', bold: true, color: '#166534', margin: [0, 0, 0, 3] },
-        { text: pdfText(j.teacherComment || '（老師已閱讀，無文字評語）') }
-      ] }]] },
-      layout: {
-        fillColor: () => '#f0fdf4',
-        hLineColor: () => '#86efac',
-        vLineColor: () => '#86efac',
-        paddingLeft: () => 8,
-        paddingRight: () => 8,
-        paddingTop: () => 7,
-        paddingBottom: () => 7
-      },
-      margin: [0, 0, 0, 8]
-    });
-  }
   return content;
 }
 
