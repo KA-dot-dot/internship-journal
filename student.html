@@ -882,6 +882,70 @@ function waitForFirebaseAsync() {
   return new Promise(resolve => waitForFirebase(resolve));
 }
 
+// ============================================================
+// 2026-07-12 暫時性除錯工具——只為了診斷「iOS PWA 卡登入畫面」這個問題。
+// 找到根因並確認修好之後，這整段（到下方「除錯工具結束」為止）連同各處
+// 呼叫 _dbgLog() 的地方都應該整段移除，不是正式功能。
+// 用 localStorage 而非變數存記錄，是因為這次要診斷的問題橫跨一次完整的
+// 頁面導向（本站 → Google → 導回本站），中間會經過至少一次全新的頁面載入，
+// 存在記憶體變數裡的記錄會直接消失；localStorage 才能讓「導去 Google 之前」
+// 跟「導回來之後」的記錄接在一起看。
+// ============================================================
+function _dbgLog(msg) {
+  try {
+    const key = '_pwaDebugLog';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    const t = new Date();
+    const time = String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') + ':' + String(t.getSeconds()).padStart(2,'0') + '.' + String(t.getMilliseconds()).padStart(3,'0');
+    arr.push(time + '  ' + msg);
+    if (arr.length > 100) arr.shift();
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch (e) { /* 忽略，除錯工具本身不能造成登入流程失敗 */ }
+  console.log('[PWADBG]', msg);
+  _dbgRender();
+}
+function _dbgRender() {
+  try {
+    const key = '_pwaDebugLog';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    let panel = document.getElementById('_pwaDebugPanel');
+    if (!panel) {
+      if (!document.body) return;
+      panel = document.createElement('div');
+      panel.id = '_pwaDebugPanel';
+      panel.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999999;background:rgba(0,0,0,0.93);color:#7CFC7C;font:10px/1.6 "Space Mono",monospace;padding:8px 10px calc(8px + env(safe-area-inset-bottom));max-height:46vh;overflow-y:auto;white-space:pre-wrap;word-break:break-all;';
+      const bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;color:#ffdd55;margin-bottom:6px;font-weight:bold;';
+      const label = document.createElement('span');
+      label.textContent = '🔍 登入除錯記錄（找到問題後這段要整段移除）';
+      const btnWrap = document.createElement('span');
+      const clearBtn = document.createElement('a');
+      clearBtn.href = 'javascript:void(0)';
+      clearBtn.textContent = '清除';
+      clearBtn.style.cssText = 'color:#ff8888;margin-right:14px;text-decoration:underline;';
+      clearBtn.onclick = () => { localStorage.removeItem(key); _dbgRender(); };
+      const hideBtn = document.createElement('a');
+      hideBtn.href = 'javascript:void(0)';
+      hideBtn.textContent = '隱藏';
+      hideBtn.style.cssText = 'color:#88ccff;text-decoration:underline;';
+      hideBtn.onclick = () => { panel.style.display = 'none'; };
+      btnWrap.appendChild(clearBtn);
+      btnWrap.appendChild(hideBtn);
+      bar.appendChild(label);
+      bar.appendChild(btnWrap);
+      panel.appendChild(bar);
+      const content = document.createElement('div');
+      content.id = '_pwaDebugPanelContent';
+      panel.appendChild(content);
+      document.body.appendChild(panel);
+    }
+    const content = document.getElementById('_pwaDebugPanelContent');
+    if (content) content.textContent = arr.length ? arr.join('\n') : '（尚無記錄）';
+    panel.style.display = 'block';
+  } catch (e) { /* 忽略 */ }
+}
+// ============ 除錯工具結束 ============
+
 function isStoragePartitionedEnv() {
   // LINE 內建瀏覽器：UA 一定含 "Line/"。
   // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
@@ -915,7 +979,9 @@ function isStandaloneApp() {
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
   sessionStorage.setItem('studentRedirectLoginPending', '1');
+  _dbgLog('startStudentRedirectLogin() 即將呼叫 signInWithRedirect，flag 已設定（sessionStorage）');
   await signInWithRedirect(auth, provider);
+  _dbgLog('⚠️ signInWithRedirect 後面這行理論上不該被印出來（正常應該直接離開頁面），如果看到這行代表 signInWithRedirect 沒有真的導頁');
 }
 
 // ============ 學期工具 ============
@@ -1127,9 +1193,11 @@ async function handleLoginUser(user) {
 }
 
 async function googleStudentLogin() {
+  _dbgLog('googleStudentLogin() 被呼叫（按下登入按鈕）');
   showLoading();
   try {
     if (!window._auth) {
+      _dbgLog('❌ window._auth 尚未就緒，提早結束');
       hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
@@ -1137,7 +1205,9 @@ async function googleStudentLogin() {
     // 2026-07 補修：standalone（PWA 加到主畫面）模式一律直接走 redirect，
     // 不先嘗試 signInWithPopup——比照 teacher.html googleTeacherLogin() 的既有作法。
     if (isStandaloneApp()) {
+      _dbgLog('分支：isStandaloneApp()=true，走 redirect 路徑');
       if (isStoragePartitionedEnv()) {
+        _dbgLog('❌ isStoragePartitionedEnv()=true，判定為受限環境，提早結束（不會嘗試 redirect）');
         hideLoading();
         toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
         return;
@@ -1145,17 +1215,21 @@ async function googleStudentLogin() {
       try {
         await startStudentRedirectLogin();
       } catch(re) {
+        _dbgLog('❌ startStudentRedirectLogin() 同步拋出例外：' + (re && re.code) + ' / ' + (re && re.message));
         hideLoading();
         toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
       }
       return;
     }
+    _dbgLog('分支：isStandaloneApp()=false，走一般 signInWithPopup 路徑');
     const { auth, provider, signInWithPopup } = window._auth;
     const popupPromise = signInWithPopup(auth, provider);
     await waitForFirebaseAsync();
     const result = await popupPromise;
+    _dbgLog('signInWithPopup 成功，uid=' + result.user?.uid);
     await handleLoginUser(result.user);
   } catch(e) {
+    _dbgLog('googleStudentLogin() catch：code=' + e.code + ' message=' + e.message);
     hideLoading();
     if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
@@ -1163,12 +1237,15 @@ async function googleStudentLogin() {
       // Firebase 無法讀到自己的 redirect state → "missing initial state" 錯誤。
       // 直接告知使用者改用外部瀏覽器，不觸發 redirect。
       if (isStoragePartitionedEnv()) {
+        _dbgLog('❌ popup 被擋 + isStoragePartitionedEnv()=true，提早結束');
         toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
         return;
       }
+      _dbgLog('popup 被擋，改走 startStudentRedirectLogin() fallback');
       try {
         await startStudentRedirectLogin();
       } catch(re) {
+        _dbgLog('❌ fallback startStudentRedirectLogin() 也拋出例外：' + (re && re.code) + ' / ' + (re && re.message));
         toast('APP 登入被系統阻擋，請改用 Safari/Chrome 開啟登入一次', 'error');
       }
       return;
@@ -1179,14 +1256,20 @@ async function googleStudentLogin() {
 }
 
 async function handleRedirectResult() {
+  _dbgLog('handleRedirectResult() 開始執行');
   // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
   // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
   // 呼叫會拋出 "missing initial state" 錯誤。
-  if (!sessionStorage.getItem('studentRedirectLoginPending')) return;
+  if (!sessionStorage.getItem('studentRedirectLoginPending')) {
+    _dbgLog('❌ 沒有 sessionStorage pending flag，提早 return（不會呼叫 getRedirectResult）');
+    return;
+  }
+  _dbgLog('✅ 找到 pending flag，繼續處理');
   // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
   // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
   // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
   if (isStoragePartitionedEnv()) {
+    _dbgLog('❌ isStoragePartitionedEnv()=true，提早 return（不會呼叫 getRedirectResult）');
     sessionStorage.removeItem('studentRedirectLoginPending');
     toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
     return;
@@ -1194,21 +1277,27 @@ async function handleRedirectResult() {
   // 設旗標：告知 onAuthStateChanged callback 這條路徑正在處理，不要搶先執行
   _loginHandling = true;
   await waitForFirebaseAsync();
+  _dbgLog('waitForFirebaseAsync() 完成，即將呼叫 getRedirectResult()');
   try {
     const { auth, getRedirectResult } = window._auth;
     const result = await getRedirectResult(auth);
+    _dbgLog('getRedirectResult() 成功回傳，result.user=' + (result && result.user ? result.user.uid : '（null，沒有 pending 的登入結果）'));
     sessionStorage.removeItem('studentRedirectLoginPending');
     if (result?.user && !currentUser) {
+      _dbgLog('準備呼叫 handleLoginUser()');
       showLoading();
       await handleLoginUser(result.user);
+      _dbgLog('handleLoginUser() 執行完畢，currentUser=' + JSON.stringify(currentUser));
     } else {
       // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
+      _dbgLog('result.user 為空或 currentUser 已存在，不呼叫 handleLoginUser()');
       _loginHandling = false;
     }
   } catch(e) {
     sessionStorage.removeItem('studentRedirectLoginPending');
     _loginHandling = false;
     hideLoading();
+    _dbgLog('❌ getRedirectResult() 拋出例外：code=' + e.code + ' message=' + e.message);
     console.error('Redirect 登入失敗', e);
     // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
     // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
@@ -4288,6 +4377,14 @@ document.addEventListener('DOMContentLoaded', () => {
     el.style.display = 'block';
     if (loginCard) loginCard.style.display = 'none';
   })();
+  _dbgLog('===== 頁面載入 =====');
+  _dbgLog('href=' + location.href);
+  _dbgLog('referrer=' + (document.referrer || '（無）'));
+  _dbgLog('UA=' + navigator.userAgent);
+  _dbgLog('isStandaloneApp()=' + isStandaloneApp() + '  navigator.standalone=' + window.navigator.standalone + '  matchMedia=' + (window.matchMedia?.('(display-mode: standalone)')?.matches));
+  _dbgLog('isStoragePartitionedEnv()=' + isStoragePartitionedEnv());
+  _dbgLog('localStorage[studentRedirectLoginPending]=' + localStorage.getItem('studentRedirectLoginPending'));
+  _dbgLog('sessionStorage[studentRedirectLoginPending]=' + sessionStorage.getItem('studentRedirectLoginPending'));
   handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
   disableStudentAutocomplete();
   const autocompleteObserver = new MutationObserver(muts => {
@@ -4301,27 +4398,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // 自動恢復登入狀態
     const { auth, onAuthStateChanged } = window._auth;
     onAuthStateChanged(auth, async (user) => {
+      _dbgLog('onAuthStateChanged 觸發，user=' + (user ? user.uid : 'null') + '  currentUser已存在=' + !!currentUser);
       if (user && !currentUser) {
         // 若 handleRedirectResult 正在處理 redirect 登入，等待它完成再決定是否接手。
         // 避免兩條路徑同時執行 handleLoginUser 造成 Firestore 競爭查詢。
         if (_loginHandling) {
+          _dbgLog('_loginHandling=true，onAuthStateChanged 開始等待（最多15秒）');
           // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
           const waitStart = Date.now();
           while (_loginHandling && Date.now() - waitStart < 15000) {
             await new Promise(r => setTimeout(r, 200));
           }
+          _dbgLog('onAuthStateChanged 等待結束，_loginHandling=' + _loginHandling + '  currentUser=' + !!currentUser);
           if (currentUser) return; // redirect 路徑已登入成功
         }
         clearLoginError();
         showLoading();
         setLoadingText('驗證帳號中...');
         const email = user.email || '';
-        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
+        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { _dbgLog('❌ email 網域不符：' + email); await window._auth.signOut(auth); hideLoading(); return; }
         const { doc, getDoc } = firebase_funcs;
         const emailKey = email.replace(/[@.]/g, '_');
         try {
+          _dbgLog('查詢 studentBindings/' + emailKey);
           const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
           if (!bindSnap.exists()) {
+            _dbgLog('❌ studentBindings 不存在');
             if (await isTeacherAccount(user)) {
               // 老師帳號：絕對不 signOut，只顯示提示，保護 teacher.html session
               showTeacherStudentSetupHint('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面');
@@ -4344,6 +4446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
           }
           if (!stuSnap.exists()) {
+            _dbgLog('❌ students 文件不存在，seatNo=' + binding.seatNo);
             if (await isTeacherAccount(user)) {
               showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
             } else {
@@ -4361,8 +4464,9 @@ document.addEventListener('DOMContentLoaded', () => {
           // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
           try { const { updateDoc } = firebase_funcs; await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid }); } catch(e) { console.warn('補寫 uid 失敗', e); }
           setLoadingText('登入成功');
+          _dbgLog('✅ 登入資料齊全，呼叫 enterApp()');
           enterApp();
-        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error'); }
+        } catch(e) { _dbgLog('❌ onAuthStateChanged 內部例外：' + e.code + ' / ' + e.message); console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error'); }
       }
     });
   });
