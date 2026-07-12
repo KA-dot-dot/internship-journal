@@ -929,7 +929,18 @@ function _dbgRender() {
       hideBtn.textContent = '隱藏';
       hideBtn.style.cssText = 'color:#88ccff;text-decoration:underline;';
       hideBtn.onclick = () => { panel.style.display = 'none'; };
+      // 2026-07-12 暫時新增：直接測試 signInWithPopup()，跳過 isStandaloneApp() 導去
+      // redirect 的判斷分支，用來驗證「popup 在 standalone 模式不可靠」這個 2026-07-09
+      // 就存在的假設，是否真的在這台裝置上成立（該次修正當時只做過 node --check／diff，
+      // 從未取得實機驗證，見 AI_CONTEXT.md 驗證狀態表）。跟正式的 googleStudentLogin()
+      // 完全分開、互不影響，測試完這顆按鈕會跟其餘除錯工具一起整段移除。
+      const popupTestBtn = document.createElement('a');
+      popupTestBtn.href = 'javascript:void(0)';
+      popupTestBtn.textContent = '🧪測試Popup';
+      popupTestBtn.style.cssText = 'color:#ffcc00;margin-right:14px;text-decoration:underline;';
+      popupTestBtn.onclick = () => { _testPopupLogin(); };
       btnWrap.appendChild(clearBtn);
+      btnWrap.appendChild(popupTestBtn);
       btnWrap.appendChild(hideBtn);
       bar.appendChild(label);
       bar.appendChild(btnWrap);
@@ -982,6 +993,34 @@ async function startStudentRedirectLogin() {
   _dbgLog('startStudentRedirectLogin() 即將呼叫 signInWithRedirect，flag 已設定（sessionStorage）');
   await signInWithRedirect(auth, provider);
   _dbgLog('⚠️ signInWithRedirect 後面這行理論上不該被印出來（正常應該直接離開頁面），如果看到這行代表 signInWithRedirect 沒有真的導頁');
+}
+
+// 2026-07-12 暫時新增（除錯用，非正式功能）：直接呼叫 signInWithPopup，完全跳過
+// isStandaloneApp() 的 redirect 分支，用來驗證「popup 在 standalone 模式不可靠」這個
+// 假設在這台裝置上是否真的成立。跟 getRedirectResult() 卡住的問題完全不相干，
+// 是另一條獨立路徑，藉由由 debug 面板按鈕手動觸發，不會被一般登入流程呼叫到。
+async function _testPopupLogin() {
+  _dbgLog('🧪 手動測試開始：直接呼叫 signInWithPopup()（跳過 standalone/redirect 判斷）');
+  if (!window._auth) {
+    _dbgLog('❌ window._auth 尚未就緒，測試中止');
+    return;
+  }
+  showLoading();
+  try {
+    const { auth, provider, signInWithPopup } = window._auth;
+    const result = await signInWithPopup(auth, provider);
+    _dbgLog('✅ signInWithPopup() 成功回傳，uid=' + (result?.user?.uid || '（無 uid）'));
+    if (result?.user && !currentUser) {
+      _dbgLog('準備呼叫 handleLoginUser() 完成登入');
+      await handleLoginUser(result.user);
+      _dbgLog('handleLoginUser() 執行完畢，currentUser=' + JSON.stringify(currentUser));
+    } else {
+      hideLoading();
+    }
+  } catch (e) {
+    hideLoading();
+    _dbgLog('❌ signInWithPopup() 拋出例外：code=' + e.code + ' message=' + e.message);
+  }
 }
 
 // ============ 學期工具 ============
