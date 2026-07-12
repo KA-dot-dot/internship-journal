@@ -536,6 +536,13 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
         使用 Google 帳號登入
       </button>
       <p style="text-align:center;font-size:12px;color:var(--text2);margin-top:10px">iPhone 用 Safari・Android 用 Chrome 開啟</p>
+      <!-- 2026-07 補修：iOS「加到主畫面」App（standalone）環境專用說明，預設隱藏，
+           偵測到才顯示。原因見 openInSafariForLogin() 函式註解：iOS Safari 16.1+ 會
+           封鎖 signInWithRedirect() 所需的跨網域 storage 存取，standalone 模式下
+           signInWithPopup() 又不支援，兩條路都走不通，只能引導改用 Safari 完成登入。 -->
+      <div id="ios-standalone-hint" class="hidden" style="margin-top:14px;padding:12px 14px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:var(--radius-sm);font-size:12px;line-height:1.7;color:var(--text)">
+        📱 偵測到您從主畫面圖示開啟本 App。iOS 系統限制無法在此直接完成 Google 登入，點擊上方按鈕會自動改用 Safari 開啟登入頁；完成登入後請「完全關閉」這個 App（非只是切到背景），再重新從主畫面圖示打開一次，就會直接進入系統，不需要在 App 內再登入一次。
+      </div>
       <!-- 登入失敗靜態說明：由 JS 寫入，預設隱藏 -->
       <div id="login-error-hint" class="hidden" style="margin-top:16px;padding:12px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);font-size:12px;line-height:1.7;color:var(--accent-red)"></div>
     </div>
@@ -912,21 +919,57 @@ function isStandaloneApp() {
     window.navigator.standalone === true;
 }
 
+function isIOSDevice() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+// 2026-07 補修：iOS「加到主畫面」standalone App 完全無法透過 signInWithRedirect() 登入
+// （網頁版／一般 Safari 分頁改走 signInWithPopup()，不受影響，實測正常）。根本原因：
+// Firebase signInWithRedirect() 底層仰賴一個連到 authDomain（本專案為預設的
+// project-xxxx.firebaseapp.com，屬於跟本站不同的網域）的跨網域 iframe 來協調重新導向
+// 狀態；iOS Safari 16.1 起會強制封鎖這類跨網域（third-party）storage 存取，導致重新
+// 導向回來後 Firebase 讀不到剛才存的狀態，登入結果直接遺失——這是 Firebase 官方文件
+// 本身列出的已知限制，且明文寫「Safari 16.1+ 起這是必須修正才能用 signInWithRedirect()
+// 的硬性要求，不是選配」：
+//   https://firebase.google.com/docs/auth/web/redirect-best-practices
+// standalone 模式下 signInWithPopup() 又天生不支援（見 isStandaloneApp() 上方註解），
+// 代表 iOS standalone 這個組合，signInWithRedirect／signInWithPopup 兩條路都走不通，
+// 純粹改程式碼無法讓「App 內直接登入」這件事本身成立，只能引導使用者改用 Safari 完成登入。
+// 之所以「登入後回到主畫面圖示會自動進入系統、不需要再登入一次」：Firebase 的登入狀態
+// （browserLocalPersistence，底層用 IndexedDB）在「同一個網域」下，standalone 主畫面
+// App 與一般 Safari 分頁是共用的儲存空間（不像本檔案另一個 sessionStorage 旗標那樣，
+// 各自的瀏覽情境獨立分開）；所以只要在 Safari 完成一次登入，之後重新開啟主畫面圖示
+// （建議完全關閉舊的背景分頁而非只是切換，確保是全新載入，讀到的是登入後的最新狀態），
+// 既有的 onAuthStateChanged 監聽器就能直接偵測到已登入狀態並自動進入系統。
+// ⚠️ 長期根治方案：把 authDomain 改成本站自己的網域＋自行代管 Firebase 的
+// signin-helper 檔案（Firebase 文件 Option 4「Self-host the sign-in helper code」），
+// 讓這個 iframe 變成同網域存取、不再受 Safari 第三方 storage 封鎖影響，屆時 iOS
+// standalone 下的 signInWithRedirect() 才有機會真正修好、不需要再繞去 Safari。這需要
+// 額外下載/代管數個檔案並到 Firebase Console／Google Cloud Console 調整 authDomain 與
+// OAuth 用戶端的授權轉址網址，屬於外部環境設定變更，不是單純改這份 html 能完成的，本次
+// 先用「引導改走 Safari」這個不需要額外主控台設定、立即可用的方式讓 iOS 使用者能登入。
+function openInSafariForLogin() {
+  const url = location.origin + location.pathname;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 async function startStudentRedirectLogin() {
   const { auth, provider, signInWithRedirect } = window._auth;
-  // 2026-07-12 補修：pending 旗標改存 localStorage（原為 sessionStorage）。
-  // 根因：iOS standalone PWA 在導去 accounts.google.com 再導回來的這段期間，
-  // 系統可能為了省記憶體回收/重載背景中的 standalone 網頁應用（跟一般 Safari
-  // 分頁不同，standalone 分頁沒有分頁列保護，更容易被回收），回來後等於是一次
-  // 全新的頁面載入，sessionStorage 會被清空——但 setPersistence(browserLocalPersistence)
-  // 已證實 localStorage 在同樣情境下能存活（PWA 重開不需重新登入即是證據）。
-  // 若這個旗標用 sessionStorage 存，遇到上述情境時 handleRedirectResult() 開頭的
-  // 旗標檢查會誤判「沒有觸發過 redirect」而直接 return，完全不會呼叫
-  // getRedirectResult()——即使 Google 那邊登入其實已經成功，也永遠不會被讀回來，
-  // 畫面停在登入頁不動。這正是 iOS 版「APP（加到主畫面）卡登入畫面，但網頁版
-  // Safari 正常」這個回報最貼合的成因：一般 Safari 分頁沒有這種背景回收問題，
-  // sessionStorage 全程存活；Android 的 PWA 實作也不會這樣回收，同樣不受影響。
-  localStorage.setItem('studentRedirectLoginPending', '1');
+  // 2026-07 補修：原本用 sessionStorage 存這個旗標，但 signInWithRedirect() 整趟
+  // 重新導向（本站 → accounts.google.com → firebaseapp.com/__/auth/handler → 本站）
+  // 途中若瀏覽器行程被系統回收重建（standalone App 比一般分頁更容易發生），
+  // sessionStorage 有機會遺失，導致回來後 handleRedirectResult() 誤判「沒有
+  // pending redirect」而直接放棄處理，登入結果就這樣悄悄不見（Firebase SDK 本身也
+  // 有記錄過這類 sessionStorage 旗標在時間差之間遺失的案例）。改用 localStorage（存
+  // 時間戳而非純值 1，供下面判斷是否過期），耐受度比 sessionStorage 高很多，不會因為
+  // App 行程被重建就消失。
+  localStorage.setItem('studentRedirectLoginPending', String(Date.now()));
   await signInWithRedirect(auth, provider);
 }
 
@@ -1154,6 +1197,19 @@ async function googleStudentLogin() {
         toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
         return;
       }
+      // 2026-07 補修：iOS standalone 下 signInWithRedirect() 會因 Safari 16.1+ 封鎖
+      // Firebase 所需的跨網域 storage 存取而必定失敗（詳見 openInSafariForLogin()
+      // 函式上方註解），實測 Android standalone 走 redirect 正常、不受影響，故僅針對
+      // iOS 特別處理，不要再讓 iOS 使用者浪費時間等待一個注定卡住的重新導向。
+      if (isIOSDevice()) {
+        hideLoading();
+        openInSafariForLogin();
+        showLoginError(
+          '已為您開啟 Safari 完成登入',
+          '請在跳出的 Safari 分頁中完成 Google 登入。完成後「完全關閉」這個 App（非只是切到背景），再重新從主畫面圖示打開一次即可直接進入系統。若沒有自動跳出 Safari，請手動開啟 Safari 前往本網站登入。'
+        );
+        return;
+      }
       try {
         await startStudentRedirectLogin();
       } catch(re) {
@@ -1194,15 +1250,17 @@ async function handleRedirectResult() {
   // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
   // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
   // 呼叫會拋出 "missing initial state" 錯誤。
-  // 2026-07-12 補修：判斷改讀 localStorage（原為 sessionStorage）。iOS standalone
-  // PWA 在導去 Google 登入、再導回來的這段期間，系統可能回收/重載背景中的
-  // standalone 網頁應用，回來後等於全新頁面載入，sessionStorage 會被清空——但
-  // localStorage 在同樣情境下已證實能存活（見 startStudentRedirectLogin() 的完整
-  // 說明；setPersistence(browserLocalPersistence) 也是基於同樣理由選 localStorage）。
-  // 這正是 iOS 版「APP 卡登入畫面、但網頁版 Safari 正常」的成因：sessionStorage
-  // 被清空後，這裡原本會誤判「沒有觸發過 redirect」而直接 return，即使 Google
-  // 那邊其實登入成功，也永遠不會呼叫 getRedirectResult() 把結果讀回來。
-  if (!localStorage.getItem('studentRedirectLoginPending')) return;
+  // 2026-07 補修：改讀 localStorage（startStudentRedirectLogin() 已同步改寫），
+  // 並判斷時間戳是否過期（超過 10 分鐘視為使用者中途放棄的殘留旗標，直接清除、
+  // 不嘗試呼叫 getRedirectResult——避免萬一真的是殘留旗標卻仍去呼叫，在某些環境下
+  // 意外拋出非預期錯誤；10 分鐘遠超過正常登入操作所需時間，不會誤傷真正進行中的登入）。
+  const pendingRaw = localStorage.getItem('studentRedirectLoginPending');
+  if (!pendingRaw) return;
+  const pendingAt = Number(pendingRaw);
+  if (!pendingAt || Date.now() - pendingAt > 10 * 60 * 1000) {
+    localStorage.removeItem('studentRedirectLoginPending');
+    return;
+  }
   // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
   // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
   // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
@@ -4307,6 +4365,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (symIcon) symIcon.textContent = symbol;
     el.style.display = 'block';
     if (loginCard) loginCard.style.display = 'none';
+  })();
+  // 2026-07 補修：iOS standalone（PWA 加到主畫面）偵測，提前顯示說明。
+  // 原因見 openInSafariForLogin() 函式上方註解——這個組合下 signInWithRedirect()
+  // 必定失敗，提前告知比等使用者點下登入、卡在載入畫面後才顯示錯誤訊息更清楚。
+  (function() {
+    if (isIOSDevice() && isStandaloneApp()) {
+      const hint = document.getElementById('ios-standalone-hint');
+      if (hint) hint.classList.remove('hidden');
+    }
   })();
   handleRedirectResult(); // 手機 Redirect 登入後自動處理回傳結果
   disableStudentAutocomplete();
