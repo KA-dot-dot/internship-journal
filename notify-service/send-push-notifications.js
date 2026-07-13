@@ -289,6 +289,19 @@ async function checkReplies() {
       // 更正紀錄，是為了誠實記錄當時的認知狀態。現在會恢復正常，是因為下方 update() 已補上
       // 「contentAt 缺資料時，用這次通知的時間戳一併回填」的自我修復邏輯，見該處註解。
       if (alreadyNotified(data.studentReplyNotifiedAt, data.studentReplyContentAt)) continue;
+
+      // 2026-07-13 補修：跟 checkComments()/checkNewJournals() 補齊同一段防禦性檢查——
+      // 排除理論上不會有資料、但 rule.txt 裡確實存在的頂層 /journals/{journalId} 集合
+      // （跟 /users/{uid}/journals/{journalId} 是不同路徑）。checkReplies() 本身不需要
+      // userId（通知對象固定是 adminTokenDocs，不像 checkComments() 要反查
+      // users/${userId}/fcmTokens），所以少了這段檢查並不會造成 parent.parent 為 null
+      // 導致的例外崩潰；補上純粹是為了跟另外兩個結構相同的姊妹函式保持一致——避免萬一
+      // 頂層 /journals/ 集合真的意外有文件帶 studentReplyUnread:true，被這裡的
+      // collectionGroup 查詢撈到後，誤把它當成合法的學生回覆通知全體老師、並寫入
+      // studentReplyNotifiedAt。
+      const userDocRef = docSnap.ref.parent.parent;
+      if (!userDocRef || userDocRef.parent.id !== 'users') continue;
+
       if (!adminTokenDocs.length) continue; // 目前沒有任何老師/管理員註冊過推播，安靜跳過
 
       const body = data.studentReply.length > 40 ? data.studentReply.slice(0, 40) + '…' : data.studentReply;
