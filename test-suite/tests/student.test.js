@@ -1,7 +1,29 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v20
+ * 學生端自動化測試 v21
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v21 新增（2026-07-13）：
+ *   S-SEC-32  checkMonthDeadline()/editJournal() 快取寫入 sem/month，saveJournal() 送出前
+ *             比對快取新鮮度。背景：_currentJournalCache 是 checkMonthDeadline() 非同步寫入
+ *             的（學期/月份 select 的 onchange 直接呼叫、未 await，且 checkMonthDeadline()
+ *             內部完全沒有 showLoading() 鎖住畫面，儲存按鈕在查詢完成前就已經可以點擊）。
+ *             原本的快取物件沒有記錄自己對應哪個學期/月份，saveJournal() 的 isFirstSubmit
+ *             判斷完全信任快取，若學生切換學期/月份後在查詢真正完成前就按下儲存，讀到的會
+ *             是前一個學期/月份殘留的快取——這在 journalSubmitNotifiedAt 出現以前只是
+ *             「覆蓋確認對話框不會跳出來」這種可接受的小瑕疵，但現在會產生兩種更嚴重的
+ *             後果：①目標月記其實已推播過，卻誤判為第一次繳交，payload 帶
+ *             journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須維持原值不變」而
+ *             整份月記存檔被拒（403）；②目標月記其實是真正的第一次繳交，卻誤判為非第一次，
+ *             payload 完全不帶這個欄位，CREATE 規則允許省略而寫入成功，但這份文件從此永遠
+ *             不會出現在 checkNewJournals() 的查詢範圍內，老師安靜地收不到繳交通知。
+ *             修法：checkMonthDeadline()/editJournal() 寫入快取時補上 sem/month；
+ *             saveJournal() 送出前比對快取的 sem/month 是否與目前選定的一致，不一致（含
+ *             快取完全沒有 sem/month）時改為 await getDoc(journalRef) 現查，寫回快取後才
+ *             計算 isFirstSubmit——跟 saveStudentReply()/saveTeacherComment() 修多裝置/
+ *             多分頁競態問題用的「送出前現查」是同一套思路。純屬前端邏輯修正，rule.txt／
+ *             test-rules.js 不受影響（rule.txt 本身對 journalSubmitNotifiedAt 的驗證邏輯
+ *             一直是正確的，這次修的是「前端算出錯誤 payload」這一步，不是規則層的問題）。
  *
  * v20 修正（2026-07-11）：
  *   S-SEC-29  檢查邏輯更新，對應 saveStudentReply() 本身同日的修法：oldReply 原本讀
@@ -2022,6 +2044,78 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error(
         'enterApp() 找不到不帶 await 的 initPushNotifications() 呼叫，呼叫方式可能已改變，需要重新確認此測試'
       );
+  });
+
+  await test('S-SEC-32 checkMonthDeadline()/editJournal() 快取寫入 sem/month，saveJournal() 送出前比對快取新鮮度', async () => {
+    // 2026-07-13 新增。背景：_currentJournalCache 是 checkMonthDeadline() 非同步寫入的
+    // （學期/月份 select 的 onchange 直接呼叫、未 await，且 checkMonthDeadline() 內部完全
+    // 沒有 showLoading() 鎖住畫面，儲存按鈕在查詢完成前就已經可以點擊）。原本的快取物件
+    // 沒有記錄自己對應哪個學期/月份，saveJournal() 的 isFirstSubmit 判斷完全信任快取，
+    // 若學生切換學期/月份後在查詢真正完成前就按下儲存，讀到的會是前一個學期/月份殘留的
+    // 快取——這在 journalSubmitNotifiedAt 出現以前只是「覆蓋確認對話框不會跳出來」這種
+    // 可接受的小瑕疵，但現在會產生兩種更嚴重的後果：①目標月記其實已推播過，卻誤判為
+    // 第一次繳交，payload 帶 journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須
+    // 維持原值不變」而整份月記存檔被拒（403）；②目標月記其實是真正的第一次繳交，卻誤判
+    // 為非第一次，payload 完全不帶這個欄位，CREATE 規則允許省略而寫入成功，但這份文件
+    // 從此永遠不會出現在 checkNewJournals() 的查詢範圍內，老師安靜地收不到繳交通知。
+    //
+    // 驗證五項特徵（缺一即退化）：
+    //   1. checkMonthDeadline() 的快取物件 exists:true 分支有記錄 sem/month
+    //   2. checkMonthDeadline() 的 exists:false 分支要出現 2 次皆帶 sem/month（ternary 的
+    //      false 分支 + 下方清空表單時的重複賦值，兩處都要同步更新，漏一處會讓其中一條
+    //      路徑的快取遺失 sem/month）
+    //   3. editJournal() 的快取物件也記錄 sem/month（跟 checkMonthDeadline() 的快取結構
+    //      保持一致，否則「先編輯再儲存、未切換月份」這條路徑會被誤判為快取不新鮮）
+    //   4. saveJournal() 有比對快取的 sem/month 是否與目前選定的一致，不一致時會
+    //      await getDoc(journalRef) 現查並把結果寫回 _currentJournalCache
+    //   5. 這段現查邏輯要出現在 isFirstSubmit 計算「之前」（在原始碼字串中的位置早於
+    //      const isFirstSubmit 這行），否則現查了也沒用，isFirstSubmit 還是用舊快取算
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      if (!checkFnStr || !saveFnStr || !editFnStr) return { skip: true };
+
+      const checkTrueBranchHasSemMonth = /exists:\s*true,\s*sem,\s*month/.test(checkFnStr);
+      const checkFalseBranchCount = (checkFnStr.match(/exists:\s*false,\s*sem,\s*month/g) || []).length;
+
+      const editCacheHasSemMonth = /exists:\s*true,\s*sem,\s*month,/.test(editFnStr);
+
+      const hasMismatchCheck =
+        /_currentJournalCache\.sem\s*!==\s*sem/.test(saveFnStr) &&
+        /_currentJournalCache\.month\s*!==\s*month/.test(saveFnStr);
+      const hasFreshGetDoc = /await\s+getDoc\s*\(\s*journalRef\s*\)/.test(saveFnStr);
+      const freshSnapWritesCache = /window\._currentJournalCache\s*=\s*freshSnap\.exists\(\)/.test(saveFnStr);
+
+      const mismatchIdx = saveFnStr.search(/_currentJournalCache\.sem\s*!==\s*sem/);
+      const isFirstSubmitIdx = saveFnStr.indexOf('const isFirstSubmit');
+      const mismatchCheckBeforeIsFirstSubmit =
+        mismatchIdx !== -1 && isFirstSubmitIdx !== -1 && mismatchIdx < isFirstSubmitIdx;
+
+      return {
+        skip: false,
+        checkTrueBranchHasSemMonth,
+        checkFalseBranchCount,
+        editCacheHasSemMonth,
+        hasMismatchCheck,
+        hasFreshGetDoc,
+        freshSnapWritesCache,
+        mismatchCheckBeforeIsFirstSubmit,
+      };
+    });
+    if (result.skip) return;
+    if (!result.checkTrueBranchHasSemMonth)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支找不到 sem/month，saveJournal() 無法判斷這份快取對應哪個學期/月份');
+    if (result.checkFalseBranchCount < 2)
+      throw new Error(`checkMonthDeadline() 的 exists:false 快取分支應出現 2 次（ternary 的 false 分支 + 清空表單時的重複賦值）皆帶 sem/month，實際只找到 ${result.checkFalseBranchCount} 次，可能有一處忘記同步補上`);
+    if (!result.editCacheHasSemMonth)
+      throw new Error('editJournal() 的快取物件找不到 sem/month，跟 checkMonthDeadline() 的快取結構不一致，會讓「先編輯再儲存」這條路徑被誤判為快取不新鮮');
+    if (!result.hasMismatchCheck)
+      throw new Error('saveJournal() 找不到比對 _currentJournalCache.sem/.month 是否與目前選定學期/月份一致的邏輯，切換月份後快速按下儲存仍可能誤判 isFirstSubmit');
+    if (!result.hasFreshGetDoc || !result.freshSnapWritesCache)
+      throw new Error('saveJournal() 找不到「快取不符時 await getDoc(journalRef) 現查並寫回 _currentJournalCache」的邏輯，快取不新鮮時仍會直接信任舊資料');
+    if (!result.mismatchCheckBeforeIsFirstSubmit)
+      throw new Error('saveJournal() 的快取新鮮度檢查沒有寫在 isFirstSubmit 計算之前，即使現查更新了快取，isFirstSubmit 仍可能用到舊值計算');
   });
 
 

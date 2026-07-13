@@ -1937,9 +1937,14 @@ async function checkMonthDeadline(skipFill = false) {
   // 2026-06-28 補修：補上 studentReply（跟 editJournal() 的快取對齊，原本只有那條路徑有），
   // 讓 saveJournal() 的覆蓋確認對話框也能在這條路徑（一般填寫頁覆蓋當月既有月記）
   // 正確判斷「有回覆會暫時看不見」並顯示對應警告。
+  // 2026-07-13 補修：補上 sem/month，讓 saveJournal() 能在送出前比對這份快取是否真的
+  // 對應目前選定的學期/月份（詳見 saveJournal() 內對應註解）——checkMonthDeadline() 是
+  // select 的 onchange 直接呼叫、未 await，且本身完全沒有 showLoading() 鎖住畫面，若學生
+  // 切換學期/月份後在這裡的查詢真正完成「前」就按下儲存，沒有這兩個欄位會讓 saveJournal()
+  // 無從分辨快取到底是不是當下選定月份的資料。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
-    : { exists: false };
+    ? { exists: true, sem, month, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
+    : { exists: false, sem, month };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
     document.getElementById('write-salary').value = j.salary ?? '';
@@ -1994,7 +1999,8 @@ async function checkMonthDeadline(skipFill = false) {
     }, 100);
   } else {
     // 清空所有欄位，同時清除快取（新月份沒有舊資料）
-    window._currentJournalCache = { exists: false };
+    // 2026-07-13 補修：同步補上 sem/month（理由同上面 exists 分支）
+    window._currentJournalCache = { exists: false, sem, month };
     document.getElementById('write-salary').value = '';
     document.getElementById('write-mentor').value = '';
     document.getElementById('write-reflection').value = '';
@@ -3236,6 +3242,40 @@ async function saveJournal() {
   // 2026-07 新增：是否為「這份月記第一次被儲存」，跟 submittedAt 的判斷條件完全共用
   // 同一個布林值——「第一次才記錄當下時間」這句話本身就是「journalSubmitNotifiedAt
   // 這個推播用標記欄位，第一次才需要明確寫成 null」的同一件事，不另外重算一次條件。
+  //
+  // 2026-07-13 補修：_currentJournalCache 是 checkMonthDeadline() 非同步寫入的（學期/月份
+  // select 的 onchange 直接呼叫、未 await，且 checkMonthDeadline() 內部完全沒有
+  // showLoading() 鎖住畫面，儲存按鈕在查詢完成前就已經是可點擊狀態），若學生切換學期/
+  // 月份後在該次查詢真正完成「前」就按下儲存，這裡讀到的會是前一個學期/月份殘留的快取。
+  // 這在 journalSubmitNotifiedAt 出現以前只會造成「覆蓋確認對話框不會跳出來」或
+  // 「submittedAt 被重設」這種可接受的小瑕疵，但現在會造成兩種更嚴重的後果：
+  // ①目標月記其實已推播過（journalSubmitNotifiedAt 已是非 null 字串），卻誤判為第一次
+  // 繳交，payload 帶 journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須維持原值
+  // 不變」而整份月記存檔被拒（403）；②目標月記其實是真正的第一次繳交，卻誤判為非第一次，
+  // payload 完全不帶這個欄位，CREATE 規則允許省略而寫入成功，但這份文件從此永遠不會出現
+  // 在 checkNewJournals() 的查詢範圍內，老師安靜地收不到繳交通知且難以事後察覺。
+  // 修法：checkMonthDeadline()／editJournal() 寫入快取時現在會多存 sem/month（見兩處對應
+  // 修改），這裡送出前先比對快取的 sem/month 是否與目前選定的一致；只要不一致（含快取
+  // 完全沒有 sem/month，例如更早版本殘留或尚未跑過 checkMonthDeadline() 就直接儲存的邊界
+  // 情況），一律視為不可信，改為現查一次 Firestore 拿到真正的當下狀態，不直接信任可能
+  // 過期的快取——跟 saveStudentReply()／saveTeacherComment() 修多裝置/多分頁競態問題用的
+  // 「送出前現查」是同一套思路。現查後把結果寫回 window._currentJournalCache，讓下面
+  // （覆蓋確認對話框那段）也直接受惠，不必再讀第二次。
+  const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
+  if (!window._currentJournalCache || window._currentJournalCache.sem !== sem || window._currentJournalCache.month !== month) {
+    try {
+      const freshSnap = await getDoc(journalRef);
+      window._currentJournalCache = freshSnap.exists()
+        ? { exists: true, sem, month, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false }
+        : { exists: false, sem, month };
+    } catch (e) {
+      // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
+      // 不因為這個輔助性檢查失敗就擋住整個儲存流程，僅記錄警告，沿用當下的快取值
+      // （可能仍是過期的，但比起讓學生完全存不了檔，這是可接受的退化，機率也更低——
+      // 需要同時滿足「快取過期」與「現查剛好也失敗」兩個條件才會發生）。
+      console.warn('儲存前重新核對月記狀態失敗，暫時沿用現有快取', e);
+    }
+  }
   const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
@@ -3293,8 +3333,8 @@ async function saveJournal() {
   }
   if (saveBtn) saveBtn.textContent = '⏳ 儲存中...';
   try {
-    const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
-    // 優先使用 checkMonthDeadline 預先快取的查詢結果，避免重複 Firestore 讀取造成延遲
+    // journalRef 已在函式前段（快取新鮮度檢查處）宣告過，這裡直接沿用同一個參照
+    // 優先使用 checkMonthDeadline 預先快取的查詢結果（若剛才判定不新鮮，上面已現查更新過）
     const cached = window._currentJournalCache;
     if (cached?.exists) {
       const submittedDate = (cached.submittedAt || '').slice(0, 10) || '未知日期';
@@ -3316,7 +3356,9 @@ async function saveJournal() {
       }
       showLoading();
     }
-    // 快取無效時（直接跳到填寫頁等邊界情況）仍正常儲存，不擋
+    // 2026-07-13 更新：正常情況下快取已在上面（isFirstSubmit 計算前）確認過新鮮，
+    // 不符則已現查更新，這裡幾乎不會再遇到「快取無效」；僅在上面的現查因網路問題
+    // 失敗時才會殘留舊/空快取，此時仍正常儲存、不擋（比照截止日查詢失敗的既有處理原則）
     await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
     window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
     clearCurrentWriteDraft();
@@ -3638,8 +3680,12 @@ async function editJournal(seatNo, sem, month) {
   const j = snap.data();
   // 預先更新 _currentJournalCache，確保 saveJournal() 保留本筆月記的原始 submittedAt
   // 不更新時，快取若殘留其他月份的資料（或為 null），saveJournal 會把 submittedAt 重設為當下時間
+  // 2026-07-13 補修：補上 sem/month，跟 checkMonthDeadline() 的快取結構保持一致，
+  // 讓 saveJournal() 的快取新鮮度比對在「先編輯再儲存、未切換月份」這條路徑上能正確
+  // 判定快取有效、不需要多一次不必要的現查。
   window._currentJournalCache = {
     exists: true,
+    sem, month,
     submittedAt: j.submittedAt,
     updatedAt: j.updatedAt,
     teacherReviewed: j.teacherReviewed,
