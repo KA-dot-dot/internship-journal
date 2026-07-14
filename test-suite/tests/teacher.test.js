@@ -1,7 +1,30 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v20
+ * 老師端自動化測試 v21
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v21 新增（2026-07-14）：
+ *   T-17／T-17B  _loginHandling 互斥旗標（對稱 student_test.js 既有的 S-17／S-17B）。
+ *             背景：AI_CONTEXT.md 記載 student.html 於 2026-06-16 修過「handleRedirectResult()
+ *             與 onAuthStateChanged callback 同時對 Firestore 發查詢、互相干擾，導致第一次
+ *             登入必定失敗、刷新才能成功」這個競態，但這個旗標從頭到尾只在 student.html
+ *             出現過，teacher.html 完全沒有對應防護；2026-07-12 的登入改版（任何裝置 popup
+ *             失敗就 fallback redirect）讓會真的走到 redirect 這條路的老師母體擴大，這個
+ *             從未修過的競態在 teacher.html 上被放大。本輪已於 teacher.html 補上與
+ *             student.html 完全對稱的修法，這裡新增對應回歸測試。
+ *   T-SEC-33  isStoragePartitionedEnv() 已定義，且 googleTeacherLogin()／
+ *             handleRedirectResult() 皆有呼叫做為 guard。背景：teacher.html 原本完全沒有
+ *             這個函式，LINE 瀏覽器雖有頁面層級的擋法（隱藏 #login-card、顯示
+ *             #line-warning），但 seapp.com 代理與 sessionStorage 不可用（無痕模式等）
+ *             這兩種 storage-partitioned 情境完全沒有防護。
+ *   T-SEC-34  handleRedirectResult() 有 pending flag 守門，未觸發過 redirect 時不會呼叫
+ *             getRedirectResult()。背景：原本無條件呼叫，任何老師只要在 storage-partitioned
+ *             環境打開 teacher.html，即使從未觸發過 redirect，也會在每次頁面載入時先噴一次
+ *             "missing initial state" 例外，跳出誤導性的「APP 登入失敗」toast。
+ *   T-SEC-35  googleTeacherLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時
+ *             fallback 到 signInWithRedirect()。背景：2026-07-12 的登入改版（拿掉
+ *             「standalone 一律先走 redirect」舊分支）完全沒有對應測試，這裡補上，跟
+ *             student_test.js 新增的 S-SEC-34 對稱。
  *
  * v20 修正（2026-07-11）：
  *   T-SEC-24  改版。saveTeacherComment() 本身同日改版——oldComment 原本讀
@@ -1625,6 +1648,170 @@ async function runTeacherTests(page, log) {
       throw new Error('salaryAlertRows「公司內部落差」的「公司」未呼叫 sanitizeExcelCell()，Excel 公式注入防護退化');
     if (result.summaryCalledCount < 4)
       throw new Error(`salarySummaryRows「最高/最低平均學生」「最高/最低平均公司」呼叫 sanitizeExcelCell() 的次數只有 ${result.summaryCalledCount}（應為 4），至少一行 Excel 公式注入防護退化`);
+  });
+
+  // ════════════════════════════════════════
+  // T-17 / T-17B  _loginHandling 互斥旗標（2026-07-14 新增，補齊 student.html 對稱防護）
+  // 背景：AI_CONTEXT.md 記載 student.html 於 2026-06-16 修過「handleRedirectResult()
+  // 與 onAuthStateChanged callback 同時對 Firestore 發查詢、互相干擾，導致第一次登入
+  // 必定失敗、刷新才能成功」這個競態，並列為「AI 禁止：移除 _loginHandling 旗標或
+  // 破壞互斥邏輯」。但這個旗標從頭到尾只在 student.html 出現過，teacher.html 的
+  // handleTeacherLoginUser()（redirect 路徑）跟 onAuthStateChanged 內嵌的登入邏輯
+  // 各自獨立查 /admins/{uid}、各自呼叫 ensureAdminUidDocument()，完全沒有互斥保護。
+  // 2026-07-12 的登入改版（任何裝置 popup 失敗就 fallback redirect）讓會真的走到
+  // redirect 這條路的老師母體擴大（原本只有 standalone 老師會走到），這個從未修過的
+  // 競態在 teacher.html 上被放大。2026-07-14 補上與 student.html 完全對稱的修法。
+  // ════════════════════════════════════════
+
+  await test('T-17 _loginHandling 互斥旗標已宣告，handleTeacherLoginUser() 所有 return 路徑均清旗標', async () => {
+    // 對稱於 student_test.js 的 S-17，確認：
+    // 1. _loginHandling 變數已宣告（let _loginHandling = false）
+    // 2. handleTeacherLoginUser() 中，所有提前 return 的路徑（非學校信箱、非管理員）
+    //    都有清旗標（_loginHandling = false）
+    // 3. handleTeacherLoginUser() 正常結束路徑也有清旗標（enterApp() 前）
+    // 4. handleRedirectResult() 有設旗標（_loginHandling = true）
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      const hasDeclare = scripts.includes('let _loginHandling = false') ||
+                         scripts.includes('let _loginHandling=false');
+
+      const fnStr = (typeof handleTeacherLoginUser === 'function') ? handleTeacherLoginUser.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const clearCount = (fnStr.match(/_loginHandling\s*=\s*false/g) || []).length;
+
+      const rFnStr = (typeof handleRedirectResult === 'function') ? handleRedirectResult.toString() : '';
+      const hasSet = rFnStr.includes('_loginHandling = true') || rFnStr.includes('_loginHandling=true');
+
+      return { skip: false, hasDeclare, clearCount, hasSet };
+    });
+
+    if (result.skip) return;
+    if (!result.hasDeclare) throw new Error('_loginHandling 旗標未宣告（let _loginHandling = false 不存在），teacher.html 與 student.html 的登入競態防護仍不對稱');
+    if (!result.hasSet)     throw new Error('handleRedirectResult() 未設旗標（_loginHandling = true 不存在）');
+    if (result.clearCount < 3) throw new Error(
+      `handleTeacherLoginUser() 只有 ${result.clearCount} 處清旗標，` +
+      '提前 return 的路徑（非學校信箱、非管理員）與正常結束路徑需各自清旗標，' +
+      '否則旗標會卡住導致 onAuthStateChanged 永久等待'
+    );
+  });
+
+  await test('T-17B onAuthStateChanged 有 _loginHandling 輪詢等待邏輯', async () => {
+    // 對稱於 student_test.js 的 S-17B
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      const hasCheck   = scripts.includes('if (_loginHandling)') || scripts.includes('if(_loginHandling)');
+      const hasWhile   = scripts.includes('while (_loginHandling') || scripts.includes('while(_loginHandling');
+      const has15s     = scripts.includes('15000');
+      const hasReturn  = scripts.includes('if (currentUser) return') || scripts.includes('if(currentUser)return');
+
+      return { hasCheck, hasWhile, has15s, hasReturn };
+    });
+
+    if (!result.hasCheck)  throw new Error('onAuthStateChanged 未偵測 _loginHandling 旗標');
+    if (!result.hasWhile)  throw new Error('onAuthStateChanged 未有 while 輪詢等待邏輯');
+    if (!result.has15s)    throw new Error('onAuthStateChanged 等待逾時未設 15000ms 上限');
+    if (!result.hasReturn) throw new Error('onAuthStateChanged 等待後未有 currentUser 判斷提前 return');
+  });
+
+  await test('T-SEC-33 isStoragePartitionedEnv() 已定義，且 googleTeacherLogin()／handleRedirectResult() 皆有呼叫做為 guard', async () => {
+    // 背景：teacher.html 原本完全沒有這個函式，LINE 瀏覽器雖有頁面層級的擋法（隱藏
+    // #login-card、顯示 #line-warning），但 seapp.com 代理與 sessionStorage 不可用
+    // （無痕模式等）這兩種 storage-partitioned 情境完全沒有防護。更嚴重的是
+    // handleRedirectResult() 原本無條件呼叫 getRedirectResult()（無 pending flag 守門，
+    // 見 T-SEC-34），若同時又在 storage-partitioned 環境，任何老師只要打開 teacher.html
+    // 就會在每次頁面載入時吃一次 "missing initial state" 例外。
+    // 驗證三項特徵：①函式本身已定義；②googleTeacherLogin() 有呼叫它（popup 執行前）；
+    // ③handleRedirectResult() 也有呼叫它（getRedirectResult() 之前）。
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+      const hasFnDef = /function\s+isStoragePartitionedEnv\s*\(/.test(scripts);
+
+      const googleFnStr = (typeof googleTeacherLogin === 'function') ? googleTeacherLogin.toString() : '';
+      const redirectFnStr = (typeof handleRedirectResult === 'function') ? handleRedirectResult.toString() : '';
+      if (!googleFnStr || !redirectFnStr) return { skip: true };
+
+      const usedInGoogle = /isStoragePartitionedEnv\s*\(\s*\)/.test(googleFnStr);
+      const usedInRedirect = /isStoragePartitionedEnv\s*\(\s*\)/.test(redirectFnStr);
+
+      return { skip: false, hasFnDef, usedInGoogle, usedInRedirect };
+    });
+
+    if (result.skip) return;
+    if (!result.hasFnDef) throw new Error('isStoragePartitionedEnv() 未定義，teacher.html 對 seapp.com／sessionStorage 不可用環境仍無防護');
+    if (!result.usedInGoogle) throw new Error('googleTeacherLogin() 未呼叫 isStoragePartitionedEnv() 做 guard');
+    if (!result.usedInRedirect) throw new Error('handleRedirectResult() 未呼叫 isStoragePartitionedEnv() 做 guard');
+  });
+
+  await test('T-SEC-34 handleRedirectResult() 有 pending flag 守門，未觸發過 redirect 時不會呼叫 getRedirectResult()', async () => {
+    // 背景：原本 handleRedirectResult() 在 DOMContentLoaded → waitForFirebase() 裡
+    // 無條件呼叫，等同任何老師只要在 storage-partitioned 環境打開 teacher.html，即使
+    // 他這次是打算用 popup 登入、從未觸發過 redirect，也會在每次頁面載入時先噴一次
+    // "missing initial state" 例外，跳出誤導性的「APP 登入失敗」toast。修法比照
+    // student.html：呼叫 getRedirectResult() 前，先檢查 sessionStorage 裡是否有
+    // startTeacherRedirectLogin() 設下的 teacherRedirectLoginPending 旗標，沒有就直接
+    // return，不呼叫 getRedirectResult()。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof handleRedirectResult === 'function') ? handleRedirectResult.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasPendingCheck = /if\s*\(\s*!sessionStorage\.getItem\(\s*['"]teacherRedirectLoginPending['"]\s*\)\s*\)\s*return;/.test(fnStr);
+      // 確認這個檢查在函式最前段（早於 getRedirectResult 呼叫），避免形同虛設
+      const pendingIdx = fnStr.search(/sessionStorage\.getItem\(\s*['"]teacherRedirectLoginPending['"]\s*\)/);
+      const getRedirectIdx = fnStr.indexOf('getRedirectResult(');
+      const orderOK = pendingIdx !== -1 && getRedirectIdx !== -1 && pendingIdx < getRedirectIdx;
+
+      // startTeacherRedirectLogin() 有寫入這個 pending flag（否則守門邏輯永遠擋下合法的 redirect 登入）
+      const startFnStr = (typeof startTeacherRedirectLogin === 'function') ? startTeacherRedirectLogin.toString() : '';
+      const startSetsFlag = /sessionStorage\.setItem\(\s*['"]teacherRedirectLoginPending['"]/.test(startFnStr);
+
+      return { skip: false, hasPendingCheck, orderOK, startSetsFlag };
+    });
+
+    if (result.skip) return;
+    if (!result.hasPendingCheck) throw new Error('handleRedirectResult() 找不到 pending flag 守門（!sessionStorage.getItem("teacherRedirectLoginPending") return），任何 storage-partitioned 環境打開 teacher.html 都會誤觸發 getRedirectResult() 例外');
+    if (!result.orderOK) throw new Error('handleRedirectResult() 的 pending flag 檢查沒有寫在 getRedirectResult() 呼叫之前，守門形同虛設');
+    if (!result.startSetsFlag) throw new Error('startTeacherRedirectLogin() 沒有寫入 teacherRedirectLoginPending，會讓 handleRedirectResult() 的守門邏輯連合法的 redirect 登入也一併擋下');
+  });
+
+  await test('T-SEC-35 googleTeacherLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時 fallback 到 signInWithRedirect()', async () => {
+    // 背景：2026-07-12 拿掉「standalone 一律先走 redirect」的舊分支，改成不分 standalone
+    // 與否，一律先試 popup、任何失敗（除了使用者主動取消）都自動 fallback 到 redirect。
+    // 這個重大改版當時完全沒有對應測試（全文搜尋 popup-first、2026-07-12 皆零命中），
+    // 這裡補上，跟 student_test.js 的 S-SEC-34 對稱。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof googleTeacherLogin === 'function') ? googleTeacherLogin.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasPopupCall = /signInWithPopup\s*\(/.test(fnStr);
+      const hasFallbackCall = /startTeacherRedirectLogin\s*\(\s*\)/.test(fnStr);
+      const hasCancelGuard = /popup-closed-by-user/.test(fnStr) && /cancelled-popup-request/.test(fnStr);
+
+      // 呼叫順序：signInWithPopup 在 catch(e) 之前，startTeacherRedirectLogin 在 catch(e) 之後
+      const popupIdx = fnStr.search(/signInWithPopup\s*\(/);
+      const catchIdx = fnStr.indexOf('catch(e)');
+      const fallbackIdx = fnStr.search(/startTeacherRedirectLogin\s*\(\s*\)/);
+      const orderOK = popupIdx !== -1 && catchIdx !== -1 && fallbackIdx !== -1 &&
+        popupIdx < catchIdx && catchIdx < fallbackIdx;
+
+      // 不應該再有「standalone 一律先走 redirect」的舊分支殘留
+      // （即 isStandaloneApp() 判斷式緊接著呼叫 signInWithRedirect 或 startTeacherRedirectLogin）
+      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startTeacherRedirectLogin)/.test(fnStr);
+
+      return { skip: false, hasPopupCall, hasFallbackCall, hasCancelGuard, orderOK, noOldStandaloneBranch };
+    });
+
+    if (result.skip) return;
+    if (!result.hasPopupCall) throw new Error('googleTeacherLogin() 找不到 signInWithPopup() 呼叫');
+    if (!result.hasFallbackCall) throw new Error('googleTeacherLogin() 找不到 startTeacherRedirectLogin() fallback 呼叫');
+    if (!result.hasCancelGuard) throw new Error('googleTeacherLogin() 找不到「使用者主動取消不重試」的判斷（auth/popup-closed-by-user／auth/cancelled-popup-request）');
+    if (!result.orderOK) throw new Error('googleTeacherLogin() 的呼叫順序不對：應是先試 signInWithPopup()，失敗（catch）後才呼叫 startTeacherRedirectLogin() fallback');
+    if (!result.noOldStandaloneBranch) throw new Error('googleTeacherLogin() 疑似殘留「standalone 一律先走 redirect」的舊分支，2026-07-12 應已拿掉');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

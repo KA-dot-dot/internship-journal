@@ -186,10 +186,12 @@ const DANGER_PATTERNS = [
       '（一般編輯分支，要求維持原值不變）這類寫法，跟前兩條規則涵蓋的欄位屬於同一種風險（誤寫成 ' +
       'hasAny() 檢查「不存在」，會放行不該通過的寫入，或擋下正常寫入)，所以另外列一條規則掃描，' +
       '不依賴人工在區塊 diff 裡自己看出來。' +
-      '2026-07-11 補上 journalSubmitNotifiedAt：這是新增欄位跟著同一種模式（新增了屬於已知危險' +
+      '2026-07-12 補上 journalSubmitNotifiedAt：這是新增欄位跟著同一種模式（新增了屬於已知危險' +
       '類別的欄位，監控清單卻沒有同步跟著擴充）又發生一次的例子——這次落在 DANGER_PATTERNS，' +
-      '不是 RISK_TARGETS，跟同一天稽核 check-rule-diff.js 本身找到的函式／match 區塊漏洞是同一個' +
-      '根本問題的不同展現形式。',
+      '不是 RISK_TARGETS。journalSubmitNotifiedAt 欄位本身是 2026-07-12 才隨「學生第一次繳交' +
+      '月記→通知全體老師」這個新推播事件新增進 rule.txt（見 AI_推播系統說明.md 3.6 節），跟' +
+      '前一天（2026-07-11）稽核 check-rule-diff.js 本身找到的函式／match 區塊自我檢查漏洞是' +
+      '同一個根本問題（新增東西時監控清單忘記同步擴充）在不同一天、不同欄位上的重演。',
     regex: /!\s*[\w.]*keys\(\)\.hasAny\(\s*\[[^\]]*(teacherCommentContentAt|studentReplyContentAt|journalSubmitNotifiedAt)[^\]]*\]\s*\)/,
   },
 ];

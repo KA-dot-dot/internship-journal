@@ -1,7 +1,20 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v21
+ * 學生端自動化測試 v22
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v22 新增（2026-07-14）：
+ *   S-SEC-33  isStoragePartitionedEnv() 已定義，且 googleStudentLogin()／
+ *             handleRedirectResult() 皆有呼叫做為 guard。背景：一輪針對 teacher.html
+ *             的稽核發現 student.html／teacher.html 在 2026-07-12 都對 Google 登入機制
+ *             做了同一輪重大改版（拿掉「standalone 一律先走 redirect」，改成「一律先試
+ *             popup，任何失敗都 fallback 到 redirect」），但這件事完全沒有出現在任何
+ *             文件的版本狀態表或變更摘要裡，且這輪改版本身在測試套件裡零覆蓋（全文搜尋
+ *             isStoragePartitionedEnv、popup-first、2026-07-12 皆零命中）。
+ *             isStoragePartitionedEnv() 本身在 student.html 其實已經存在（非本輪新增），
+ *             只是從未被任何測試覆蓋過，這裡補上。
+ *   S-SEC-34  googleStudentLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時
+ *             fallback 到 signInWithRedirect()，跟 teacher_test.js 新增的 T-SEC-35 對稱。
  *
  * v21 新增（2026-07-13）：
  *   S-SEC-32  checkMonthDeadline()/editJournal() 快取寫入 sem/month，saveJournal() 送出前
@@ -2116,6 +2129,73 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('saveJournal() 找不到「快取不符時 await getDoc(journalRef) 現查並寫回 _currentJournalCache」的邏輯，快取不新鮮時仍會直接信任舊資料');
     if (!result.mismatchCheckBeforeIsFirstSubmit)
       throw new Error('saveJournal() 的快取新鮮度檢查沒有寫在 isFirstSubmit 計算之前，即使現查更新了快取，isFirstSubmit 仍可能用到舊值計算');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-33 / S-SEC-34  2026-07-12 登入改版測試覆蓋補齊（2026-07-14 新增）
+  // 背景：一輪針對 teacher.html 的稽核發現，student.html／teacher.html 在 2026-07-12
+  // 都對 Google 登入機制做了同一輪重大改版（拿掉「standalone 一律先走 redirect」，
+  // 改成「一律先試 popup，任何失敗都 fallback 到 redirect」），但這件事完全沒有出現在
+  // 任何一份文件的版本狀態表或變更摘要裡，且 student.html／teacher.html 這輪改版本身
+  // 在測試套件裡零覆蓋（全文搜尋 isStoragePartitionedEnv、popup-first、2026-07-12
+  // 皆零命中）。isStoragePartitionedEnv() 這個函式本身在 student.html 其實已經存在
+  // （並非這次新增），只是從未被任何測試覆蓋過，這裡一併補上。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-33 isStoragePartitionedEnv() 已定義，且 googleStudentLogin()／handleRedirectResult() 皆有呼叫做為 guard', async () => {
+    // 確認三項特徵：①函式本身已定義；②googleStudentLogin() 有呼叫它（popup 執行前）；
+    // ③handleRedirectResult() 也有呼叫它（getRedirectResult() 之前）。
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+      const hasFnDef = /function\s+isStoragePartitionedEnv\s*\(/.test(scripts);
+
+      const googleFnStr = (typeof googleStudentLogin === 'function') ? googleStudentLogin.toString() : '';
+      const redirectFnStr = (typeof handleRedirectResult === 'function') ? handleRedirectResult.toString() : '';
+      if (!googleFnStr || !redirectFnStr) return { skip: true };
+
+      const usedInGoogle = /isStoragePartitionedEnv\s*\(\s*\)/.test(googleFnStr);
+      const usedInRedirect = /isStoragePartitionedEnv\s*\(\s*\)/.test(redirectFnStr);
+
+      return { skip: false, hasFnDef, usedInGoogle, usedInRedirect };
+    });
+
+    if (result.skip) return;
+    if (!result.hasFnDef) throw new Error('isStoragePartitionedEnv() 未定義');
+    if (!result.usedInGoogle) throw new Error('googleStudentLogin() 未呼叫 isStoragePartitionedEnv() 做 guard');
+    if (!result.usedInRedirect) throw new Error('handleRedirectResult() 未呼叫 isStoragePartitionedEnv() 做 guard');
+  });
+
+  await test('S-SEC-34 googleStudentLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時 fallback 到 signInWithRedirect()', async () => {
+    // 背景：2026-07-12 拿掉「standalone 一律先走 redirect」的舊分支，改成不分 standalone
+    // 與否，一律先試 popup、任何失敗（除了使用者主動取消）都自動 fallback 到 redirect。
+    // 這個重大改版當時完全沒有對應測試，這裡補上，跟 teacher_test.js 的 T-SEC-35 對稱。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof googleStudentLogin === 'function') ? googleStudentLogin.toString() : '';
+      if (!fnStr) return { skip: true };
+
+      const hasPopupCall = /signInWithPopup\s*\(/.test(fnStr);
+      const hasFallbackCall = /startStudentRedirectLogin\s*\(\s*\)/.test(fnStr);
+      const hasCancelGuard = /popup-closed-by-user/.test(fnStr) && /cancelled-popup-request/.test(fnStr);
+
+      const popupIdx = fnStr.search(/signInWithPopup\s*\(/);
+      const catchIdx = fnStr.indexOf('catch(e)');
+      const fallbackIdx = fnStr.search(/startStudentRedirectLogin\s*\(\s*\)/);
+      const orderOK = popupIdx !== -1 && catchIdx !== -1 && fallbackIdx !== -1 &&
+        popupIdx < catchIdx && catchIdx < fallbackIdx;
+
+      // 不應該再有「standalone 一律先走 redirect」的舊分支殘留
+      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startStudentRedirectLogin)/.test(fnStr);
+
+      return { skip: false, hasPopupCall, hasFallbackCall, hasCancelGuard, orderOK, noOldStandaloneBranch };
+    });
+
+    if (result.skip) return;
+    if (!result.hasPopupCall) throw new Error('googleStudentLogin() 找不到 signInWithPopup() 呼叫');
+    if (!result.hasFallbackCall) throw new Error('googleStudentLogin() 找不到 startStudentRedirectLogin() fallback 呼叫');
+    if (!result.hasCancelGuard) throw new Error('googleStudentLogin() 找不到「使用者主動取消不重試」的判斷（auth/popup-closed-by-user／auth/cancelled-popup-request）');
+    if (!result.orderOK) throw new Error('googleStudentLogin() 的呼叫順序不對：應是先試 signInWithPopup()，失敗（catch）後才呼叫 startStudentRedirectLogin() fallback');
+    if (!result.noOldStandaloneBranch) throw new Error('googleStudentLogin() 疑似殘留「standalone 一律先走 redirect」的舊分支，2026-07-12 應已拿掉');
   });
 
 

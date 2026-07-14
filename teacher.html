@@ -1526,6 +1526,11 @@ tr:last-child td { border-bottom: none; }
 // ============ 全域狀態 ============
 let currentUser = null; // { role:'teacher', uid, name, email }
 let db, firebase_funcs;
+// 2026-07-14 補修：Redirect 登入與 onAuthStateChanged 互斥旗標，避免兩條路徑同時執行
+// handleTeacherLoginUser 造成 Firestore 競爭查詢——跟 student.html 完全同一套修法
+// （該檔案 2026-06-16 就已修過同一種競態，本檔一直沒有對應防護，詳見 handleRedirectResult()
+// 與 onAuthStateChanged 的對應修改）。
+let _loginHandling = false;
 let _currentCommentJournal = null;
 let _batchReviewJournals = [];
 let _activeRosterSemester = null;
@@ -2050,6 +2055,33 @@ async function ensureAdminUidDocument(user, adminDocData = {}) {
 }
 
 // ============ Google 老師登入 ============
+// 2026-07-14 補修：與 student.html 完全對稱補上，原本只有 student.html 有這層防護——
+// 偵測 LINE 內建瀏覽器／seapp.com 代理／sessionStorage 不可用（無痕模式等）三種
+// storage-partitioned 環境，登入前擋下並顯示友善提示，而不是讓 signInWithPopup()／
+// signInWithRedirect() 各自用不可預期的方式失敗。LINE 這一種在 teacher.html 原本已有
+// 頁面層級的擋法（見 <script> IIFE 隱藏 #login-card、顯示 #line-warning），但
+// googleTeacherLogin() 函式本身完全沒有對應 guard，且 seapp.com／sessionStorage
+// 不可用這兩種情境在 teacher.html 上原本沒有任何防護，是這次補上的重點。
+function isStoragePartitionedEnv() {
+  // LINE 內建瀏覽器：UA 一定含 "Line/"。
+  // 即使我們的頁面在 github.io（非 seapp.com），Firebase 的 auth handler 回調
+  // 仍會被 LINE 透過 seapp.com 代理，造成 origin 不一致。
+  if (/Line\//i.test(navigator.userAgent)) return true;
+  // seapp.com hostname：LINE 代理網域（也涵蓋未必含 "Line/" UA 的邊角情況）
+  if (/seapp\.com/i.test(location.hostname)) return true;
+  // sessionStorage 完全無法使用（私密模式等）
+  try {
+    const key = '_ssptest_' + Date.now();
+    sessionStorage.setItem(key, '1');
+    const readable = sessionStorage.getItem(key) === '1';
+    sessionStorage.removeItem(key);
+    if (!readable) return true;
+  } catch (e) {
+    return true;
+  }
+  return false;
+}
+
 // isStandaloneApp() 本身不只給登入邏輯用，PDF 匯出（exportSemesterPDF()／exportStudentPDF()）
 // 也靠它判斷是否要避免開新分頁，維持不動。
 //
@@ -2088,6 +2120,10 @@ async function handleTeacherLoginUser(user) {
   if (!isSchoolEmail(email)) {
     await window._auth.signOut(auth);
     hideLoading();
+    // 2026-07-14 補修：無論這次呼叫是來自 popup 或 redirect 路徑，都要在每個出口
+    // 釋放 _loginHandling，跟 student.html handleLoginUser() 的既有寫法一致
+    // （popup 路徑本來就不會把這個旗標設為 true，這裡清一次是安全的 no-op）。
+    _loginHandling = false;
     toast(`⚠️ 請使用 @${SCHOOL_DOMAIN} 的學校帳號登入`, 'error');
     return;
   }
@@ -2113,6 +2149,8 @@ async function handleTeacherLoginUser(user) {
   if (!isAdmin) {
     await window._auth.signOut(auth);
     hideLoading();
+    // 2026-07-14 補修：同上，這個出口也要釋放 _loginHandling
+    _loginHandling = false;
     toast('❌ 您沒有老師權限，請聯絡系統管理員', 'error');
     return;
   }
@@ -2128,6 +2166,9 @@ async function handleTeacherLoginUser(user) {
   } catch (syncErr) {
     console.warn('同步老師 UID 權限文件失敗，保留 emailKey 登入', syncErr);
   }
+  // 2026-07-14 補修：成功路徑也要釋放 _loginHandling，緊接在 currentUser 設定完成、
+  // enterApp() 呼叫之前——跟 student.html handleLoginUser() 的位置一致
+  _loginHandling = false;
   setLoadingText('登入成功'); // 註：enterApp() 第一行即同步呼叫 hideLoading()，此文字幾乎不會被肉眼看到，純粹是邏輯完整性
   enterApp();
 }
@@ -2136,7 +2177,18 @@ async function googleTeacherLogin() {
   showLoading();
   try {
     if (!window._auth) {
+      hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
+      return;
+    }
+    // 2026-07-14 補修：補上跟 student.html googleStudentLogin() 對稱的 storage-partitioned
+    // 環境 guard——原本這裡完全沒有這層檢查，seapp.com 代理與 sessionStorage 不可用
+    // （無痕模式等）這兩種情境會直接嘗試 signInWithPopup()，以不可預期的方式失敗。
+    // LINE 瀏覽器本身另有頁面層級的擋法（見上方 <script> IIFE 隱藏 #login-card），
+    // 這裡屬於「函式本身也該有的防護」，兩層並不衝突。
+    if (isStoragePartitionedEnv()) {
+      hideLoading();
+      toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
       return;
     }
     // 2026-07-12 補修：不再對 standalone 特別分支走 redirect，一律先試 popup。
@@ -2155,6 +2207,8 @@ async function googleTeacherLogin() {
     // 拋出 auth/network-request-failed，不是原本列舉的兩種錯誤碼。與其每次實測到新的
     // 錯誤碼就補一條 if，改成「除了使用者主動取消以外，popup 失敗一律自動 fallback 到
     // redirect」，涵蓋未來可能出現、目前還沒實測到的其他失敗代碼。
+    // （isStoragePartitionedEnv() 已在函式開頭 popup 執行前檢查過一次，執行到這裡
+    // 代表當時判定不是受限環境，不需要重複檢查——跟 student.html 同一套設計。）
     console.warn('signInWithPopup() 失敗，改嘗試 signInWithRedirect() fallback：', e.code, e.message);
     try {
       await startTeacherRedirectLogin();
@@ -6030,6 +6084,18 @@ document.addEventListener('DOMContentLoaded', () => {
         _authNullTimer = null;
       }
       if (user && !currentUser) {
+        // 2026-07-14 補修：若 handleRedirectResult 正在處理 redirect 登入，等待它完成
+        // 再決定是否接手。避免兩條路徑同時執行 handleTeacherLoginUser 造成 Firestore
+        // 競爭查詢——跟 student.html 完全同一套修法（見該檔案 onAuthStateChanged 對應
+        // 註解，2026-06-16 修正的同一種競態）。
+        if (_loginHandling) {
+          // redirect 路徑正在處理，等它結束（最多 15 秒），結束後若已登入則不再重複執行
+          const waitStart = Date.now();
+          while (_loginHandling && Date.now() - waitStart < 15000) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (currentUser) return; // redirect 路徑已登入成功
+        }
         const email = normalizeEmail(user.email);
         if (!isSchoolEmail(email)) { await window._auth.signOut(auth); return; }
         showLoading();
@@ -6074,20 +6140,53 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function handleRedirectResult() {
+  // 2026-07-14 補修：補上跟 student.html 對稱的 pending flag 守門——原本這裡無條件
+  // 呼叫 getRedirectResult()，任何老師只要在 seapp.com 等 storage-partitioned 環境
+  // 開啟 teacher.html，即使他這次是打算用 popup 登入、從未觸發過 redirect，也會在
+  // 每次頁面載入時（DOMContentLoaded → waitForFirebase() 無條件呼叫本函式）先噴一次
+  // "missing initial state" 例外，跳出誤導性的「APP 登入失敗」toast。
+  // 只在確實觸發過 redirect 登入時才呼叫 getRedirectResult，
+  // 否則在無 pending 狀態的環境（如登出後重載、storage-partitioned browser）
+  // 呼叫會拋出 "missing initial state" 錯誤。
+  if (!sessionStorage.getItem('teacherRedirectLoginPending')) return;
+  // LINE 瀏覽器或 seapp.com 環境：即使 flag 存在（如上一版未修正前留下的殘留）
+  // 也不可呼叫 getRedirectResult，因為 Firebase auth handler 的 state 已在
+  // seapp.com 跨 origin 代理中遺失，呼叫必然拋出 "missing initial state"。
+  if (isStoragePartitionedEnv()) {
+    sessionStorage.removeItem('teacherRedirectLoginPending');
+    toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    return;
+  }
+  // 2026-07-14 補修：設旗標，告知 onAuthStateChanged callback 這條路徑正在處理，
+  // 不要搶先執行——原本 teacher.html 完全沒有這道互斥保護，redirect 登入解析出使用者時
+  // 幾乎必然同時觸發 onAuthStateChanged(user)，兩條路徑會各自獨立查 /admins/{uid}、
+  // 各自呼叫 ensureAdminUidDocument()，互相干擾（跟 student.html 2026-06-16 修過的
+  // 同一種競態，AI_CONTEXT.md 明文記載「第一次登入必定失敗、刷新才能成功」）。
+  _loginHandling = true;
   await waitForFirebaseAsync();
   try {
     const { auth, getRedirectResult } = window._auth;
     const result = await getRedirectResult(auth);
+    sessionStorage.removeItem('teacherRedirectLoginPending');
     if (result?.user && !currentUser) {
       showLoading();
       await handleTeacherLoginUser(result.user);
+    } else {
+      // 沒有 redirect result（例如已被 onAuthStateChanged 處理過），放行
+      _loginHandling = false;
     }
   } catch(e) {
-    console.error('Redirect 登入失敗', e);
-    toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
-  } finally {
     sessionStorage.removeItem('teacherRedirectLoginPending');
+    _loginHandling = false;
     hideLoading();
+    console.error('Redirect 登入失敗', e);
+    // auth/missing-initial-state：通常是 seapp.com 代理在跨域 redirect 過程中清空了
+    // Firebase 存在 sessionStorage 裡的 redirect state，與我們的 pending flag 無關。
+    if (e.code === 'auth/missing-initial-state' || e.message?.includes('missing initial state')) {
+      toast('⚠️ 登入狀態遺失，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
+    } else {
+      toast('APP 登入失敗：' + (e.message || '請關閉 APP 後重開再試'), 'error');
+    }
   }
 }
 </script>
