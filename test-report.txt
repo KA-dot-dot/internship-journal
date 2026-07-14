@@ -1,6 +1,6 @@
 ══════════════════════════════════════════════════
 產學班實習月記系統 自動化測試
-執行時間：2026/7/14 上午6:31:31
+執行時間：2026/7/14 上午11:59:15
 對應 AI_CONTEXT.md 版本：2026-07-11
 ══════════════════════════════════════════════════
 
@@ -103,9 +103,11 @@
   ✅ S-SEC-30 saveJournal() 補上 teacherCommentContentAt: null 歸零（避免一般編輯被 rule.txt 拒絕）
   ✅ S-SEC-31 initPushNotifications() 關鍵特徵：相對路徑註冊 SW、寫入路徑對應 rule.txt、userAgent 截斷、fire-and-forget 不擋登入
   ✅ S-SEC-32 checkMonthDeadline()/editJournal() 快取寫入 sem/month，saveJournal() 送出前比對快取新鮮度
+  ✅ S-SEC-33 isStoragePartitionedEnv() 已定義，且 googleStudentLogin()／handleRedirectResult() 皆有呼叫做為 guard
+  ✅ S-SEC-34 googleStudentLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時 fallback 到 signInWithRedirect()
 
 ──────────────────────────────────────────────────
-學生端 測試結果：66/66 通過，0 失敗
+學生端 測試結果：68/68 通過，0 失敗
 ──────────────────────────────────────────────────
 耗時：25.5s
 
@@ -166,21 +168,30 @@
   ✅ T-SEC-27 exportAllStatsExcel() distance/type 兩欄位 Excel 公式注入防護（補齊 T-SEC-26 未涵蓋範圍）
   ✅ T-SEC-28 exportAllStatsExcel() 姓名/公司/日期/月份/學期/繳交時間/最後更新 Excel 公式注入防護（收斂 T-SEC-26/27 之後第三輪）
   ✅ T-SEC-29 loadRosterStudentsForSemesters() 根源防護 + submitAoA/stuSalaryRows/companyRows2/companyWorktypeRows/salaryAlertRows(低於/高於平均/公司內部落差)/salarySummaryRows Excel 公式注入防護（第四輪，根因與 T-SEC-26/27/28 相同但透過 studentMap 間接繼承）
+  ✅ T-17 _loginHandling 互斥旗標已宣告，handleTeacherLoginUser() 所有 return 路徑均清旗標
+  ✅ T-17B onAuthStateChanged 有 _loginHandling 輪詢等待邏輯
+  ✅ T-SEC-33 isStoragePartitionedEnv() 已定義，且 googleTeacherLogin()／handleRedirectResult() 皆有呼叫做為 guard
+  ❌ T-SEC-34 handleRedirectResult() 有 pending flag 守門，未觸發過 redirect 時不會呼叫 getRedirectResult()
+     原因：handleRedirectResult() 的 pending flag 檢查沒有寫在 getRedirectResult() 呼叫之前，守門形同虛設
+  ✅ T-SEC-35 googleTeacherLogin() 一律先試 signInWithPopup()，失敗（非使用者取消）時 fallback 到 signInWithRedirect()
   ✅ T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
 
 ──────────────────────────────────────────────────
-老師端 測試結果：53/53 通過，0 失敗
+老師端 測試結果：57/58 通過，1 失敗
+失敗項目：
+  ✗ T-SEC-34 handleRedirectResult() 有 pending flag 守門，未觸發過 redirect 時不會呼叫 getRedirectResult()
+    handleRedirectResult() 的 pending flag 檢查沒有寫在 getRedirectResult() 呼叫之前，守門形同虛設
 ──────────────────────────────────────────────────
-耗時：11.3s
+耗時：12.6s
 
 ══════════════════════════════════════════════════
 整體測試結果
 ══════════════════════════════════════════════════
-✅ 學生端：66/66 通過（25.5s）
-✅ 老師端：53/53 通過（11.3s）
+✅ 學生端：68/68 通過（25.5s）
+❌ 老師端：57/58 通過（12.6s）
 
-合計：119/119 通過，0 失敗
-總耗時：91.8s
+合計：125/126 通過，1 失敗
+總耗時：65.2s
 ══════════════════════════════════════════════════
 
 報告已儲存至：test-report.txt

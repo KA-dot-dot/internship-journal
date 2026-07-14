@@ -1,7 +1,22 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v21
+ * 老師端自動化測試 v22
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v22 修正（2026-07-14，同日 v21 上線後立即發現的測試本身缺陷，非新增測試，數量不變）：
+ *   T-SEC-34  修正假失敗：getRedirectIdx 原本用裸字串 fnStr.indexOf('getRedirectResult(')
+ *             尋找呼叫位置，命中的其實是函式最上面解釋性註解裡提到這個名字的地方，遠早於
+ *             真正的呼叫語句（await getRedirectResult(auth)），導致 orderOK 誤判為 false。
+ *             這是 S-SEC-08／T-SEC-30／S-SEC-29 已經記錄過好幾次的同一種陷阱（regex／
+ *             字串搜尋命中函式內部解釋性註解）第一次在 T-SEC-34 上重演——teacher.html
+ *             的程式碼本身完全正確，是測試比對方式不夠精確。修法：改用
+ *             fnStr.search(/await\s+getRedirectResult\s*\(\s*auth\s*\)/) 錨定實際呼叫語法。
+ *   T-SEC-35  補強 noOldStandaloneBranch 這條負向檢查：原本直接對整段函式字串（含註解）
+ *             做鄰近字元搜尋，目前是僥倖通過（isStandaloneApp() 附近的中文說明剛好沒有
+ *             直接寫出 signInWithRedirect／startTeacherRedirectLogin 這兩個字面詞，但講的
+ *             內容正是這件事本身，未來改註解措辭很容易不小心撞在一起）。修法：先過濾掉
+ *             「整行都是註解」的行，只在剩餘程式碼行上做鄰近搜尋，避免未來注釋內容變化
+ *             導致正確程式碼被誤判為退化。
  *
  * v21 新增（2026-07-14）：
  *   T-17／T-17B  _loginHandling 互斥旗標（對稱 student_test.js 既有的 S-17／S-17B）。
@@ -1760,10 +1775,19 @@ async function runTeacherTests(page, log) {
       const fnStr = (typeof handleRedirectResult === 'function') ? handleRedirectResult.toString() : '';
       if (!fnStr) return { skip: true };
 
+      // 2026-07-14 修正：getRedirectIdx 原本用裸字串 fnStr.indexOf('getRedirectResult(')
+      // 尋找呼叫位置，命中的其實是函式最上面解釋性註解裡提到「getRedirectResult()」這個
+      // 字串本身的地方（第113字元附近），比真正的呼叫語句（await getRedirectResult(auth)，
+      // 第1384字元附近）早了超過1000字元，導致 orderOK 誤判為 false——這是 S-SEC-08／
+      // T-SEC-30／S-SEC-29 已經記錄過好幾次的同一種陷阱（regex／字串搜尋命中函式內部的
+      // 解釋性註解），這次在 T-SEC-34 上第一次重演。teacher.html 的程式碼本身沒有問題，
+      // pending flag 檢查確實寫在真正的 getRedirectResult() 呼叫之前，是這條測試的比對
+      // 方式不夠精確。修法：改用 search() 錨定實際呼叫語法（await getRedirectResult(auth)），
+      // 只會命中真正的呼叫語句，不會誤命中提及這個名字的註解文字。
       const hasPendingCheck = /if\s*\(\s*!sessionStorage\.getItem\(\s*['"]teacherRedirectLoginPending['"]\s*\)\s*\)\s*return;/.test(fnStr);
       // 確認這個檢查在函式最前段（早於 getRedirectResult 呼叫），避免形同虛設
       const pendingIdx = fnStr.search(/sessionStorage\.getItem\(\s*['"]teacherRedirectLoginPending['"]\s*\)/);
-      const getRedirectIdx = fnStr.indexOf('getRedirectResult(');
+      const getRedirectIdx = fnStr.search(/await\s+getRedirectResult\s*\(\s*auth\s*\)/);
       const orderOK = pendingIdx !== -1 && getRedirectIdx !== -1 && pendingIdx < getRedirectIdx;
 
       // startTeacherRedirectLogin() 有寫入這個 pending flag（否則守門邏輯永遠擋下合法的 redirect 登入）
@@ -1799,9 +1823,17 @@ async function runTeacherTests(page, log) {
       const orderOK = popupIdx !== -1 && catchIdx !== -1 && fallbackIdx !== -1 &&
         popupIdx < catchIdx && catchIdx < fallbackIdx;
 
-      // 不應該再有「standalone 一律先走 redirect」的舊分支殘留
-      // （即 isStandaloneApp() 判斷式緊接著呼叫 signInWithRedirect 或 startTeacherRedirectLogin）
-      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startTeacherRedirectLogin)/.test(fnStr);
+      // 2026-07-14 修正：這條負向檢查（確認舊分支「不存在」）原本直接對整段函式字串
+      // （含註解）做鄰近字元搜尋，屬於僥倖通過——目前 isStandaloneApp() 附近 200 字內的
+      // 中文說明剛好沒有直接寫出 signInWithRedirect／startTeacherRedirectLogin 這兩個
+      // 英文字面詞，但這幾行註解講的內容正是「為什麼不再用 redirect」這件事本身，未來
+      // 改註解措辭時很容易不小心把這兩個詞寫進 200 字窗口內，導致這條測試在程式碼完全
+      // 正確的情況下無端失敗——跟 T-SEC-34 的 getRedirectIdx 是同一類陷阱（S-SEC-08／
+      // T-SEC-30／S-SEC-29 也踩過），只是這次剛好還沒真的爆炸。修法：先過濾掉「整行都是
+      // 註解」的行（trim 後以 // 開頭），只在剩餘的程式碼行上做鄰近搜尋，這樣即使未來
+      // 註解怎麼寫都不會被誤判，只有真正的程式碼結構（例如舊分支被重新加回來）才會被抓到。
+      const codeOnlyLines = fnStr.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startTeacherRedirectLogin)/.test(codeOnlyLines);
 
       return { skip: false, hasPopupCall, hasFallbackCall, hasCancelGuard, orderOK, noOldStandaloneBranch };
     });

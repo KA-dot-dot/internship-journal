@@ -1,7 +1,19 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v22
+ * 學生端自動化測試 v23
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v23 修正（2026-07-14，同日 v22 上線後立即發現的測試本身缺陷，非新增測試，數量不變）：
+ *   S-SEC-34  補強 noOldStandaloneBranch 這條負向檢查：原本直接對整段函式字串（含註解）
+ *             做鄰近字元搜尋，目前是僥倖通過（googleStudentLogin() 裡 isStandaloneApp()
+ *             附近有一段解釋「當初為什麼拿掉 standalone 特別分支」的中文說明，200 字窗口
+ *             內剛好沒有直接寫出 signInWithRedirect／startStudentRedirectLogin 這兩個字面
+ *             詞，但講的內容正是這件事本身，未來改註解措辭很容易不小心撞在一起）。這是
+ *             S-SEC-08／T-SEC-30 已經記錄過好幾次的同一種陷阱（regex／字串搜尋命中函式
+ *             內部解釋性註解），跟 teacher_test.js 同日發現的 T-SEC-34 假失敗是同一輪
+ *             稽核揪出來的姊妹問題。修法：先過濾掉「整行都是註解」的行，只在剩餘程式碼行
+ *             上做鄰近搜尋，避免未來註解內容變化導致正確程式碼被誤判為退化，與
+ *             teacher_test.js 的 T-SEC-35 套用同一套修法。
  *
  * v22 新增（2026-07-14）：
  *   S-SEC-33  isStoragePartitionedEnv() 已定義，且 googleStudentLogin()／
@@ -2184,8 +2196,19 @@ async function runStudentTests(page, browserContext, log) {
       const orderOK = popupIdx !== -1 && catchIdx !== -1 && fallbackIdx !== -1 &&
         popupIdx < catchIdx && catchIdx < fallbackIdx;
 
-      // 不應該再有「standalone 一律先走 redirect」的舊分支殘留
-      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startStudentRedirectLogin)/.test(fnStr);
+      // 2026-07-14 修正：這條負向檢查（確認舊分支「不存在」）原本直接對整段函式字串
+      // （含註解）做鄰近字元搜尋，屬於僥倖通過——googleStudentLogin() 裡 isStandaloneApp()
+      // 附近確實有一段解釋「當初為什麼拿掉 standalone 特別分支」的中文說明（提到
+      // isStandaloneApp() 本身），目前 200 字窗口內剛好沒有直接寫出 signInWithRedirect／
+      // startStudentRedirectLogin 這兩個英文字面詞，但講的內容正是這件事本身，未來改
+      // 註解措辭時很容易不小心把這兩個詞寫進窗口內，導致這條測試在程式碼完全正確的情況下
+      // 無端失敗——跟 T-SEC-34 的 getRedirectIdx 是同一類陷阱（S-SEC-08／T-SEC-30 也踩過），
+      // 只是這次剛好還沒真的爆炸。修法：先過濾掉「整行都是註解」的行（trim 後以 // 開頭），
+      // 只在剩餘的程式碼行上做鄰近搜尋，這樣即使未來註解怎麼寫都不會被誤判，只有真正的
+      // 程式碼結構（例如舊分支被重新加回來）才會被抓到，與 teacher_test.js 的 T-SEC-35
+      // 套用同一套修法。
+      const codeOnlyLines = fnStr.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const noOldStandaloneBranch = !/isStandaloneApp\s*\(\s*\)[\s\S]{0,200}(signInWithRedirect|startStudentRedirectLogin)/.test(codeOnlyLines);
 
       return { skip: false, hasPopupCall, hasFallbackCall, hasCancelGuard, orderOK, noOldStandaloneBranch };
     });
