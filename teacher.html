@@ -535,7 +535,7 @@ tr:last-child td { border-bottom: none; }
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 /* 2026-07-14：桌面版工作照片改每列固定2張、置中排列（手機版≤768px維持上面的單欄設計，不受影響） */
 @media (min-width: 769px) {
-  .entry-photos { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 20px; max-width: 420px; margin-left: auto; margin-right: auto; }
+  .entry-photos { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 20px; }
   .entry-photo { flex: 0 0 auto; width: 200px; height: 150px; max-width: 200px; max-height: 150px; object-fit: cover; }
 }
 .entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
