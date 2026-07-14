@@ -533,6 +533,11 @@ tr:last-child td { border-bottom: none; }
 .entry-photo { max-width: 100%; max-height: 265px; width: 100%; height: auto; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; display: block; }
 
 .entry-photos { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+/* 2026-07-14：桌面版工作照片改每列固定2張、置中排列（手機版≤768px維持上面的單欄設計，不受影響） */
+@media (min-width: 769px) {
+  .entry-photos { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 20px; }
+  .entry-photo { flex: 0 0 auto; width: 200px; height: 150px; max-width: 200px; max-height: 150px; object-fit: cover; }
+}
 .entry-content { word-break: break-all; overflow-wrap: anywhere; white-space: pre-wrap; }
 .comment-section-teacher { background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);padding:12px;border-radius:var(--radius-sm);margin-top:8px;font-size:13px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere; }
 /* 對話串（老師端月記卡片用） */
@@ -5158,7 +5163,7 @@ function renderJournalCard(j, isTeacher) {
       ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
       <div class="entry-content">${escapeHtml(e.content || '')}</div>
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
-      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos" style="display:flex;flex-direction:column;gap:8px;">${e.photos.map(p => {const s=escapeHtml(resolveImgSrc(p));return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
+      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos">${e.photos.map(p => {const s=escapeHtml(resolveImgSrc(p));return `<img src="${s}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
     </div>
   `).join('');
   const safeMonth = safeNumber(j.month);
@@ -5433,6 +5438,28 @@ function pdfSubmittedRow(j) {
   return { text: `繳交日期：${pdfText(j.submittedAt?.slice(0,10) || '-')}`, fontSize: 9, color: '#555', margin: [0, 0, 0, 8] };
 }
 
+// 2026-07-14：工作照片 PDF 排版改為每列固定 2 張、固定尺寸（不因張數多寡放大撐滿版面）、
+// 左右各補一個彈性欄位（width:'*'）把整列往中間推，達成置中效果；這個補白寫法對「剛好2張」
+// 與「最後只剩1張」兩種情況都成立（1張時左右彈性欄位會平分剩餘空間，該張圖片自然置中），
+// 不需要另外判斷奇偶數。不再用 slice(0,3) 砍掉超過3張的照片——照片在產生 _pdfPhotos 時
+// 本來就已經全部抓下來轉成 dataURL，只是先前渲染時自己丟棄多餘的，並非抓不到。
+function pdfPhotoRows(photos) {
+  const PER_ROW = 2, IMG_W = 200, IMG_H = 150, GAP = 20;
+  const rows = [];
+  for (let i = 0; i < photos.length; i += PER_ROW) {
+    const rowPhotos = photos.slice(i, i + PER_ROW);
+    const cols = [{ width: '*', text: '' }];
+    rowPhotos.forEach((img, imgIdx) => {
+      if (imgIdx > 0) cols.push({ width: GAP, text: '' });
+      cols.push({ width: IMG_W, image: img, fit: [IMG_W, IMG_H] });
+    });
+    cols.push({ width: '*', text: '' });
+    const isLastRow = i + PER_ROW >= photos.length;
+    rows.push({ columns: cols, margin: [0, 0, 0, isLastRow ? 0 : 10] });
+  }
+  return rows;
+}
+
 function pdfWorkEntry(e, idx) {
   const stack = [
     { text: `工作摘要 ${idx + 1}　${pdfText(e.date || '')}`, bold: true, margin: [0, 0, 0, 3] }
@@ -5441,11 +5468,7 @@ function pdfWorkEntry(e, idx) {
   stack.push({ text: `內容：${pdfText(e.content || '')}`, margin: [0, 0, 0, (e._pdfPhotos?.length || e.noPhoto) ? 4 : 0] });
   if (e._pdfPhotos?.length) {
     stack.push({ text: '工作照片', bold: true, margin: [0, 0, 0, 3] });
-    stack.push({
-      columns: e._pdfPhotos.slice(0, 3).map(img => ({ image: img, fit: [210, 92], margin: [0, 0, 6, 0] })),
-      columnGap: 6,
-      margin: [0, 0, 0, 0]
-    });
+    stack.push(...pdfPhotoRows(e._pdfPhotos));
   } else if (e.noPhoto) {
     stack.push({ text: '【不便拍照】', color: '#888', fontSize: 11, margin: [0, 0, 0, 0] });
   }
