@@ -791,6 +791,14 @@ tr:last-child td { border-bottom: none; }
       <div id="page-t-dashboard" class="hidden fade-in">
         <div class="page-title">📊 主頁</div>
         <div class="page-subtitle" id="t-dashboard-subtitle">載入中...</div>
+        <!-- 2026-07-16 新增：與 student.html 對稱，見 initPushNotifications() 上方註解。 -->
+        <div id="push-enable-banner" class="hidden" style="background:var(--bg3); border:0.5px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap">
+          <div style="font-size:13px;color:var(--text)">🔔 開啟通知，學生回覆時能即時收到提醒</div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button class="btn btn-secondary btn-sm" onclick="hidePushEnableBanner()">先不要</button>
+            <button class="btn btn-primary btn-sm" onclick="enablePushFromBanner()">開啟通知</button>
+          </div>
+        </div>
         <div style="font-size:15px;font-weight:700;margin:20px 0 12px">學生繳交概況</div>
         <div class="stats-grid" id="t-stats-grid">
           <div class="stat-card">
@@ -2243,6 +2251,11 @@ function enterApp() {
   showPage('t-dashboard');
   // 2026-07 新增：Web Push 通知註冊。fire-and-forget，失敗不擋登入。
   initPushNotifications();
+  // 2026-07-16 新增：與 student.html 對稱——見 initPushNotifications() 上方註解，部分裝置
+  // （尤其 iOS Safari）上面這次自動呼叫可能被瀏覽器靜默忽略（登入流程本身夾了太多非同步
+  // 步驟，Notification.requestPermission() 到不了真正跳出詢問視窗的條件）。短暫延遲後
+  // 檢查權限狀態是否仍是 'default'，是的話顯示明確按鈕讓使用者自己點擊觸發。
+  setTimeout(maybeShowPushEnableBanner, 1500);
 }
 
 // ============ Web Push 通知（2026-07 新增） ============
@@ -2252,6 +2265,26 @@ function enterApp() {
 // token 存在 /admins/{uid}/fcmTokens/ 底下，跟 student.html 的 /users/{uid}/fcmTokens/ 對稱。
 const FCM_VAPID_KEY = 'BOUmDJyMxKobgdMBrq1wtf5y6bHoRa8voW7Lm2FDaNDQW0dLA0TtrMfNpPqba_PO4swUOL-pUp7h0p0NevtsI7Y'; // Firebase Console > Cloud Messaging > Web Push 憑證（2026-07-05 產生，跟 student.html 同一把）
 let _fcmSwRegistration = null;
+
+// 2026-07-16 新增：與 student.html 對稱，見上方 enterApp() 呼叫處的說明。
+function maybeShowPushEnableBanner() {
+  try {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+    if (Notification.permission !== 'default') return;
+    const el = document.getElementById('push-enable-banner');
+    if (el) el.classList.remove('hidden');
+  } catch (e) { /* 純 UI 提示，出錯不影響其他功能 */ }
+}
+
+function hidePushEnableBanner() {
+  const el = document.getElementById('push-enable-banner');
+  if (el) el.classList.add('hidden');
+}
+
+async function enablePushFromBanner() {
+  hidePushEnableBanner();
+  await initPushNotifications();
+}
 
 async function initPushNotifications() {
   try {

@@ -597,6 +597,17 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
       <div id="page-s-dashboard" class="hidden fade-in">
         <div class="page-title">🏠 我的實習月記</div>
         <div class="page-subtitle" id="s-dashboard-subtitle">載入中...</div>
+        <!-- 2026-07-16 新增：見 initPushNotifications() 上方註解——部分裝置（尤其 iOS Safari）
+             登入流程自動觸發的通知權限請求，可能因為中間夾了太多非同步流程而被瀏覽器靜默忽略，
+             完全不會跳出詢問視窗。這裡提供一個明確的按鈕，讓使用者自己點擊觸發，保證是一次
+             「剛剛發生」的使用者手勢。預設隱藏，只在偵測到權限狀態仍是 'default' 時才顯示。 -->
+        <div id="push-enable-banner" class="hidden" style="background:var(--bg3); border:0.5px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap">
+          <div style="font-size:13px;color:var(--text)">🔔 開啟通知，老師留評語或回覆時能即時收到提醒</div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button class="btn btn-secondary btn-sm" onclick="hidePushEnableBanner()">先不要</button>
+            <button class="btn btn-primary btn-sm" onclick="enablePushFromBanner()">開啟通知</button>
+          </div>
+        </div>
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-label">本月繳交狀態</div>
@@ -1267,6 +1278,13 @@ function enterApp() {
   // 2026-07 新增：Web Push 通知註冊。刻意 fire-and-forget（不 await、失敗只 console.warn），
   // 推播設定本身失敗（使用者拒絕權限、瀏覽器不支援等）絕對不能擋住正常登入流程。
   initPushNotifications();
+  // 2026-07-16 新增：見 initPushNotifications() 上方註解——上面這次自動呼叫，在部分裝置
+  // （尤其 iOS Safari）可能因為登入流程本身夾了太多非同步步驟（Google popup／多次
+  // Firestore 查詢），導致 Notification.requestPermission() 到達不了真正跳出詢問視窗的
+  // 條件，被瀏覽器靜默忽略——不會有任何錯誤或 log，Notification.permission 仍停留在
+  // 'default'。短暫延遲（給上面那次自動呼叫足夠時間跑完）後檢查權限狀態，若仍是
+  // 'default'，顯示一個明確按鈕讓使用者自己點擊，取得一次保證「剛剛發生」的使用者手勢。
+  setTimeout(maybeShowPushEnableBanner, 1500);
 }
 
 // ============ Web Push 通知（2026-07 新增） ============
@@ -1277,6 +1295,31 @@ function enterApp() {
 // 其他人的 token。
 const FCM_VAPID_KEY = 'BOUmDJyMxKobgdMBrq1wtf5y6bHoRa8voW7Lm2FDaNDQW0dLA0TtrMfNpPqba_PO4swUOL-pUp7h0p0NevtsI7Y'; // Firebase Console > Cloud Messaging > Web Push 憑證（2026-07-05 產生）
 let _fcmSwRegistration = null;
+
+// 2026-07-16 新增：見上方 enterApp() 呼叫處的說明。這三個函式配合 dashboard 上的
+// #push-enable-banner，讓使用者能在自動請求被瀏覽器靜默忽略時，自己補一次點擊觸發。
+function maybeShowPushEnableBanner() {
+  try {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return; // 環境不支援，不顯示
+    if (Notification.permission !== 'default') return; // 已同意或已明確拒絕過，都不需要顯示
+    const el = document.getElementById('push-enable-banner');
+    if (el) el.classList.remove('hidden');
+  } catch (e) { /* 純 UI 提示，出錯不影響其他功能 */ }
+}
+
+function hidePushEnableBanner() {
+  const el = document.getElementById('push-enable-banner');
+  if (el) el.classList.add('hidden');
+}
+
+// 使用者在 dashboard 直接點擊「開啟通知」時呼叫——這是一次保證剛發生、未被登入流程
+// 沖淡的使用者手勢，`Notification.requestPermission()` 在這裡呼叫最有機會真的跳出視窗。
+async function enablePushFromBanner() {
+  hidePushEnableBanner();
+  await initPushNotifications();
+  // 使用者主動點擊後，不論結果是 granted 還是 denied，都不需要再顯示這個按鈕；
+  // 若使用者這次也是靜默失敗（極少數情況），不重複打擾，之後只能等下次登入再嘗試。
+}
 
 async function initPushNotifications() {
   try {
