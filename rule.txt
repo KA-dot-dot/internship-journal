@@ -236,7 +236,17 @@ service cloud.firestore {
             && request.resource.data.studentReply.size() >= 1
             && request.resource.data.studentReply.size() <= 50
             // 2026-06-27 補修：studentReplyAt 型別驗證（只允許 null 或字串，避免寫入任意型別的值）
-            && (request.resource.data.get('studentReplyAt', null) == null || request.resource.data.studentReplyAt is string)
+            // 2026-07-16 補修：原本只驗證型別，沒有長度上限。studentReplyAt 在「內容真的改變」
+            // 分支會被下方 studentReplyContentAt == studentReplyAt 這條間接約束成 localISOStr()
+            // 輸出格式（固定19字元），但在「內容沒變」分支完全不受任何條件限制，只要求是字串——
+            // 技術使用者可直接呼叫 Firestore API，在內容不變的情況下把 studentReplyAt 塞入任意
+            // 長度的字串，撐大自己這份月記文件的大小（影響僅限學生自己這份文件，非越權/外洩，
+            // 但仍是資料完整性缺口，且跟 studentReply 已有 <=50 字上限、studentReplyContentAt
+            // 有格式正則的既有保護標準不一致）。這裡補上 .size() 上限（40字，比 localISOStr()
+            // 實際輸出的19字元留一點餘裕，避免時區/格式微調時誤傷合法寫入）。這一行在下方
+            // 兩個分支（內容改變／內容沒變）的判斷之前就被求值，一次修改即可同時保護兩個分支，
+            // 不需要分別在兩個分支各加一次。
+            && (request.resource.data.get('studentReplyAt', null) == null || (request.resource.data.studentReplyAt is string && request.resource.data.studentReplyAt.size() <= 40))
             && (
               (
                 // 內容真的改變：必須標記未讀、且必須提供 studentReplyContentAt

@@ -698,6 +698,42 @@ async function main() {
     );
   });
 
+  // 2026-07-16 新增：稽核發現 studentReplyAt 原本只驗證 is string，沒有長度上限——
+  // 「內容真的改變」分支雖然透過要求 studentReplyContentAt 必須等於 studentReplyAt、
+  // 且 studentReplyContentAt 本身受格式 regex 鎖定為固定19字元，間接把該分支下的
+  // studentReplyAt 也鎖住，但「內容沒變」分支完全沒有這層間接保護，只受全域的
+  // is string 檢查約束。技術使用者可對自己的月記呼叫
+  // update({ studentReply: <跟現有值相同>, studentReplyAt: <超長字串> })，只要
+  // studentReply／studentReplyUnread／studentReplyContentAt 三者都維持原值不變，
+  // 就會落入「內容沒變」分支，studentReplyAt 本身完全不受限制，可撐大文件逼近
+  // Firestore 單文件 1MiB 上限（影響僅限學生自己這份文件，非越權/外洩）。
+  // 修法：把全域型別檢查改為 is string && .size()<=40（rule.txt），這一行在兩個
+  // 分支判斷之前就先求值，一次修改同時保護兩個分支。下面兩條分別驗證超長字串
+  // 被擋下、以及剛好等於上限的邊界值仍能正常寫入（避免修過頭誤傷合法寫入）。
+  await test('【2026-07-16】學生 UPDATE 回覆：內容沒變、但 studentReplyAt 塞入超長字串 → 應被拒（防止利用「內容沒變」分支撐大文件逼近 Firestore 1MiB 上限）', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '已讀回覆內容', // 跟現有值相同，確保落入「內容沒變」分支，
+                                        // 排除是「內容改變」分支的其他驗證造成失敗
+          studentReplyAt: 'X'.repeat(500), // 遠超過 40 字元上限
+        })
+    );
+  });
+
+  await test('【2026-07-16】學生 UPDATE 回覆：內容沒變、studentReplyAt 剛好 40 字元（上限邊界值）→ 應成功（確認沒有誤傷合法寫入）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({
+          studentReply: '已讀回覆內容', // 跟現有值相同
+          studentReplyAt: 'A'.repeat(40), // 剛好等於上限，正常 localISOStr() 輸出（19字元）
+                                           // 遠低於此，這裡刻意測邊界值本身能否通過
+        })
+    );
+  });
+
   // ════════════════════════════════════════════════════════════
   // journalSubmitNotifiedAt（2026-07 新增：學生第一次繳交月記推播用的後端專屬標記欄位）
   // ════════════════════════════════════════════════════════════
