@@ -1005,8 +1005,8 @@ tr:last-child td { border-bottom: none; }
           <div style="font-size:15px;font-weight:700;margin-bottom:16px">📋 已設定期限總覽</div>
           <div class="table-wrap">
             <table style="min-width:480px">
-              <thead><tr><th>學期</th><th>月份</th><th>開放日</th><th>截止日</th><th>狀態</th><th>操作</th></tr></thead>
-              <tbody id="deadlines-table-body"><tr><td colspan="6" style="text-align:center;color:var(--text2);padding:30px">尚未設定</td></tr></tbody>
+              <thead><tr><th>學期</th><th>月份</th><th>開放日</th><th>截止日</th><th>最少篇數</th><th>狀態</th><th>操作</th></tr></thead>
+              <tbody id="deadlines-table-body"><tr><td colspan="7" style="text-align:center;color:var(--text2);padding:30px">尚未設定</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2601,6 +2601,17 @@ async function removeBinding(docId, email) {
 // ===== 老師功能 ==============================================
 // ============================================================
 
+// 2026-07-16 新增：每月「最少應繳工作摘要篇數」的判斷邏輯。
+// 這個數字存在對應月份的 /deadlines/{semester}-{month} 文件的 minEntries 欄位裡（老師端
+// 「截止日期設定」逐月微調表格新增的欄位，見 renderDeadlineMonthTable()/saveAllDeadlines()）。
+// 欄位不存在、或不是 >=1 的整數（例如舊資料、或老師這個月從未特別設定過），一律 fallback 為 1，
+// 等同維持這個功能上線前的行為（存了月記文件就算已繳）。傳入的 deadlineDoc 可以是 undefined
+// （代表這個月份根本沒有 deadlines 文件），此時同樣視為未設定、fallback 為 1。
+function resolveMinEntries(deadlineDoc) {
+  const v = deadlineDoc && deadlineDoc.minEntries;
+  return (Number.isInteger(v) && v >= 1) ? v : 1;
+}
+
 // ---- 老師主頁 ----
 async function loadTeacherDashboard() {
   showLoading();
@@ -2610,20 +2621,43 @@ async function loadTeacherDashboard() {
   const semLabel = `${y}學年第${t}學期`;
   document.getElementById('t-dashboard-subtitle').textContent = `目前學期：${semLabel}`;
   const { collection, collectionGroup, getDocs, query, where } = firebase_funcs;
-  const stuSnap = await withTimeout(getDocs(collection(db, 'students')), 5000, '主頁資料載入逾時');
+  // 2026-07-16 起：deadlines 跟 students/journals 一起平行讀取（互不依賴，Promise.all 節省一次
+  // 往返時間），供下方判斷每月「最少應繳篇數」使用（見 resolveMinEntries()）。
+  const [stuSnap, jSnap, deadlinesSnap] = await Promise.all([
+    withTimeout(getDocs(collection(db, 'students')), 5000, '主頁資料載入逾時'),
+    withTimeout(getDocs(collectionGroup(db, 'journals')), 5000, '主頁資料載入逾時'),
+    withTimeout(getDocs(collection(db, 'deadlines')), 5000, '主頁資料載入逾時')
+  ]);
   // 只取目前學期的新格式 {semester}_{seatNo}
   const semPrefix = sem + '_';
   const activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix));
   const activeSeatNos = new Set(activeStuDocs.map(d => d.data().seatNo || d.id.slice(semPrefix.length)));
   const total = activeStuDocs.length;
   document.getElementById('stat-total-students').textContent = total;
-  const jSnap = await withTimeout(getDocs(collectionGroup(db, 'journals')), 5000, '主頁資料載入逾時');
+  // deadlineDataMap：key 為 `${semester}-${month}`，value 為該月 deadlines 文件的原始資料
+  // （非單純數字），供 resolveMinEntries() 隨用隨解析，避免每次都要重新判斷「有沒有設定」。
+  const deadlineDataMap = {};
+  deadlinesSnap.docs.forEach(d => {
+    const dd = d.data();
+    if (dd.semester && dd.month) deadlineDataMap[`${dd.semester}-${dd.month}`] = dd;
+  });
+  // activeJournals：本月「有存檔」的月記（不論篇數多寡），供審閱／評語等既有統計沿用，
+  // 這些統計看的是「老師有沒有東西可審閱」，跟本次新增的「篇數是否達標」是不同維度，
+  // 不因篇數多寡而改變原本定義。
   const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth);
-  const submitted = activeJournals.length;
+  // 2026-07-16 新增：本月「已完成」改為篇數需達到 minEntries 才算，不再是「有存檔就算」——
+  // 只交1篇但規定要2篇的學生，這裡不算完成，會落入下方的未繳名單（含篇數註記）。
+  const requiredThisMonth = resolveMinEntries(deadlineDataMap[`${sem}-${thisMonth}`]);
+  const completeSeats = new Set(activeJournals.filter(j => (j.entries || []).length >= requiredThisMonth).map(j => j.seatNo));
+  const submitted = completeSeats.size;
   const missing = total - submitted;
   const reviewed = activeJournals.filter(j => !!j.teacherReviewed).length;
   const commented = activeJournals.filter(j => (j.teacherComment || '').trim()).length;
-  const unreviewed = Math.max(submitted - reviewed, 0);
+  // 2026-07-16 提醒：「未審閱」是老師的審閱工作量，看的是「有沒有東西可以審閱」（存了月記文件），
+  // 跟篇數有沒有達標是兩件事——只交1篇但規定要2篇的月記，老師一樣可以、也應該正常審閱，
+  // 所以這裡用 activeJournals.length（本月有存檔的月記數），不能改用上面的 submitted
+  // （已改為篇數達標才算），否則會把「篇數不夠但已審閱」的月記也算進「未審閱」，數字錯誤。
+  const unreviewed = Math.max(activeJournals.length - reviewed, 0);
   // 全班所有月記中有學生未讀回覆的（不限本月，老師隨時要能看到）
   const allJournals = userJournalData(jSnap);
   const studentReplies = allJournals.filter(j => j.studentReplyUnread);
@@ -2639,21 +2673,23 @@ async function loadTeacherDashboard() {
     replyEl.style.color = studentReplies.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
   }
   // 各名單（供點擊展開）
-  const submittedSeats = new Set(activeJournals.map(j => j.seatNo));
+  // 2026-07-16 起：「未繳」改用 completeSeats（篇數達標才算），不再只看有沒有存檔——
+  // 只交1篇但規定要2篇的學生，一樣會出現在這份名單裡（label 會加註目前進度，見下方）。
   const missingStudents = activeStuDocs.filter(d => {
     const sno = d.data().seatNo || d.id.slice(semPrefix.length);
-    return !submittedSeats.has(sno);
+    return !completeSeats.has(sno);
   });
   // 計算每位未繳學生本學期累計缺繳月數（含本月）
   const semMonths = getSemesterMonths(sem);
   const thisMonthIdx = semMonths.indexOf(thisMonth);
-  // 本學期到目前為止（含本月）已有 journal 的月份，依座號建 Map
+  // 本學期到目前為止（含本月）每位學生各月的月記篇數，依座號建 Map（月份→entries篇數）。
+  // 2026-07-16 起改存篇數而非單純「有沒有存檔」，才能跟每月各自的 minEntries 比較是否達標；
   // 限定 activeSeatNos（本班在籍名單）避免跨班舊資料干擾
   const semJournalsBySeq = {};
   const openedMonthsInSem = new Set();
   userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem).forEach(j => {
-    if (!semJournalsBySeq[j.seatNo]) semJournalsBySeq[j.seatNo] = new Set();
-    semJournalsBySeq[j.seatNo].add(j.month);
+    if (!semJournalsBySeq[j.seatNo]) semJournalsBySeq[j.seatNo] = new Map();
+    semJournalsBySeq[j.seatNo].set(j.month, (j.entries || []).length);
     openedMonthsInSem.add(j.month);
   });
   // 只計「班上有人繳交（老師實際開放過）」且「不晚於當月」的月份
@@ -2664,9 +2700,19 @@ async function loadTeacherDashboard() {
   window._missingWithCount = missingStudents.map(d => {
     const sno = d.data().seatNo || d.id.slice(semPrefix.length);
     const name = d.data().name || sno;
-    const submitted = semJournalsBySeq[sno] || new Set();
-    const missCount = monthsToCheck.filter(m => !submitted.has(m)).length;
-    return { label: `${sno} ${name}`, sno, name, missCount };
+    const monthEntriesMap = semJournalsBySeq[sno] || new Map();
+    // 2026-07-16 起：每個月「算不算達標」改用該月各自的 minEntries（而非單純存不存在）
+    const missCount = monthsToCheck.filter(m => {
+      const req = resolveMinEntries(deadlineDataMap[`${sem}-${m}`]);
+      return (monthEntriesMap.get(m) || 0) < req;
+    }).length;
+    // 2026-07-16 新增：本月已交篇數註記——0篇維持原本樣式（完全未繳，不加註）；
+    // 1篇以上但未達標則加註「已交X篇，尚差Y篇」，讓老師從名單/複製文字就能分辨兩種狀況
+    const thisEntriesCount = monthEntriesMap.get(thisMonth) || 0;
+    const label = thisEntriesCount > 0
+      ? `${sno} ${name}（已交${thisEntriesCount}篇，尚差${Math.max(requiredThisMonth - thisEntriesCount, 0)}篇）`
+      : `${sno} ${name}`;
+    return { label, sno, name, missCount };
   });
   window._statLists = {
     missing:    window._missingWithCount.map(s => s.label),
@@ -3440,11 +3486,13 @@ async function loadDeadlinesTable() {
     const status = now > close ? '<span class="badge badge-red">已截止</span>' : now >= open ? '<span class="badge badge-green">上傳中</span>' : '<span class="badge badge-yellow">未開放</span>';
     const semShort = (dd.semesterLabel||dd.semester).replace(/學年第(\d)學期.*/, '學年第$1學期');
     const fmtDate = s => s ? s.replace(/^\d{4}-/, '').replace('-', '/') : '-';
-    return `<tr><td style="white-space:nowrap;font-size:12px">${semShort}</td><td style="white-space:nowrap">${dd.month}月</td><td style="white-space:nowrap">${fmtDate(dd.openDate)}</td><td style="white-space:nowrap">${fmtDate(dd.closeDate)}</td><td>${status}</td><td><button class="btn btn-danger btn-sm" onclick="deleteDeadline('${d.id}')">刪除</button></td></tr>`;
+    // 2026-07-16 新增：顯示這個月設定的最少篇數；未設定時顯示「1（預設）」，跟 resolveMinEntries() 的 fallback 一致
+    const minEntriesDisplay = (Number.isInteger(dd.minEntries) && dd.minEntries >= 1) ? `${dd.minEntries}篇` : '1篇（預設）';
+    return `<tr><td style="white-space:nowrap;font-size:12px">${semShort}</td><td style="white-space:nowrap">${dd.month}月</td><td style="white-space:nowrap">${fmtDate(dd.openDate)}</td><td style="white-space:nowrap">${fmtDate(dd.closeDate)}</td><td style="white-space:nowrap">${minEntriesDisplay}</td><td>${status}</td><td><button class="btn btn-danger btn-sm" onclick="deleteDeadline('${d.id}')">刪除</button></td></tr>`;
   }).join('');
-  document.getElementById('deadlines-table-body').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:30px">尚未設定</td></tr>';
+  document.getElementById('deadlines-table-body').innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:30px">尚未設定</td></tr>';
   } catch(e) {
-    document.getElementById('deadlines-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:30px">截止日期資料載入失敗，請重新整理後再試。</td></tr>';
+    document.getElementById('deadlines-table-body').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:30px">截止日期資料載入失敗，請重新整理後再試。</td></tr>';
     toast('截止日期載入失敗：' + (e.message || '請重試'), 'error');
   } finally {
     hideLoading();
@@ -3473,8 +3521,11 @@ function renderDeadlineMonthTable() {
   const semLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/7～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/6)`;
   labelEl.textContent = semLabel;
   saveBtn.style.display = '';
-  let html = `<div style="overflow-x:auto"><table style="min-width:600px"><thead><tr><th>月份</th><th>開放上傳日期</th><th>截止日期</th></tr></thead><tbody>`;
-  months.forEach(m => { html += `<tr><td><strong>${m}月</strong></td><td><input type="date" id="dl-open-${m}" style="width:100%;min-width:140px"></td><td><input type="date" id="dl-close-${m}" style="width:100%;min-width:140px"></td></tr>`; });
+  let html = `<div style="overflow-x:auto"><table style="min-width:600px"><thead><tr><th>月份</th><th>開放上傳日期</th><th>截止日期</th><th>最少篇數</th></tr></thead><tbody>`;
+  // 2026-07-16 新增：「最少篇數」輸入框跟開放/截止日期一樣不預先帶出已存的值（這個表格本來
+  // 就是「整組重填後送出」的設計，見 saveAllDeadlines() 說明），placeholder 提示未填時的
+  // fallback 行為，避免老師誤以為空白＝0篇
+  months.forEach(m => { html += `<tr><td><strong>${m}月</strong></td><td><input type="date" id="dl-open-${m}" style="width:100%;min-width:140px"></td><td><input type="date" id="dl-close-${m}" style="width:100%;min-width:140px"></td><td><input type="number" id="dl-min-${m}" min="1" max="31" placeholder="預設1篇" style="width:100%;min-width:90px"></td></tr>`; });
   html += '</tbody></table></div>';
   tableEl.innerHTML = html;
 }
@@ -3602,12 +3653,24 @@ async function saveAllDeadlines() {
   for (const m of months) {
     const openRaw = document.getElementById(`dl-open-${m}`)?.value || '';
     const closeRaw = document.getElementById(`dl-close-${m}`)?.value || '';
+    // 2026-07-16 新增：最少篇數輸入框，跟開放/截止日一樣不預先帶出舊值——若這個月同時要
+    // 調整最少篇數，記得連同開放日/截止日一起重新填寫，不然這個月會被下面 `continue` 整月跳過
+    const minRaw = (document.getElementById(`dl-min-${m}`)?.value || '').trim();
     if (!openRaw && !closeRaw) continue;
     const openDate = normalizeToISODate(openRaw);
     const closeDate = normalizeToISODate(closeRaw);
     if (!openDate || !closeDate) { toast(`${m}月的日期格式有誤，請重新確認`, 'error'); return; }
     if (openDate > closeDate) { toast(`${m}月的開放日不能晚於截止日`, 'error'); return; }
-    entries.push({ id: `${sem.key}-${m}`, data: { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() } });
+    const data = { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() };
+    if (minRaw) {
+      const minEntries = parseInt(minRaw, 10);
+      if (!Number.isInteger(minEntries) || minEntries < 1 || String(minEntries) !== minRaw) {
+        toast(`${m}月的最少篇數請填 1 以上的整數`, 'error');
+        return;
+      }
+      data.minEntries = minEntries;
+    }
+    entries.push({ id: `${sem.key}-${m}`, data });
   }
   if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
