@@ -2027,6 +2027,25 @@ async function runTeacherTests(page, log) {
 
     await page.evaluate(() => { if (typeof showPage === 'function') showPage('t-dashboard'); });
     await waitForPage(page, 't-dashboard', 6000);
+    // 2026-07-18 修正（真實 bug，非 copyMissingList() 本身的問題）：showPage('t-dashboard')
+    // 內部呼叫 loadTeacherDashboard() 是 fire-and-forget（loaders[pageId]() 沒有 await，
+    // 見 teacher.html showPage()），waitForPage() 只確認 DOM 的 .hidden class 被拿掉，
+    // 完全不保證 loadTeacherDashboard() 的三個 Firestore 集合查詢（Promise.all）已經跑完。
+    // 若這裡直接覆寫 window._missingWithCount，loadTeacherDashboard() 稍後才完成時會用
+    // 真實班級資料把它蓋掉；而 copyMissingList() 本身在讀取 window._missingWithCount 之前
+    // 還有自己的一次 await getDoc()（讀取當月截止日），這個 await 空檔正好給了背景中的
+    // loadTeacherDashboard() 完成並覆寫的機會，造成本測試間歇性失敗（成功與否取決於兩個
+    // Firestore 讀取誰先完成，屬於典型的競態，不是 copyMissingList()／labelNoName 欄位本身
+    // 有問題——已核對 teacher.html 原始碼，copyMissingList() 讀的欄位名稱與這裡合成資料
+    // 使用的欄位名稱一致，都是 labelNoName，AI_CONTEXT.md 先前記載的 entriesNote 是文件
+    // 落後於程式碼的舊描述，並非目前實際欄位名）。
+    // 修法：明確等待 loadTeacherDashboard() 的 loading 遮罩重新隱藏（其 finally 區塊會呼叫
+    // hideLoading()，代表三個 Promise.all 查詢與後續同步計算皆已完成），才繼續往下設定
+    // 合成資料，確保不會再被背景載入蓋掉。
+    await page.waitForFunction(() => {
+      const el = document.getElementById('loading-overlay');
+      return el && el.classList.contains('hidden');
+    }, { timeout: 8000 }).catch(() => {});
 
     const result = await page.evaluate(async () => {
       let captured = null;
