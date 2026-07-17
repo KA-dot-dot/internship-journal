@@ -1,7 +1,18 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v23
+ * 學生端自動化測試 v24
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v24 新增（2026-07-17）：對應 student.html 新增「每月最少應繳篇數（minEntries）」概念——
+ * 背景是 teacher.html 主頁 2026-07-16 起已改用篇數判斷是否已繳，但 student.html 對這個概念
+ * 完全零涵蓋（全文搜尋「篇」「minEntries」皆零命中），主頁「本月繳交狀態」只要有存檔就顯示
+ * ✅已繳，「已逾期」名單也只看有沒有存檔，跟老師端看到的狀態可能不一致（學生自己覺得已繳，
+ * 老師端卻標記未繳）。這批測試盡量直接呼叫真正的函式本體帶入合成資料驗證行為，而非只做
+ * 原始碼字串比對，跟 teacher_test.js 新增的 T-SEC-36～41 對稱維護：
+ *   S-SEC-35  resolveMinEntries() 篇數判斷 fallback 邏輯正確，與 teacher.html 對稱
+ *   S-SEC-36  getOverdueMonths() 改用篇數達標判斷，只交1篇但規定2篇且已過期仍算逾期
+ *   S-SEC-37  loadStudentDashboard() 本月繳交狀態改用篇數判斷，並與 getOverdueMonths()
+ *             共用同一次 deadlines 查詢（避免重複打 Firestore）
  *
  * v23 修正（2026-07-14，同日 v22 上線後立即發現的測試本身缺陷，非新增測試，數量不變）：
  *   S-SEC-34  補強 noOldStandaloneBranch 這條負向檢查：原本直接對整段函式字串（含註解）
@@ -2219,6 +2230,94 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.hasCancelGuard) throw new Error('googleStudentLogin() 找不到「使用者主動取消不重試」的判斷（auth/popup-closed-by-user／auth/cancelled-popup-request）');
     if (!result.orderOK) throw new Error('googleStudentLogin() 的呼叫順序不對：應是先試 signInWithPopup()，失敗（catch）後才呼叫 startStudentRedirectLogin() fallback');
     if (!result.noOldStandaloneBranch) throw new Error('googleStudentLogin() 疑似殘留「standalone 一律先走 redirect」的舊分支，2026-07-12 應已拿掉');
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-35 ～ S-SEC-37　2026-07-17 新增：每月最少應繳篇數（minEntries）
+  // ════════════════════════════════════════
+  // 背景：teacher.html 主頁 2026-07-16 起已改用「entries.length >= minEntries」判斷一份
+  // 月記是否算已繳，但 student.html 對這個概念完全零涵蓋——主頁「本月繳交狀態」只要有存檔
+  // 就顯示✅已繳，「已逾期」名單也只看有沒有存檔，跟老師端看到的狀態可能不一致（學生自己
+  // 覺得已繳，老師端卻標記未繳/篇數不足）。與 teacher_test.js 的 T-SEC-36～41 對稱維護。
+
+  await test('S-SEC-35 resolveMinEntries() 篇數判斷 fallback 邏輯正確，與 teacher.html 對稱', async () => {
+    // 直接呼叫函式本體帶入合成資料驗證，而非只看原始碼字串。
+    const result = await page.evaluate(() => {
+      if (typeof resolveMinEntries !== 'function') return { skip: true };
+      return {
+        skip: false,
+        fallbackNoDoc:    resolveMinEntries(undefined) === 1,
+        fallbackNoField:  resolveMinEntries({}) === 1,
+        fallbackZero:     resolveMinEntries({ minEntries: 0 }) === 1,
+        fallbackNonInt:   resolveMinEntries({ minEntries: 1.5 }) === 1,
+        respectsSetValue: resolveMinEntries({ minEntries: 2 }) === 2,
+      };
+    });
+    if (result.skip) return;
+    if (!result.fallbackNoDoc || !result.fallbackNoField || !result.fallbackZero || !result.fallbackNonInt)
+      throw new Error('resolveMinEntries() 對未設定/非法 minEntries 未正確 fallback 為 1');
+    if (!result.respectsSetValue)
+      throw new Error('resolveMinEntries() 未正確讀出已設定的 minEntries 值');
+  });
+
+  await test('S-SEC-36 getOverdueMonths() 改用篇數達標判斷，只交1篇但規定2篇且已過期仍算逾期', async () => {
+    // 背景：原本 getOverdueMonths() 用 submittedMonths（純存在性 Set）判斷「這個月是否已繳」，
+    // 只要有存檔（不論篇數）就不算逾期。改成跟 teacher.html 主頁一致的篇數達標判斷
+    // （resolveMinEntries()）——只交1篇但規定2篇，截止日一過仍要提醒，不會因為「至少存了
+    // 一份文件」就被排除在提醒之外。直接呼叫真正的函式帶入合成資料驗證，而非只做靜態
+    // 字串比對。
+    const result = await page.evaluate(async () => {
+      if (typeof getOverdueMonths !== 'function') return { skip: true };
+
+      const deadlineDataMap = {
+        '115-1-7': { semester: '115-1', month: 7, closeDate: '2000-01-01', minEntries: 2 }, // 早已過期
+        '115-1-8': { semester: '115-1', month: 8, closeDate: '2099-01-01', minEntries: 2 }, // 尚未過期
+      };
+
+      const case1 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 7, entries: [{}] }], deadlineDataMap);
+      const case2 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 7, entries: [{}, {}] }], deadlineDataMap);
+      const case3 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 8, entries: [{}] }], deadlineDataMap);
+
+      return {
+        skip: false,
+        case1IncludesJuly: case1.includes(7),
+        case2ExcludesJuly: !case2.includes(7),
+        case3ExcludesAugust: !case3.includes(8),
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.case1IncludesJuly)
+      throw new Error('只交1篇但規定2篇、且已過截止日時，getOverdueMonths() 未將該月列為逾期——這正是本次要修正的核心落差本身（先前只看有沒有存檔）');
+    if (!result.case2ExcludesJuly)
+      throw new Error('篇數已達標的月份被誤判為逾期');
+    if (!result.case3ExcludesAugust)
+      throw new Error('截止日尚未到的月份被誤判為逾期');
+  });
+
+  await test('S-SEC-37 loadStudentDashboard() 本月繳交狀態改用篇數判斷，並與 getOverdueMonths() 共用同一次 deadlines 查詢', async () => {
+    const result = await page.evaluate(() => {
+      if (typeof loadStudentDashboard !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(loadStudentDashboard.toString());
+
+      const usesResolveMinEntries = /resolveMinEntries\s*\(/.test(fnStr);
+      const comparesEntriesCount = /currentEntriesCount\s*>=\s*requiredThisMonth/.test(fnStr);
+      const hasIncompleteBadge = fnStr.includes('badge-incomplete');
+      const passesMapToOverdue = /getOverdueMonths\s*\(\s*sem\s*,\s*journals\s*,\s*deadlineDataMap\s*\)/.test(fnStr);
+
+      return { skip: false, usesResolveMinEntries, comparesEntriesCount, hasIncompleteBadge, passesMapToOverdue };
+    });
+
+    if (result.skip) return;
+    if (!result.usesResolveMinEntries)
+      throw new Error('loadStudentDashboard() 找不到 resolveMinEntries() 呼叫，本月繳交狀態可能又退回「有存檔就算已繳」的舊標準');
+    if (!result.comparesEntriesCount)
+      throw new Error('loadStudentDashboard() 找不到 currentEntriesCount >= requiredThisMonth 比較邏輯');
+    if (!result.hasIncompleteBadge)
+      throw new Error('loadStudentDashboard() 找不到 badge-incomplete，篇數不足時可能沒有正確顯示「未完成」狀態');
+    if (!result.passesMapToOverdue)
+      throw new Error('loadStudentDashboard() 呼叫 getOverdueMonths() 時未傳入共用的 deadlineDataMap，可能重複查詢 Firestore');
   });
 
 

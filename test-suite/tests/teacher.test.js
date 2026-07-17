@@ -1,7 +1,24 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v22
+ * 老師端自動化測試 v23
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v23 新增（2026-07-17）：對應 teacher.html／student.html 新增「每月最少應繳篇數
+ * （minEntries）」概念後，補齊的一批回歸測試——背景是使用者實測發現「統計總覽→繳交狀況」
+ * 頁籤與 Excel 匯出只看「月記文件存不存在」，跟老師主頁（2026-07-16 起已改用篇數判斷）標準
+ * 不一致（同一位學生同一個月，主頁顯示未繳、統計總覽卻顯示✓已繳），連帶又發現主頁自己內部
+ * 「本月已繳」統計卡片跟「本月已繳名單」面板兩者標準也不一致。這批測試盡量直接呼叫真正的
+ * 函式本體帶入合成資料驗證行為，而非只做原始碼字串比對（可以做到的地方就不只做靜態分析）：
+ *   T-SEC-36  resolveMinEntries()／isJournalComplete() 篇數判斷邏輯正確（直接呼叫函式驗證）
+ *   T-SEC-37  statusSymbolForJournal() 篇數不足回傳新符號△，不再跟已達標的✓混淆
+ *   T-SEC-38  loadSubmitStats()／exportAllStatsExcel() 皆改用 isJournalComplete() 判斷已繳，
+ *             避免其中一處日後被單獨改動又跟另一處或主頁脫鉤
+ *   T-SEC-39  「截止日期設定」快速套用新增「最少應繳篇數」子區塊 C，
+ *             applyBatchMinEntries() 邏輯正確（含避免覆蓋已填日期、避免存檔時被略過的陷阱）
+ *   T-SEC-40  copyMissingList() 複製到剪貼簿的文字不含姓名，只留座號＋篇數註記
+ *             （直接餵入合成資料呼叫真正的函式、攔截 clipboard 寫入驗證，而非只看原始碼）
+ *   T-SEC-41  window._statLists.submitted（本月已繳名單面板）改用 completeSeats 篩選，
+ *             避免跟「本月已繳」統計卡片矛盾（同一頁面「已繳0人」但「已繳名單」列出好幾人）
  *
  * v22 修正（2026-07-14，同日 v21 上線後立即發現的測試本身缺陷，非新增測試，數量不變）：
  *   T-SEC-34  修正假失敗：getRedirectIdx 原本用裸字串 fnStr.indexOf('getRedirectResult(')
@@ -1844,6 +1861,231 @@ async function runTeacherTests(page, log) {
     if (!result.hasCancelGuard) throw new Error('googleTeacherLogin() 找不到「使用者主動取消不重試」的判斷（auth/popup-closed-by-user／auth/cancelled-popup-request）');
     if (!result.orderOK) throw new Error('googleTeacherLogin() 的呼叫順序不對：應是先試 signInWithPopup()，失敗（catch）後才呼叫 startTeacherRedirectLogin() fallback');
     if (!result.noOldStandaloneBranch) throw new Error('googleTeacherLogin() 疑似殘留「standalone 一律先走 redirect」的舊分支，2026-07-12 應已拿掉');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-36 ～ T-SEC-41　2026-07-17 新增：每月最少應繳篇數（minEntries）
+  // ════════════════════════════════════════
+  // 背景：teacher.html 主頁（loadTeacherDashboard()）2026-07-16 起已改用
+  // 「entries.length >= minEntries」判斷一份月記是否算已繳，但「統計總覽→繳交狀況」頁籤
+  // （loadSubmitStats()）與 Excel 匯出（exportAllStatsExcel()）當時仍只看「月記文件存不存在」，
+  // 使用者實測發現兩套標準不一致（同一位學生同一個月，主頁顯示「未繳（已交1篇，尚差1篇）」，
+  // 統計總覽卻顯示✓已繳）。修正後又從使用者提供的截圖發現主頁自己內部也有同類矛盾——
+  // 「本月已繳」統計卡片（completeSeats，篇數需達標）跟「本月已繳名單」面板
+  // （window._statLists.submitted，原本是 activeJournals，本月有存檔就算）標準不一致。
+
+  await test('T-SEC-36 resolveMinEntries()／isJournalComplete() 篇數判斷邏輯正確', async () => {
+    // 直接呼叫函式本體帶入合成資料驗證，而非只看原始碼字串——這兩個函式都是不依賴 DOM／
+    // Firestore 的純函式，可以直接測試行為本身。
+    const result = await page.evaluate(() => {
+      if (typeof resolveMinEntries !== 'function' || typeof isJournalComplete !== 'function')
+        return { skip: true };
+
+      const deadlineMap = { '115-1-7': { minEntries: 2 } };
+
+      const fallbackNoDoc    = resolveMinEntries(undefined) === 1;
+      const fallbackNoField  = resolveMinEntries({}) === 1;
+      const fallbackZero     = resolveMinEntries({ minEntries: 0 }) === 1;
+      const fallbackNonInt   = resolveMinEntries({ minEntries: 1.5 }) === 1;
+      const respectsSetValue = resolveMinEntries({ minEntries: 2 }) === 2;
+
+      const noJournal      = isJournalComplete(null, deadlineMap) === false;
+      const oneEntryNeedTwo = isJournalComplete({ semester: '115-1', month: 7, entries: [{}] }, deadlineMap) === false;
+      const twoEntriesOK    = isJournalComplete({ semester: '115-1', month: 7, entries: [{}, {}] }, deadlineMap) === true;
+      const noEntriesField  = isJournalComplete({ semester: '115-1', month: 7 }, deadlineMap) === false;
+      const defaultsToOne   = isJournalComplete({ semester: '115-2', month: 3, entries: [{}] }, deadlineMap) === true;
+
+      return {
+        skip: false,
+        fallbackNoDoc, fallbackNoField, fallbackZero, fallbackNonInt, respectsSetValue,
+        noJournal, oneEntryNeedTwo, twoEntriesOK, noEntriesField, defaultsToOne,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.fallbackNoDoc || !result.fallbackNoField || !result.fallbackZero || !result.fallbackNonInt)
+      throw new Error('resolveMinEntries() 對未設定/非法 minEntries 未正確 fallback 為 1');
+    if (!result.respectsSetValue)
+      throw new Error('resolveMinEntries() 未正確讀出已設定的 minEntries 值');
+    if (!result.noJournal)
+      throw new Error('isJournalComplete(null,...) 應回傳 false（沒有月記本來就不算完成）');
+    if (!result.oneEntryNeedTwo)
+      throw new Error('isJournalComplete() 未正確擋下「只交1篇但規定2篇」的情境——這正是本次要修正的核心落差本身');
+    if (!result.twoEntriesOK)
+      throw new Error('isJournalComplete() 誤判「篇數已達標」的月記為未完成');
+    if (!result.noEntriesField)
+      throw new Error('isJournalComplete() 對缺少 entries 欄位的月記未視為未完成（應 fallback 為 0 篇）');
+    if (!result.defaultsToOne)
+      throw new Error('isJournalComplete() 對未設定 minEntries 的月份未 fallback 為預設 1 篇');
+  });
+
+  await test('T-SEC-37 statusSymbolForJournal() 篇數不足回傳新符號△，不再跟已達標的✓混淆', async () => {
+    // 「統計總覽→繳交狀況」頁籤與 Excel 匯出圖例原本只有 ✓／▲／✗ 三種符號，篇數不足的
+    // 月記會被歸類成✓（因為舊版只檢查月記文件存不存在）。新增△獨立顯示，這裡驗證四種
+    // 情境的符號都正確。
+    const result = await page.evaluate(() => {
+      if (typeof statusSymbolForJournal !== 'function') return { skip: true };
+      const deadlineMap = { '115-1-7': { minEntries: 2, closeDate: '2026-07-31' } };
+
+      const miss = statusSymbolForJournal(null, deadlineMap) === '✗';
+      const incomplete = statusSymbolForJournal(
+        { semester: '115-1', month: 7, entries: [{}], submittedAt: '2026-07-10T00:00:00' }, deadlineMap
+      ) === '△';
+      const doneOnTime = statusSymbolForJournal(
+        { semester: '115-1', month: 7, entries: [{}, {}], submittedAt: '2026-07-10T00:00:00' }, deadlineMap
+      ) === '✓';
+      const doneLate = statusSymbolForJournal(
+        { semester: '115-1', month: 7, entries: [{}, {}], submittedAt: '2026-08-10T00:00:00' }, deadlineMap
+      ) === '▲';
+
+      return { skip: false, miss, incomplete, doneOnTime, doneLate };
+    });
+
+    if (result.skip) return;
+    if (!result.miss) throw new Error('沒有月記時應回傳 ✗');
+    if (!result.incomplete) throw new Error('篇數不足時應回傳 △，不應仍顯示成 ✓ 已繳（這正是本次要修的落差本身）');
+    if (!result.doneOnTime) throw new Error('篇數達標且準時繳交時應回傳 ✓');
+    if (!result.doneLate) throw new Error('篇數達標但遲交時應回傳 ▲');
+  });
+
+  await test('T-SEC-38 「統計總覽」與「Excel 匯出」皆改用 isJournalComplete() 判斷已繳（避免任一處漏改重現落差）', async () => {
+    // 這兩個函式上方都留了提到 isJournalComplete() 這個名字的說明性註解，先過濾掉整行都是
+    // 註解的行才做關鍵字搜尋，避免像 S-SEC-08／T-SEC-30／T-SEC-34 那樣 regex 命中的其實是
+    // 註解文字本身、而非真正的呼叫語句。
+    const result = await page.evaluate(() => {
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const submitStrRaw = (typeof loadSubmitStats === 'function') ? loadSubmitStats.toString() : '';
+      const excelStrRaw  = (typeof exportAllStatsExcel === 'function') ? exportAllStatsExcel.toString() : '';
+      if (!submitStrRaw || !excelStrRaw) return { skip: true };
+      const submitStr = codeOnly(submitStrRaw);
+      const excelStr  = codeOnly(excelStrRaw);
+
+      const statsUsesComplete = /isJournalComplete\s*\(/.test(submitStr);
+      const excelUsesComplete = /isJournalComplete\s*\([^)]*\)\)\s*submitted\+\+/.test(excelStr);
+      const legendHasIncomplete = submitStrRaw.includes('篇數不足');
+
+      return { skip: false, statsUsesComplete, excelUsesComplete, legendHasIncomplete };
+    });
+
+    if (result.skip) return;
+    if (!result.statsUsesComplete)
+      throw new Error('loadSubmitStats() 的儲存格判斷（濾掉註解行後）找不到 isJournalComplete() 呼叫，「繳交狀況」頁籤可能又跟主頁的篇數標準脫鉤');
+    if (!result.excelUsesComplete)
+      throw new Error('exportAllStatsExcel() 的「已繳/合計」計算（濾掉註解行後）找不到 isJournalComplete() 呼叫，Excel 匯出可能又跟主頁的篇數標準脫鉤');
+    if (!result.legendHasIncomplete)
+      throw new Error('「繳交狀況」頁籤圖例未提及「篇數不足」，使用者可能看不懂新符號△代表什麼');
+  });
+
+  await test('T-SEC-39 「截止日期設定」快速套用新增「最少應繳篇數」子區塊 C，applyBatchMinEntries() 邏輯正確', async () => {
+    // 背景：最少篇數（dl-min-{m}）原本只能在③逐月微調表格逐月輸入，這裡新增子區塊 C
+    // 可一次套用到整學期所有月份。關鍵陷阱：③逐月微調表格本身刻意不預先帶出已存的開放/
+    // 截止日（「整組重填後送出」設計），若只套最少篇數、日期欄位是空的，儲存時會被
+    // saveAllDeadlines() 的 `!openRaw && !closeRaw` 邏輯整月跳過——applyBatchMinEntries()
+    // 因此需要先讀一次既有期限資料，把已存在的日期一併帶入，這裡一併驗證這個防呆存在。
+    await page.evaluate(() => { if (typeof showPage === 'function') showPage('t-deadline'); });
+    await waitForPage(page, 't-deadline', 6000);
+
+    const uiCheck = await page.evaluate(() => {
+      const input = document.getElementById('batch-min-entries');
+      const btn = Array.from(document.querySelectorAll('button'))
+        .find(b => b.getAttribute('onclick') === 'applyBatchMinEntries()');
+      return { hasInput: !!input, hasButton: !!btn };
+    });
+    if (!uiCheck.hasInput) throw new Error('找不到 #batch-min-entries 輸入框，快速套用最少篇數的 UI 缺失');
+    if (!uiCheck.hasButton) throw new Error('找不到呼叫 applyBatchMinEntries() 的按鈕');
+
+    const fnCheck = await page.evaluate(() => {
+      if (typeof applyBatchMinEntries !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(applyBatchMinEntries.toString());
+      return {
+        skip: false,
+        validatesInteger: /Number\.isInteger\(\s*minEntries\s*\)/.test(fnStr),
+        fillsAllMonths: fnStr.includes('dl-min-'),
+        fetchesExistingDeadlines: /getDocs\s*\(\s*collection\s*\(\s*db\s*,\s*['"]deadlines['"]\s*\)\s*\)/.test(fnStr),
+        avoidsOverwritingTypedDates: fnStr.includes('alreadyTyped'),
+      };
+    });
+    if (fnCheck.skip) return;
+    if (!fnCheck.validatesInteger)
+      throw new Error('applyBatchMinEntries() 未驗證輸入值是否為 >=1 的整數');
+    if (!fnCheck.fillsAllMonths)
+      throw new Error('applyBatchMinEntries() 找不到套用到 dl-min-{m} 各月輸入框的邏輯');
+    if (!fnCheck.fetchesExistingDeadlines)
+      throw new Error('applyBatchMinEntries() 未讀取既有的 deadlines 集合，可能導致只填最少篇數、日期空白的月份被 saveAllDeadlines() 略過');
+    if (!fnCheck.avoidsOverwritingTypedDates)
+      throw new Error('applyBatchMinEntries() 未避免覆蓋畫面上已經填過的開放/截止日欄位');
+  });
+
+  await test('T-SEC-40 copyMissingList() 複製到剪貼簿的文字不含姓名，只留座號＋篇數註記', async () => {
+    // 背景：複製名單原本連姓名一起複製，手機上不同姓名長度會讓每行對不齊、排版容易顯得亂；
+    // 新增 labelNoName 欄位只在複製文字裡使用，畫面上的「本月未繳名單」列表本身完全不受
+    // 影響（仍照舊顯示座號＋姓名）。這裡直接餵入合成資料呼叫真正的 copyMissingList()，
+    // 攔截 navigator.clipboard.writeText() 檢查複製出來的實際文字內容，而非只做靜態字串比對。
+    const hasFn = await page.evaluate(() => typeof copyMissingList === 'function');
+    if (!hasFn) return;
+
+    await page.evaluate(() => { if (typeof showPage === 'function') showPage('t-dashboard'); });
+    await waitForPage(page, 't-dashboard', 6000);
+
+    const result = await page.evaluate(async () => {
+      let captured = null;
+      const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+      // 攔截剪貼簿寫入：copyMissingList() 呼叫 navigator.clipboard.writeText(text) 時
+      // 同步把 text 存起來（不是在 .then() 回呼裡才存，因為 copyMissingList() 本身沒有
+      // await 這個呼叫，用 .then()/.catch() 是 fire-and-forget，若改成非同步存取可能
+      // 讀不到值）
+      navigator.clipboard.writeText = (text) => { captured = text; return Promise.resolve(); };
+
+      window._missingWithCount = [
+        { label: '00 測試學生甲', labelNoName: '00', sno: '00', name: '測試學生甲', missCount: 1, partial: false },
+        { label: '01 測試學生乙（已交1篇，尚差1篇）', labelNoName: '01（已交1篇，尚差1篇）', sno: '01', name: '測試學生乙', missCount: 1, partial: true },
+      ];
+      window._statLists = window._statLists || {};
+      window._statLists.missing = window._missingWithCount.map(s => s.label);
+
+      try {
+        await copyMissingList();
+      } finally {
+        navigator.clipboard.writeText = originalWriteText;
+      }
+      return { captured };
+    });
+
+    if (!result.captured)
+      throw new Error('copyMissingList() 沒有呼叫 navigator.clipboard.writeText()，可能執行中拋出例外');
+    if (result.captured.includes('測試學生甲'))
+      throw new Error('複製出來的文字仍包含姓名「測試學生甲」，未依需求移除姓名');
+    if (result.captured.includes('測試學生乙'))
+      throw new Error('複製出來的文字仍包含姓名「測試學生乙」，未依需求移除姓名');
+    if (!result.captured.includes('00'))
+      throw new Error('複製出來的文字遺失座號 00');
+    if (!result.captured.includes('01（已交1篇，尚差1篇）'))
+      throw new Error('複製出來的文字未保留篇數註記（已交1篇，尚差1篇）');
+  });
+
+  await test('T-SEC-41 「本月已繳名單」（_statLists.submitted）改用 completeSeats 篩選，避免跟「本月已繳」卡片矛盾', async () => {
+    // 背景：loadTeacherDashboard() 原本用 activeJournals（本月有存檔就算，不論篇數）建立
+    // window._statLists.submitted（本月已繳名單面板的資料來源），但「本月已繳」統計卡片
+    // 本身（stat-submitted）用的是 completeSeats（篇數需達標）——同一頁面會出現「本月已繳」
+    // 顯示0，但「本月已繳名單」面板卻列出好幾位只交1篇（規定2篇）學生的矛盾畫面，是使用者
+    // 實測截圖發現的真實案例。
+    const result = await page.evaluate(() => {
+      if (typeof loadTeacherDashboard !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(loadTeacherDashboard.toString());
+
+      const submittedUsesCompleteSeats = /submitted:\s*activeJournals\.filter\(\s*j\s*=>\s*completeSeats\.has\(\s*j\.seatNo\s*\)\s*\)/.test(fnStr);
+      const hasPartialFlag = /const\s+partial\s*=\s*thisEntriesCount\s*>\s*0/.test(fnStr);
+
+      return { skip: false, submittedUsesCompleteSeats, hasPartialFlag };
+    });
+
+    if (result.skip) return;
+    if (!result.submittedUsesCompleteSeats)
+      throw new Error('window._statLists.submitted 未用 completeSeats 篩選，可能又跟「本月已繳」統計卡片的篇數標準脫鉤，重現「本月已繳0人但已繳名單列出好幾人」的矛盾畫面');
+    if (!result.hasPartialFlag)
+      throw new Error('_missingWithCount 的 partial 標記遺失，「本月未繳名單」無法區分「完全沒交」與「有交但篇數不足」兩種狀態');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
