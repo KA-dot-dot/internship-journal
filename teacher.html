@@ -57,6 +57,9 @@
   --accent-green: #22c55e;
   --accent-yellow: #f59e0b;
   --accent-red: #ef4444;
+  /* 2026-07-17 新增：「未完成」（有交但篇數不足）狀態專用強調色，跟 accent2（評語相關用途）
+     刻意分開，避免語意混淆；淺色系在深色底/淺色底皆清楚可辨，兩個主題共用同一個色碼 */
+  --accent-incomplete: #c084fc;
   --text: #e8eaf0;
   --text2: #8892aa;
   --text3: #4a5568;
@@ -443,6 +446,9 @@ tr:last-child td { border-bottom: none; }
 .submit-table td.submit-cell-done { background: rgba(34,197,94,0.10); color: var(--accent-green); font-weight: 700; font-size: 12px; }
 .submit-table td.submit-cell-miss { background: rgba(239,68,68,0.16); color: var(--accent-red); font-weight: 700; font-size: 12px; }
 .submit-table td.submit-cell-late { background: rgba(245,158,11,0.18); color: var(--accent-yellow); font-weight: 700; font-size: 12px; }
+/* 2026-07-17 新增：月記已存檔但篇數未達當月 minEntries 要求，跟「遲繳」(黃) 用不同顏色
+   （--accent-incomplete，浪漫淺紫 #c084fc）區隔，避免跟「已達標但遲交」混淆，見 isJournalComplete() */
+.submit-table td.submit-cell-incomplete { background: rgba(192,132,252,0.16); color: var(--accent-incomplete); font-weight: 700; font-size: 12px; }
 .submit-table td.submit-cell-na { color: var(--text3); }
 .submit-sem-row td { background: rgba(79,142,247,0.10); border-bottom: 1px solid var(--border); padding: 0; }
 .submit-sem-row td.submit-sem-sticky { position: sticky; left: 0; z-index: 2; width: 155px; min-width: 155px; max-width: 155px; border-left: 3px solid var(--accent); background: #eaf2ff; text-align: center; }
@@ -985,6 +991,16 @@ tr:last-child td { border-bottom: none; }
               </div>
               <div id="nmonth-preview" style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.7"></div>
               <button class="btn btn-secondary" onclick="applyNMonthDates()">📋 套用到所有月份</button>
+            </div>
+          </div>
+
+          <!-- 子區塊 C：統一設定最少篇數（2026-07-17 新增，補齊先前只能在③逐月微調表格
+               逐月輸入 dl-min-{m} 的缺口）。跟日期無關，不受上方 A/B 模式選擇影響。 -->
+          <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+            <div style="margin-bottom:10px;font-size:13px;font-weight:600;color:var(--text)">C. 最少應繳篇數（套用到所有月份，不影響上方日期設定）</div>
+            <div style="padding-left:22px">
+              <div class="form-group" style="max-width:200px"><label>每月最少篇數</label><input type="number" id="batch-min-entries" min="1" max="31" placeholder="預設1篇"></div>
+              <button class="btn btn-secondary" onclick="applyBatchMinEntries()">📋 套用到所有月份</button>
             </div>
           </div>
         </div>
@@ -2709,14 +2725,28 @@ async function loadTeacherDashboard() {
     // 2026-07-16 新增：本月已交篇數註記——0篇維持原本樣式（完全未繳，不加註）；
     // 1篇以上但未達標則加註「已交X篇，尚差Y篇」，讓老師從名單/複製文字就能分辨兩種狀況
     const thisEntriesCount = monthEntriesMap.get(thisMonth) || 0;
-    const label = thisEntriesCount > 0
-      ? `${sno} ${name}（已交${thisEntriesCount}篇，尚差${Math.max(requiredThisMonth - thisEntriesCount, 0)}篇）`
-      : `${sno} ${name}`;
-    return { label, sno, name, missCount };
+    const annotation = thisEntriesCount > 0
+      ? `（已交${thisEntriesCount}篇，尚差${Math.max(requiredThisMonth - thisEntriesCount, 0)}篇）`
+      : '';
+    const label = `${sno} ${name}${annotation}`;
+    // 2026-07-17 新增：labelNoName 供 copyMissingList() 複製到 LINE 群組時使用——手機上不同
+    // 姓名長度會讓每行對不齊、排版容易顯得亂，複製的文字只留座號＋篇數註記，姓名不帶出去；
+    // label（含姓名）維持給畫面上「本月未繳名單」列表使用（見 toggleStatList()），兩者用途
+    // 分開、互不影響，系統上座號＋姓名的顯示方式完全不變。
+    const labelNoName = `${sno}${annotation}`;
+    // 2026-07-17 新增：partial 標記「本月並非完全沒交，只是篇數不足」，供 toggleStatList()
+    // 把這類項目的徽章改用「未完成」強調色顯示，跟真正完全沒交的項目（紅色）視覺區隔
+    const partial = thisEntriesCount > 0;
+    return { label, labelNoName, sno, name, missCount, partial };
   });
   window._statLists = {
     missing:    window._missingWithCount.map(s => s.label),
-    submitted:  activeJournals.map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
+    // 2026-07-17 修正：原本用 activeJournals（本月有存檔就算，不論篇數）建立「已繳名單」，
+    // 跟「本月已繳」統計卡（completeSeats，篇數需達標）標準不一致——同一頁面上會出現「本月已繳
+    // 顯示0」但「本月已繳名單」卻列出好幾位學生的矛盾畫面（只交1篇但規定2篇的學生，被算進
+    // 已繳名單）。改用 completeSeats 篩選，只有篇數真正達標的月記才算「已繳」，未達標的學生
+    // 已經會出現在上面的 missing 名單裡（含篇數註記），不會兩邊都沒有、也不會兩邊都有。
+    submitted:  activeJournals.filter(j => completeSeats.has(j.seatNo)).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     reviewed:   activeJournals.filter(j => !!j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     unreviewed: activeJournals.filter(j => !j.teacherReviewed).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`),
     commented:  activeJournals.filter(j => (j.teacherComment || '').trim()).map(j => `${j.seatNo} ${j.studentName || j.seatNo}`)
@@ -2811,11 +2841,23 @@ async function copyMissingList() {
   const deadlineLine = deadlineStr
     ? `請於 ${deadlineStr} 前完成：`
     : '請盡快完成：';
-  const data = window._missingWithCount || list.map(l => ({ label: l, missCount: 1 }));
+  // 2026-07-17 修正：複製到剪貼簿（給 LINE 群組看）的版本不附姓名，只留座號＋篇數註記——
+  // 手機上不同姓名長度會讓每行對不齊、排版容易顯得很亂。畫面上的「本月未繳名單」列表本身
+  // 完全不受影響，仍照舊顯示座號＋姓名（見 loadTeacherDashboard() 的 label 欄位／
+  // toggleStatList()），這裡改用另外新增的 labelNoName 欄位，兩者互不影響。
+  const data = window._missingWithCount || list.map(l => {
+    // fallback：理論上不會發生（_missingWithCount 一定跟 _statLists 同時由
+    // loadTeacherDashboard() 設定），僅防禦性處理。label 格式固定是「座號 姓名」或
+    // 「座號 姓名（已交X篇，尚差Y篇）」，姓名本身不含「（」字元，用它當分界點取出座號＋
+    // 括號註記，去掉中間的姓名部分
+    const m = l.match(/^(\S+)\s+[^（]+(（.*）)?$/);
+    return { label: l, labelNoName: m ? `${m[1]}${m[2] || ''}` : l, missCount: 1 };
+  });
   const lines = data.map(s => {
-    if (s.missCount >= 3) return `${s.label}　🔴 本學期已缺${s.missCount}個月`;
-    if (s.missCount === 2) return `${s.label}　⚠ 本學期已缺2個月`;
-    return s.label;
+    const base = s.labelNoName || s.label;
+    if (s.missCount >= 3) return `${base}　🔴 本學期已缺${s.missCount}個月`;
+    if (s.missCount === 2) return `${base}　⚠ 本學期已缺2個月`;
+    return base;
   });
   const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
   const btn = document.getElementById('copy-missing-btn');
@@ -2893,7 +2935,11 @@ function toggleStatList(key) {
           } else if (s.missCount === 2) {
             badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2個月</span>`;
           }
-          return `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
+          // 2026-07-17 新增：本月「有交但篇數不足」（s.partial）的項目改用未完成強調色
+          // （--accent-incomplete，浪漫淺紫）顯示，跟「本月完全沒交」（紅色，c.color）視覺區隔，
+          // 缺月數徽章（上面的 badge，紅/黃）維持不變——那是本學期累計缺繳月數，是另一個維度
+          const itemColor = s.partial ? 'var(--accent-incomplete)' : c.color;
+          return `<span style="background:rgba(0,0,0,0.08);color:${itemColor};border:1px solid ${itemColor};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
         }).join('');
       } else {
         namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
@@ -3625,6 +3671,63 @@ function applyNMonthDates() {
   toast(`已套用：每月第${openDay}號開放，共 ${n} 個月`, 'success');
 }
 
+// 2026-07-17 新增：快速套用「最少篇數」到所有月份，補齊先前只能在③逐月微調表格裡逐月輸入
+// dl-min-{m} 的缺口（見 resolveMinEntries()、renderDeadlineMonthTable() 上方的既有註解）。
+// 跟 applyBatchDates()/applyNMonthDates() 一樣，這裡只是把值填進畫面上的 input，
+// 真正寫入 Firestore 仍要按下方「一次儲存全部月份期限」（saveAllDeadlines()）。
+// 關鍵細節：③逐月微調表格本身刻意不預先帶出已存的值（「整組重填後送出」設計），若某個月
+// 只填了最少篇數、開放/截止日兩個欄位仍是空的，saveAllDeadlines() 會因為
+// `!openRaw && !closeRaw` 直接把整個月跳過，最少篇數也會一併不見、白填。為避免這個陷阱，
+// 套用前先讀一次這個學期目前已存在 Firestore 的各月期限，對「開放/截止日欄位仍空白、但這個
+// 月其實已經存過期限」的月份，順便把既有日期一併帶入，讓這個月不會被略過；從未設定過期限、
+// 也還沒在畫面上填過日期的月份維持空白（本來就無法只靠最少篇數單獨成立一筆期限資料，仍需
+// 老師之後補上日期）。已在畫面上填過日期的月份（不論是這次手動填的還是套用 A/B 帶出的）
+// 一律保留不覆蓋。
+async function applyBatchMinEntries() {
+  const sem = getDeadlineSemKey();
+  if (!sem) return toast('請先選擇學期', 'error');
+  const raw = (document.getElementById('batch-min-entries')?.value || '').trim();
+  if (!raw) return toast('請先填寫最少篇數', 'error');
+  const minEntries = parseInt(raw, 10);
+  if (!Number.isInteger(minEntries) || minEntries < 1 || String(minEntries) !== raw) {
+    return toast('最少篇數請填 1 以上的整數', 'error');
+  }
+  // 確保逐月微調已展開，讓老師看到套用結果
+  _ensureMonthTableOpen();
+  const months = getDeadlineSemMonths(sem.half);
+  showLoading();
+  try {
+    const { collection, getDocs } = firebase_funcs;
+    const snap = await getDocs(collection(db, 'deadlines'));
+    const existingMap = {};
+    snap.docs.forEach(d => { existingMap[d.id] = d.data(); });
+    let filledDatesCount = 0;
+    months.forEach(m => {
+      const minEl = document.getElementById(`dl-min-${m}`);
+      if (minEl) minEl.value = minEntries;
+      const openEl = document.getElementById(`dl-open-${m}`);
+      const closeEl = document.getElementById(`dl-close-${m}`);
+      const alreadyTyped = !!(openEl?.value || closeEl?.value);
+      if (!alreadyTyped) {
+        const existing = existingMap[`${sem.key}-${m}`];
+        if (existing && existing.openDate && existing.closeDate) {
+          if (openEl) openEl.value = existing.openDate;
+          if (closeEl) closeEl.value = existing.closeDate;
+          filledDatesCount++;
+        }
+      }
+    });
+    toast(`已套用最少篇數 ${minEntries} 篇到所有月份` + (filledDatesCount ? `（其中 ${filledDatesCount} 個月份同時帶入既有開放/截止日，避免儲存時被略過）` : ''), 'success');
+  } catch(e) {
+    // 讀取既有期限資料失敗時，仍把最少篇數本身填進所有欄位，不因此完全卡住操作；
+    // 但沒有既有日期可帶入的月份，老師需要自行確認開放/截止日是否已填，否則儲存時仍會被跳過
+    months.forEach(m => { const minEl = document.getElementById(`dl-min-${m}`); if (minEl) minEl.value = minEntries; });
+    toast('讀取既有期限資料失敗，已套用最少篇數欄位，但請自行確認各月份開放/截止日是否已填寫（否則儲存時會被略過）：' + (e.message || '請重試'), 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
 // 套用後自動展開逐月微調（讓老師看到結果）
 function _ensureMonthTableOpen() {
   const wrap = document.getElementById('deadline-month-table-wrap');
@@ -3739,6 +3842,9 @@ async function loadSubmitStats() {
         if (slot.sem !== s.semester) return `<td class="submit-cell-na">-</td>`;
         const j = journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`];
         if (!j) return `<td class="submit-cell-miss">✗</td>`;
+        // 2026-07-17 新增：篇數不足（有存檔但未達 minEntries）獨立顯示為△，跟老師主頁
+        // 「未繳（含篇數註記）」的判斷基準一致，見 isJournalComplete()
+        if (!isJournalComplete(j, deadlineMap)) return `<td class="submit-cell-incomplete">△</td>`;
         return isJournalLate(j, deadlineMap)
           ? `<td class="submit-cell-late">▲</td>`
           : `<td class="submit-cell-done">✓</td>`;
@@ -3746,7 +3852,7 @@ async function loadSubmitStats() {
       tbody += `<tr><td class="col-seat">${escapeHtml(s.seatNo)}</td><td class="col-name">${escapeHtml(s.name)}</td>${cells}</tr>`;
     });
   });
-  const legendBar = `<div style="font-size:12px;color:var(--text2);padding:6px 2px 8px">✓：已繳　▲：遲繳　✗：未繳</div>`;
+  const legendBar = `<div style="font-size:12px;color:var(--text2);padding:6px 2px 8px">✓：已繳　▲：遲繳　✗：未繳　△：篇數不足</div>`;
   const tableHtml = `${legendBar}<div class="submit-scroll-box"><table class="submit-table">
     <thead><tr><th class="col-seat">座號</th><th class="col-name">姓名</th>${theadCells}</tr></thead>
     <tbody>${tbody}</tbody>
@@ -3846,8 +3952,24 @@ function isJournalLate(j, deadlineMap) {
   return !!(closeDate && submittedDate && submittedDate > closeDate);
 }
 
+// 2026-07-17 新增：月記是否「篇數達標」，跟 loadTeacherDashboard() 的 resolveMinEntries()
+// 用同一套判斷基準。deadlineMap 這裡沿用 loadSubmitStats()/exportAllStatsExcel() 既有的
+// buildDeadlineMap() 輸出（{ 'semester-month': deadlineDocData }），跟 loadTeacherDashboard()
+// 自己另外建的 deadlineDataMap 是同一種形狀，可以直接共用 resolveMinEntries()。
+// 修正「統計總覽／繳交狀況」頁籤與 Excel 匯出先前只看「月記文件存不存在」、完全沒檢查篇數，
+// 導致跟老師主頁（2026-07-16 已改為篇數需達標才算已繳）出現落差的問題——同一位學生同一個月，
+// 主頁顯示「未繳（已交1篇，尚差1篇）」，這裡卻顯示✓已繳，是同一份資料被兩套不一致的標準
+// 各自判讀。詳見 AI_CONTEXT.md 對應更新記錄。
+function isJournalComplete(j, deadlineMap) {
+  if (!j) return false;
+  const required = resolveMinEntries(deadlineMap[`${j.semester}-${j.month}`]);
+  return (j.entries || []).length >= required;
+}
+
 function statusSymbolForJournal(j, deadlineMap) {
   if (!j) return '✗';
+  // 2026-07-17 新增：有存檔但篇數不足，獨立顯示為△，不再跟「已達標」的✓混在一起
+  if (!isJournalComplete(j, deadlineMap)) return '△';
   return isJournalLate(j, deadlineMap) ? '▲' : '✓';
 }
 
@@ -3971,7 +4093,7 @@ async function exportAllStatsExcel() {
   journals.forEach(j => { journalMap[`${j.semester}-${j.seatNo}-${j.month}`] = j; });
 
   const submitAoA = [
-    ['符號說明', '✓：已繳', '▲：遲繳', '✗：未繳'],
+    ['符號說明', '✓：已繳', '▲：遲繳', '✗：未繳', '△：篇數不足'],
     [],
     ['座號', '姓名', ...monthSlots.map(s => s.label), '已繳/合計']
   ];
@@ -3979,7 +4101,11 @@ async function exportAllStatsExcel() {
     let submitted = 0;
     const cells = monthSlots.map(slot => {
       const j = slot.sem === s.semester ? journalMap[`${slot.sem}-${s.seatNo}-${slot.month}`] : null;
-      if (j) submitted++;
+      // 2026-07-17 修正：「已繳/合計」原本只看月記文件存不存在（if (j) submitted++），
+      // 跟老師主頁（篇數需達標才算已繳，2026-07-16 起）標準不一致，導致 Excel 匯出跟主頁
+      // 顯示的已繳人數對不上。改用 isJournalComplete() 統一判斷：遲交但篇數達標仍算已繳
+      // （跟修正前行為一致），篇數不足則不計入已繳數。
+      if (isJournalComplete(j, deadlineMap)) submitted++;
       return statusSymbolForJournal(j, deadlineMap);
     });
     const totalSlots = monthSlots.filter(slot => slot.sem === s.semester).length;

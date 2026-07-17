@@ -52,6 +52,9 @@
   --accent-green: #22c55e;
   --accent-yellow: #f59e0b;
   --accent-red: #ef4444;
+  /* 2026-07-17 新增：「未完成」（有交但篇數不足）狀態專用強調色，與 teacher.html 對稱維護，
+     同一色碼跨兩端／跨深淺色主題保持一致，方便老師與學生看到同一個視覺語言 */
+  --accent-incomplete: #c084fc;
   --text: #e8eaf0;
   --text2: #8892aa;
   --text3: #4a5568;
@@ -114,6 +117,8 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .badge-green { background: rgba(34,197,94,0.15); color: var(--accent-green); }
 .badge-red { background: rgba(239,68,68,0.15); color: var(--accent-red); }
 .badge-yellow { background: rgba(245,158,11,0.15); color: var(--accent-yellow); }
+/* 2026-07-17 新增：本月已交但篇數未達標時使用，見 loadStudentDashboard() */
+.badge-incomplete { background: rgba(192,132,252,0.16); color: var(--accent-incomplete); }
 .badge-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
 
 #toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg3); border: 1px solid var(--border); padding: 14px 20px; border-radius: var(--radius-sm); font-size: 14px; z-index: 9999; transform: translateY(80px); opacity: 0; transition: all 0.3s; max-width: 320px; box-shadow: var(--shadow); }
@@ -1517,19 +1522,45 @@ function renderTeacherStatusDetail(list) {
   }).join('');
 }
 
-// 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但尚未繳交的月份
-// （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）
-async function getOverdueMonths(sem, journals) {
-  const { collection, getDocs } = firebase_funcs;
-  const snap = await getDocs(collection(db, 'deadlines'));
+// 2026-07-17 新增：每月「最少應繳工作摘要篇數」的判斷邏輯，與 teacher.html 的同名函式對稱
+// 維護（完整背景說明見該檔案）。欄位不存在、或不是 >=1 的整數時，一律 fallback 為 1，
+// 等同維持這個功能上線前的行為（存了月記文件就算已繳）。
+function resolveMinEntries(deadlineDoc) {
+  const v = deadlineDoc && deadlineDoc.minEntries;
+  return (Number.isInteger(v) && v >= 1) ? v : 1;
+}
+
+// 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但篇數未達標的月份
+// （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）。
+// 2026-07-17 起：不再是「完全沒有月記文件」才算逾期，改用跟 teacher.html
+// loadTeacherDashboard() 一致的篇數達標判斷（resolveMinEntries()）——只交1篇但規定要2篇，
+// 截止日一過一樣算逾期，不會因為「至少存了一份文件」就被排除在提醒之外，避免學生誤以為
+// 已經完成而忽略。deadlineDataMap 為選填的預先讀取結果（{ 'semester-month': deadlineDocData }，
+// 由呼叫端 loadStudentDashboard() 跟本月繳交狀態共用同一次查詢，避免重複打 Firestore），
+// 沒有傳入時自行查一次，維持函式本身仍可獨立呼叫。
+async function getOverdueMonths(sem, journals, deadlineDataMap = null) {
+  let dataMap = deadlineDataMap;
+  if (!dataMap) {
+    const { collection, getDocs } = firebase_funcs;
+    const snap = await getDocs(collection(db, 'deadlines'));
+    dataMap = {};
+    snap.docs.forEach(d => { const dd = d.data(); if (dd.semester && dd.month) dataMap[`${dd.semester}-${dd.month}`] = dd; });
+  }
   const now = new Date();
-  const submittedMonths = new Set(journals.filter(j => j.semester === sem).map(j => Number(j.month)));
+  // 依月份加總本學期各月的 entries 篇數（一份月記理論上剛好對應一個月份，不會同月重複，
+  // 用加總寫法即使未來資料形狀改變也不會誤判成 0）
+  const entriesByMonth = new Map();
+  journals.filter(j => j.semester === sem).forEach(j => {
+    entriesByMonth.set(Number(j.month), (entriesByMonth.get(Number(j.month)) || 0) + (j.entries || []).length);
+  });
   const overdue = [];
-  snap.docs.forEach(d => {
-    const dd = d.data();
+  Object.values(dataMap).forEach(dd => {
     if (dd.semester !== sem || !dd.month || !dd.closeDate) return;
     const close = new Date(dd.closeDate + 'T23:59:59+08:00');
-    if (close < now && !submittedMonths.has(Number(dd.month))) overdue.push(Number(dd.month));
+    if (close >= now) return;
+    const required = resolveMinEntries(dd);
+    const entriesCount = entriesByMonth.get(Number(dd.month)) || 0;
+    if (entriesCount < required) overdue.push(Number(dd.month));
   });
   return overdue.sort((a,b) => a-b);
 }
@@ -1544,16 +1575,36 @@ async function loadStudentDashboard() {
     document.getElementById(`stat-detail-${key}`)?.classList.add('hidden');
   });
   try {
-    const snap = await getMyJournalDocs();
+    const { collection, getDocs } = firebase_funcs;
+    // 2026-07-17 起：跟「已逾期」共用同一次 deadlines 查詢結果（deadlineDataMap），
+    // 判斷每月最少應繳篇數，見下方 resolveMinEntries()
+    const [snap, deadlinesSnap] = await Promise.all([
+      getMyJournalDocs(),
+      getDocs(collection(db, 'deadlines'))
+    ]);
     const journals = snap.docs.map(d => d.data());
     // 依 semester 再依 month 排序（與 loadStudentHistory()/exportMyPDF() 同邏輯一致），避免 Firestore 回傳順序不固定
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
 
-    // 本月繳交狀態
-    const hasCurrent = journals.some(j => j.semester === sem && j.month === thisMonth);
-    document.getElementById('s-this-month-status').innerHTML = hasCurrent ?
-      '<span class="badge badge-green">✅ 本月已繳</span>' :
-      '<span class="badge badge-red">❌ 本月未繳</span>';
+    const deadlineDataMap = {};
+    deadlinesSnap.docs.forEach(d => {
+      const dd = d.data();
+      if (dd.semester && dd.month) deadlineDataMap[`${dd.semester}-${dd.month}`] = dd;
+    });
+
+    // 本月繳交狀態：2026-07-17 起改為篇數需達到當月 minEntries 才算已繳，不再是「有存檔就算」，
+    // 跟 teacher.html loadTeacherDashboard() 的判斷基準一致（resolveMinEntries()，兩份檔案
+    // 對稱維護同一套邏輯）——先前只看月記文件存不存在，會出現老師端已經在「未繳名單」裡標注
+    // 「已交1篇，尚差1篇」，學生自己這裡卻顯示「✅ 本月已繳」的落差。有存檔但篇數不足時，
+    // 改顯示「未完成」並附上目前進度，而不是直接顯示「未繳」造成「明明有交怎麼算沒交」的誤會。
+    const currentJournal = journals.find(j => j.semester === sem && j.month === thisMonth);
+    const requiredThisMonth = resolveMinEntries(deadlineDataMap[`${sem}-${thisMonth}`]);
+    const currentEntriesCount = currentJournal ? (currentJournal.entries || []).length : 0;
+    document.getElementById('s-this-month-status').innerHTML = currentEntriesCount >= requiredThisMonth
+      ? '<span class="badge badge-green">✅ 本月已繳</span>'
+      : currentJournal
+        ? `<span class="badge badge-incomplete">🟣 本月未完成（已交${currentEntriesCount}篇，尚差${Math.max(requiredThisMonth - currentEntriesCount, 0)}篇）</span>`
+        : '<span class="badge badge-red">❌ 本月未繳</span>';
 
     // 已繳交（累計）
     document.getElementById('s-submitted-count').textContent = journals.length;
@@ -1565,7 +1616,7 @@ async function loadStudentDashboard() {
     document.getElementById('stat-detail-teacher').innerHTML = renderTeacherStatusDetail(teacherList);
 
     // 已逾期
-    const overdueMonths = await getOverdueMonths(sem, journals);
+    const overdueMonths = await getOverdueMonths(sem, journals, deadlineDataMap);
     document.getElementById('s-overdue-count').textContent = overdueMonths.length;
     document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
       ? overdueMonths.map(m => `<div class="stat-detail-row clickable" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
