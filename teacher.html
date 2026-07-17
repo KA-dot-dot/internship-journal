@@ -2859,7 +2859,7 @@ async function copyMissingList() {
     if (s.missCount === 2) return `${base}　⚠ 本學期已缺2個月`;
     return base;
   });
-  const text = `【月記提醒】${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
+  const text = `【月記提醒】\n${ceYear}年${thisMonth}月份月記\n以下同學尚未繳交月記，${deadlineLine}\n${lines.join('\n')}`;
   const btn = document.getElementById('copy-missing-btn');
   navigator.clipboard.writeText(text).then(() => {
     if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
@@ -2935,10 +2935,12 @@ function toggleStatList(key) {
           } else if (s.missCount === 2) {
             badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2個月</span>`;
           }
-          // 2026-07-17 新增：本月「有交但篇數不足」（s.partial）的項目改用未完成強調色
-          // （--accent-incomplete，浪漫淺紫）顯示，跟「本月完全沒交」（紅色，c.color）視覺區隔，
+          // 2026-07-17（第二次調整）：本月「有交但篇數不足」（s.partial）的項目改跟「有評語」
+          // 同一套紫色（--accent2，較深的紫）顯示，方便老師一眼認出跟「本月完全沒交」的紅色不同；
+          // 原本用的 --accent-incomplete（浪漫淺紫 #c084fc）維持只用在「統計總覽→繳交狀況」
+          // 那張表格（.submit-cell-incomplete），兩處刻意改成不同用途、不再共用同一個顏色。
           // 缺月數徽章（上面的 badge，紅/黃）維持不變——那是本學期累計缺繳月數，是另一個維度
-          const itemColor = s.partial ? 'var(--accent-incomplete)' : c.color;
+          const itemColor = s.partial ? 'var(--accent2)' : c.color;
           return `<span style="background:rgba(0,0,0,0.08);color:${itemColor};border:1px solid ${itemColor};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
         }).join('');
       } else {
