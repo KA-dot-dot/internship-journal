@@ -120,6 +120,13 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 /* 2026-07-17 新增：本月已交但篇數未達標時使用，見 loadStudentDashboard() */
 .badge-incomplete { background: rgba(192,132,252,0.16); color: var(--accent-incomplete); }
 .badge-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
+/* 2026-07-18 新增：「已交X篇，尚差Y篇」附註共用排版元件——本月未完成徽章（.badge-incomplete）
+   與已逾期清單（.stat-detail-row-progress）共用同一組 .entries-progress-main／
+   .entries-progress-detail 子元素命名，確保兩處排版邏輯一致。桌面版維持原本緊接在主文字
+   後方同一行顯示（不需額外樣式，flex 預設 gap 為 0）；.stat-detail-row 本身另有
+   gap:8px，這裡歸零避免兩個 span 之間出現不該有的間距。手機版換行寫法見下方
+   @media (max-width:768px) 區塊。 */
+.stat-detail-row.stat-detail-row-progress { gap: 0; }
 
 #toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg3); border: 1px solid var(--border); padding: 14px 20px; border-radius: var(--radius-sm); font-size: 14px; z-index: 9999; transform: translateY(80px); opacity: 0; transition: all 0.3s; max-width: 320px; box-shadow: var(--shadow); }
 #toast.show { transform: translateY(0); opacity: 1; }
@@ -234,6 +241,12 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .stat-card-detail .stat-detail-row .journal-reviewed-badge,
   .stat-card-detail .stat-detail-row .journal-updated-badge,
   .stat-card-detail .stat-detail-row .journal-updated-read-badge { min-width: auto; margin-right: 4px !important; }
+  /* 2026-07-18 新增：手機版「已交X篇，尚差Y篇」附註強制換行——用 flex-direction:column
+     讓主文字（entries-progress-main）與附註（entries-progress-detail）各自獨立成一行，
+     不依賴 flex-basis:100% 這種需要容器有明確寬度才可靠的寫法，兩處（本月未完成徽章／
+     已逾期清單）共用同一套子元素命名，排版邏輯一致。桌面版不受影響（不在此 media 區塊內）。 */
+  .badge-incomplete { flex-direction: column; align-items: flex-start; row-gap: 2px; }
+  .stat-card-detail .stat-detail-row.stat-detail-row-progress { flex-direction: column; align-items: flex-start; row-gap: 2px; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   .entry-item { padding: 10px; }
@@ -1606,10 +1619,14 @@ async function loadStudentDashboard() {
     const currentJournal = journals.find(j => j.semester === sem && j.month === thisMonth);
     const requiredThisMonth = resolveMinEntries(deadlineDataMap[`${sem}-${thisMonth}`]);
     const currentEntriesCount = currentJournal ? (currentJournal.entries || []).length : 0;
+    // 2026-07-18 起：badge-incomplete 內文拆成 entries-progress-main／entries-progress-detail
+    // 兩個 span，桌面版 flex 預設 gap:0，視覺上仍是原本緊接同一行的「🟣 本月未完成（已交X篇，
+    // 尚差Y篇）」；手機版由 @media (max-width:768px) 的 .badge-incomplete{flex-direction:column}
+    // 讓兩者各自換行，避免窄螢幕擠壓成「本月未完成（已交\n1篇，尚差1篇）」這種不自然的斷字。
     document.getElementById('s-this-month-status').innerHTML = currentEntriesCount >= requiredThisMonth
       ? '<span class="badge badge-green">✅ 本月已繳</span>'
       : currentJournal
-        ? `<span class="badge badge-incomplete">🟣 本月未完成（已交${currentEntriesCount}篇，尚差${Math.max(requiredThisMonth - currentEntriesCount, 0)}篇）</span>`
+        ? `<span class="badge badge-incomplete"><span class="entries-progress-main">🟣 本月未完成</span><span class="entries-progress-detail">（已交${currentEntriesCount}篇，尚差${Math.max(requiredThisMonth - currentEntriesCount, 0)}篇）</span></span>`
         : '<span class="badge badge-red">❌ 本月未繳</span>';
 
     // 已繳交（累計）
@@ -1624,8 +1641,25 @@ async function loadStudentDashboard() {
     // 已逾期
     const overdueMonths = await getOverdueMonths(sem, journals, deadlineDataMap);
     document.getElementById('s-overdue-count').textContent = overdueMonths.length;
+    // 2026-07-18 起：逾期清單比照 teacher.html「本月未繳名單」的既有慣例，只在「有交但篇數
+    // 不足」時才附上「（已交X篇，尚差Y篇）」；完全沒交（0篇）的月份維持原本單純的
+    // 「⚠️ 年/月」，不刻意寫「已交0篇」製造多餘資訊。刻意不改動 getOverdueMonths() 本身的
+    // 回傳格式（仍是純月份數字陣列），避免牽動既有測試對它回傳值形狀的假設——這裡改用呼叫端
+    // 已經持有的 journals／deadlineDataMap 自行重算篇數，屬於局部新增、風險最小的作法，跟
+    // getOverdueMonths() 內部判斷逾期用的是同一套 entriesByMonth／resolveMinEntries() 邏輯。
     document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
-      ? overdueMonths.map(m => `<div class="stat-detail-row clickable" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記">⚠️ ${escapeHtml(semMonthToLabel(sem, m))}</div>`).join('')
+      ? overdueMonths.map(m => {
+          const required = resolveMinEntries(deadlineDataMap[`${sem}-${m}`]);
+          const entriesCount = journals
+            .filter(j => j.semester === sem && Number(j.month) === Number(m))
+            .reduce((sum, j) => sum + (j.entries || []).length, 0);
+          const label = escapeHtml(semMonthToLabel(sem, m));
+          const detail = entriesCount > 0
+            ? `<span class="entries-progress-detail">（已交${entriesCount}篇，尚差${Math.max(required - entriesCount, 0)}篇）</span>`
+            : '';
+          const rowClass = entriesCount > 0 ? 'stat-detail-row clickable stat-detail-row-progress' : 'stat-detail-row clickable';
+          return `<div class="${rowClass}" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記"><span class="entries-progress-main">⚠️ ${label}</span>${detail}</div>`;
+        }).join('')
       : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
     syncStatCardHeights();
   } catch (e) {
