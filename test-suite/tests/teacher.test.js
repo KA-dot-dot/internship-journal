@@ -2107,6 +2107,77 @@ async function runTeacherTests(page, log) {
       throw new Error('_missingWithCount 的 partial 標記遺失，「本月未繳名單」無法區分「完全沒交」與「有交但篇數不足」兩種狀態');
   });
 
+  await test('T-SEC-42 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門', async () => {
+    // 2026-07-17 新增。與 student_test.js 的 S-SEC-38 對稱。#push-enable-modal／
+    // maybeShowPushEnableModal()／enablePushFromModal() 是 2026-07-16 新增、目前唯一
+    // 決定老師裝置能否收到任何推播的入口（見 AI_推播系統說明.md 第六節 #22），上線後
+    // 一直完全沒有自動化測試覆蓋，靠人工實測驗證，缺回歸保護網。比照 T-SEC-31 的模式
+    // 補上靜態分析。
+    //
+    // 同時驗證 2026-07-17 補修的登入狀態守門：maybeShowPushEnableModal() 由 enterApp()
+    // 尾端的 setTimeout(...,1500) 排程觸發，若老師在這 1.5 秒窗口內登出，currentUser
+    // 可能已被清空，原本沒有檢查會讓彈窗在跟登入狀態不一致的情況下顯示。
+    //
+    // 四項檢查（與 S-SEC-38 同構）：
+    //   1. maybeShowPushEnableModal() 開頭有 currentUser?.uid 守門（本次補修的重點）——
+    //      用 codeOnly() 過濾掉整行註解再比對，避免像 S-SEC-08／T-SEC-30／T-SEC-34 那樣
+    //      被函式內部解釋性註解誤判命中。
+    //   2. enablePushFromModal() 有呼叫 closeModal('push-enable-modal') 與
+    //      initPushNotifications()。
+    //   3. enterApp() 尾端有 setTimeout(maybeShowPushEnableModal, 1500)。
+    //   4. #push-enable-modal 這個 DOM 元素確實存在於頁面上。
+    const result = await page.evaluate(() => {
+      const hasFns = typeof maybeShowPushEnableModal === 'function'
+        && typeof enablePushFromModal === 'function'
+        && typeof enterApp === 'function';
+      if (!hasFns) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const maybeFnStr = codeOnly(maybeShowPushEnableModal.toString());
+      const enableFnStr = codeOnly(enablePushFromModal.toString());
+      const enterAppFnStr = codeOnly(enterApp.toString());
+
+      const hasLoginGuard = /if\s*\(\s*!currentUser\?\.uid\s*\)\s*return;/.test(maybeFnStr);
+      const guardBeforeShow = (() => {
+        const guardIdx = maybeFnStr.search(/!currentUser\?\.uid/);
+        const showIdx = maybeFnStr.search(/classList\.remove\(\s*['"]hidden['"]\s*\)/);
+        return guardIdx !== -1 && showIdx !== -1 && guardIdx < showIdx;
+      })();
+
+      const closesModal = /closeModal\(\s*['"]push-enable-modal['"]\s*\)/.test(enableFnStr);
+      const callsInit = /initPushNotifications\s*\(\s*\)/.test(enableFnStr);
+
+      const schedulesModal = /setTimeout\(\s*maybeShowPushEnableModal\s*,\s*1500\s*\)/.test(enterAppFnStr);
+
+      const modalElExists = document.getElementById('push-enable-modal') !== null;
+
+      return {
+        skip: false,
+        hasLoginGuard,
+        guardBeforeShow,
+        closesModal,
+        callsInit,
+        schedulesModal,
+        modalElExists,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasLoginGuard)
+      throw new Error(
+        'maybeShowPushEnableModal() 找不到 !currentUser?.uid 登入狀態守門——' +
+        '2026-07-17 補修：若老師在 enterApp() 排程的 1.5 秒窗口內登出，' +
+        'currentUser 可能已被清空，彈窗理論上仍可能顯示在畫面上'
+      );
+    if (!result.guardBeforeShow)
+      throw new Error('maybeShowPushEnableModal() 的登入狀態守門沒有寫在顯示彈窗（classList.remove(\'hidden\')）之前');
+    if (!result.closesModal || !result.callsInit)
+      throw new Error('enablePushFromModal() 沒有同時呼叫 closeModal(\'push-enable-modal\') 與 initPushNotifications()');
+    if (!result.schedulesModal)
+      throw new Error('enterApp() 找不到 setTimeout(maybeShowPushEnableModal, 1500)，彈窗機制的唯一觸發點消失');
+    if (!result.modalElExists)
+      throw new Error('#push-enable-modal 這個 DOM 元素不存在於頁面上，maybeShowPushEnableModal() 顯示的目標消失了');
+  });
+
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
     const errors = page._testErrors || [];
     const serious = errors.filter(e =>

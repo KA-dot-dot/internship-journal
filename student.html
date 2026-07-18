@@ -1314,6 +1314,12 @@ let _fcmSwRegistration = null;
 // 讓使用者能在自動請求被瀏覽器靜默忽略時，自己補一次點擊觸發。
 function maybeShowPushEnableModal() {
   try {
+    // 2026-07-17 補修：這個函式由 enterApp() 尾端的 setTimeout(...,1500) 排程觸發，
+    // 原本沒有檢查登入狀態——若使用者在這 1.5 秒的窗口內就登出（disablePushNotifications()
+    // + signOut() 若因網路延遲拖過 1.5 秒），計時器觸發時 currentUser 可能已被 logout()
+    // 清空，此時彈窗理論上仍可能被顯示在畫面上，跟目前登入狀態不一致。加上這行守門，
+    // 跟 initPushNotifications() 開頭的 `if (!currentUser?.uid) return;` 是同一種防護。
+    if (!currentUser?.uid) return;
     if (!('Notification' in window) || !('serviceWorker' in navigator)) return; // 環境不支援，不顯示
     if (Notification.permission !== 'default') return; // 已同意或已明確拒絕過，都不需要顯示
     const el = document.getElementById('push-enable-modal');

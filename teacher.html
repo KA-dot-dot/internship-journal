@@ -2293,6 +2293,10 @@ let _fcmSwRegistration = null;
 // 2026-07-16 新增：與 student.html 對稱，見上方 enterApp() 呼叫處的說明。
 function maybeShowPushEnableModal() {
   try {
+    // 2026-07-17 補修：與 student.html 對稱——這個函式由 enterApp() 尾端的
+    // setTimeout(...,1500) 排程觸發，原本沒有檢查登入狀態，若老師在這 1.5 秒窗口內
+    // 登出，計時器觸發時 currentUser 可能已被清空，彈窗理論上仍可能顯示在畫面上。
+    if (!currentUser?.uid) return;
     if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
     if (Notification.permission !== 'default') return;
     const el = document.getElementById('push-enable-modal');
