@@ -15,13 +15,16 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-07-17：student.test.js 71 項〔67個具名呼叫點 + 4次頁籤切換迴圈，
-    #     v23→v24 新增 S-SEC-35/36/37，對應 minEntries／篇數功能〕、teacher.test.js 64 項
-    #     〔56個具名呼叫點 + 8次頁籤切換迴圈，v22→v23 新增 T-SEC-36～41，同一批 minEntries
-    #     功能〕。此數字已連續在 2026-06-24／2026-07-03／2026-07-15 過期三次，見
+    #    （目前對應 2026-07-18：student.test.js 72 項〔68個具名呼叫點 + 4次頁籤切換迴圈，
+    #     新增 S-SEC-38，補齊 push-enable-modal（#push-enable-modal／
+    #     maybeShowPushEnableModal()／enablePushFromModal()）先前完全零測試覆蓋的缺口，
+    #     同時驗證 maybeShowPushEnableModal() 新補的登入狀態守門〕、teacher.test.js 65 項
+    #     〔57個具名呼叫點 + 8次頁籤切換迴圈，新增對稱的 T-SEC-42〕。本機終端機截圖已確認
+    #     137/137 全過（學生端72/72、老師端65/65，含 T-SEC-42 正確通過）。
+    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18 過期四次，見
     #     AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後新增/刪除
     #     測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 71 項 + 老師端 64 項）
+    name: 完整自動化測試（學生端 72 項 + 老師端 65 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
