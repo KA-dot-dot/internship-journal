@@ -229,14 +229,24 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .thread-input-field { font-size: 16px; }
   .page-title { font-size: 17px; }
   .table-wrap { -webkit-overflow-scrolling: touch; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr) !important; grid-template-rows: auto; gap: 10px; margin-bottom: 16px; align-items: stretch; }
-  .stat-card { height: auto !important; min-height: 72px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
-  .stat-card .stat-label { font-size: 11px; line-height: 1.3; margin-bottom: 6px; }
-  .stat-value { font-size: 22px; }
-  .stat-card-detail { max-height: none; overflow-y: hidden; overflow-x: auto; display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; padding-bottom: 2px; scrollbar-width: none; -ms-overflow-style: none; }
-  .stat-card-detail::-webkit-scrollbar { display: none; }
-  .stat-card-detail .stat-detail-row { flex-shrink: 0; background: var(--bg3); border-radius: 20px; padding: 4px 10px; white-space: nowrap; margin: 0; }
-  .stat-card-detail .stat-detail-row.clickable { padding: 4px 10px; margin: 0; }
+  /* 2026-07-18 新增：手機版統計卡改「單欄4列」佈局，取代原本的「2欄2列」——目的是讓還沒
+     點擊「查看」展開任何一張卡片之前，四張卡片＋標題就能整段在一個畫面內看完，不需要滑動
+     頁面。做法：每張卡片內部改成「標籤在左、數值/徽章在右」同一行的橫向排版（原本是標籤
+     在上、數值在下的縱向堆疊，四張卡片縱向排列會佔用兩倍高度），配合 flex-wrap 讓真的放
+     不下時（例如篇數不足徽章換成兩行）才自然換行，不強制。展開細節（.stat-card-detail）
+     改用 flex-basis:100% 讓它固定出現在該卡片自己的新一行，內部排版直接沿用桌面版既有的
+     display:grid + max-height:220px + overflow-y:auto（見上方非 media 區塊第 265 行），
+     這樣「資訊過長」時只有展開區塊本身出現內部垂直滑桿，不會把整個頁面撐高——原本手機版
+     另外設計的「橫向捲動晶片」樣式（.stat-card-detail 改 flex-direction:row、
+     .stat-detail-row 改成圓角晶片）是配合舊版窄卡片（2欄，每張只有約160px寬）設計的，
+     現在改成單欄全寬卡片後，橫向捲動晶片的必要性下降，直接沿用桌面版垂直清單樣式反而更
+     直覺、也更貼近使用者的「除非查看後資訊過長才需要滑桿」需求，故一併移除。 */
+  .stats-grid { grid-template-columns: 1fr !important; grid-template-rows: auto; gap: 8px; margin-bottom: 16px; }
+  .stat-card { height: auto !important; min-height: 0; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 10px; row-gap: 4px; padding: 12px 14px; }
+  .stat-card .stat-label { font-size: 12.5px; line-height: 1.3; margin-bottom: 0; }
+  .stat-value { font-size: 20px; }
+  #s-this-month-status { margin-top: 0; }
+  .stat-card-detail { flex-basis: 100%; }
   .stat-card-detail .stat-detail-row .journal-unread-badge,
   .stat-card-detail .stat-detail-row .journal-reviewed-badge,
   .stat-card-detail .stat-detail-row .journal-updated-badge,
@@ -262,6 +272,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; font-family: 'Space Mono', monospace; }
 .stat-card-clickable { cursor: pointer; user-select: none; }
+/* 2026-07-18 起：原本寫在 HTML 內的 inline style="margin-top:8px" 移到這裡統一管理，
+   讓手機版單欄佈局（標籤與徽章同一行）能透過 @media (max-width:768px) 乾淨地覆蓋成 0，
+   不需要在該處另外寫 !important 去蓋掉 inline style 的高優先權。 */
+#s-this-month-status { margin-top: 8px; }
 .stat-card-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 13px; max-height: 220px; overflow-y: auto; overflow-x: hidden; }
 .stat-card-detail.hidden { display: none; }
 .stat-detail-row { display: flex; align-items: center; gap: 8px; border-radius: 6px; transition: background 0.15s; }
@@ -618,7 +632,7 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-label">本月繳交狀態</div>
-            <div id="s-this-month-status" style="margin-top:8px">-</div>
+            <div id="s-this-month-status">-</div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
             <div class="stat-label">已繳交（點擊查看）</div>
