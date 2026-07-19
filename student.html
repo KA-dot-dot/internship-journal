@@ -247,14 +247,11 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .stat-card { height: auto !important; min-height: 0; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 10px; row-gap: 4px; padding: 12px 14px; }
   .stat-card .stat-label { font-size: 12.5px; line-height: 1.3; margin-bottom: 0; }
   .stat-value { font-size: 20px; }
-  /* 2026-07-18（第二輪）：#s-this-month-status（本月未完成徽章的容器）改用 flex-basis:100%，
-     跟 .stat-card-detail 同一招，固定佔滿卡片自己的新一行，不再跟「本月繳交狀態」標籤擠在
-     同一行——原本共用一行時，徽章可用寬度被標籤吃掉一部分，篇數不足時常常還是得靠
-     .badge-incomplete 的 flex-wrap 換成兩行；獨占一整行後寬度足夠，「🟣 本月未完成
-     （已交1篇，尚差1篇）」通常就能直接一行呈現，只有極窄螢幕才會觸發下方 .badge-incomplete
-     的 flex-wrap 安全網換行。margin-top 沿用桌面版同一條規則（見上方非 media 區塊），
-     不需要在這裡另外覆蓋成 0。 */
-  #s-this-month-status { flex-basis: 100%; }
+  #s-this-month-status { margin-top: 0; }
+  /* 2026-07-19 更正：使用者回饋「本月繳交狀態」標籤與徽章同一行比較順眼，取消上一輪
+     （2026-07-18 第二輪）讓 #s-this-month-status 獨占一整行的做法，改回跟標籤共用同一行；
+     四張卡片收合狀態下的高度一致性改由下方 syncStatCardHeights() 用 JS 量測拉齊處理，
+     不再依賴「徽章獨占整行→天生等高」這個間接效果。 */
   .stat-card-detail { flex-basis: 100%; }
   .stat-card-detail .stat-detail-row .journal-unread-badge,
   .stat-card-detail .stat-detail-row .journal-reviewed-badge,
@@ -636,15 +633,15 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
             <div class="stat-label">本月繳交狀態</div>
             <div id="s-this-month-status">-</div>
           </div>
-          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
-            <div class="stat-label">已繳交（點擊查看）</div>
-            <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
-            <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
-          </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('teacher')">
             <div class="stat-label">審閱紀錄（點擊查看）</div>
             <div class="stat-value" style="color:var(--text)" id="s-teacher-count">-</div>
             <div class="stat-card-detail hidden" id="stat-detail-teacher"></div>
+          </div>
+          <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('submitted')">
+            <div class="stat-label">已繳交（點擊查看）</div>
+            <div class="stat-value" style="color:var(--accent-green)" id="s-submitted-count">-</div>
+            <div class="stat-card-detail hidden" id="stat-detail-submitted"></div>
           </div>
           <div class="stat-card stat-card-clickable" onclick="toggleStatDetail('overdue')">
             <div class="stat-label">已逾期（點擊查看）</div>
@@ -1495,11 +1492,43 @@ function semMonthToLabel(semester, month) {
 }
 
 function syncStatCardHeights() {
-  // 手機版改為4列單欄，每張卡片各自 auto 高度，不需要等高對齊。
-  // 電腦版同樣不操作 inline style，讓 CSS grid 自然處理。
-  const cards = document.querySelectorAll('#page-s-dashboard .stat-card');
-  cards.forEach(c => { c.style.height = ''; });
+  // 2026-07-19 更新：改回「標籤與數值/徽章同一行」佈局後，使用者要求四張卡片收合狀態下的
+  // 高度要一致。手機版是單欄4列（每張卡片各自獨占一個 grid row），CSS Grid 的
+  // align-items:stretch 只能在「同一個 grid row 內」拉齊多個 items，這裡每列只有一張卡片，
+  // 沒有同列的其他卡片可以拉齊，所以只能用 JS 量測後手動套用同一個 min-height。
+  // 桌面版是多欄 grid，同一 row 內本來就有多張卡片，CSS 自己的 align-items:stretch 已經會
+  // 自動拉齊，不需要這段邏輯介入，故只在 max-width:768px（單欄佈局生效的斷點，需與上方
+  // CSS 的中斷點一致）時才量測套用。
+  const cards = Array.from(document.querySelectorAll('#page-s-dashboard .stats-grid .stat-card'));
+  if (!cards.length) return;
+  cards.forEach(c => { c.style.minHeight = ''; });
+  if (!(window.matchMedia && window.matchMedia('(max-width:768px)').matches)) return;
+  // 量測時刻意排除「目前正在展開中」的卡片（.stat-card-detail 存在且不是 hidden）——
+  // 展開後的高度包含了下方細節清單，不代表收合狀態的基準值，若誤把它算進 max，會反過來
+  // 把其餘三張仍在收合中的卡片也撐高、留下大片不必要的空白。
+  let maxH = 0;
+  cards.forEach(c => {
+    const detail = c.querySelector('.stat-card-detail');
+    const expanded = detail && !detail.classList.contains('hidden');
+    if (expanded) return;
+    maxH = Math.max(maxH, c.getBoundingClientRect().height);
+  });
+  if (maxH > 0) cards.forEach(c => { c.style.minHeight = maxH + 'px'; });
 }
+// 2026-07-19 新增：手機/平板旋轉方向或瀏覽器視窗跨越 768px 斷點時，重新量測拉齊高度——
+// 若不處理，切到桌面版寬度後，前面手機版用 inline style 設定的 min-height 不會自動消失
+// （inline style 優先權高於一般 CSS 規則，媒體查詢不再命中不代表 inline style 會被清掉），
+// 會誤把桌面版卡片也撐出不必要的高度。用 300ms debounce 避免拖曳視窗大小時過度頻繁觸發；
+// 只在首頁目前可見時才重新計算，其餘頁面不受影響、也不浪費效能。
+let _statCardResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_statCardResizeTimer);
+  _statCardResizeTimer = setTimeout(() => {
+    if (!document.getElementById('page-s-dashboard')?.classList.contains('hidden')) {
+      syncStatCardHeights();
+    }
+  }, 300);
+});
 
 function toggleStatDetail(key) {
   const detail = document.getElementById(`stat-detail-${key}`);
