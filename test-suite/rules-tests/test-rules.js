@@ -260,6 +260,24 @@ async function main() {
     );
   });
 
+  // 2026-07-19 補修：teacherCommentUpdated（老師「再次留言」覆蓋舊評語的旗標，見
+  // AI_CONTEXT.md「評語對話串」章節第1節，決定學生端徽章狀態2🟠／狀態4📖是否顯示）
+  // 是跟 teacherComment／teacherReviewed／reviewedAt／teacherCommentUnread 同一組、
+  // 2026-06-17 那次就存在的老師專屬欄位，rule.txt 的 CREATE／UPDATE 一般編輯兩個分支
+  // 從一開始就都有 .get('teacherCommentUpdated', false) == false 這行鎖定，但這組
+  // 四個「兄弟」欄位裡，唯獨這一個從來沒有對應的 Layer 1 回歸測試——是用
+  // check-rule-diff.js 新增的反向掃描機制（rule.txt 有驗證、test-rules.js 完全沒測到，
+  // 見該檔案「反向掃描」章節）才第一次抓到，之前四輪安全稽核（2026-06-27～2026-07-16）
+  // 都沒有人發現這個缺口。跟同組其他三個欄位的「偽造應被拒」測試放在一起補齊，
+  // 不再讓它是這組欄位裡唯一沒有測試守著的一個。
+  await test('【2026-07-19】學生 CREATE 月記：偽造 teacherCommentUpdated=true → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/fake-03c`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherCommentUpdated: true }))
+    );
+  });
+
   await test('學生 CREATE 月記：ownerUid 對不上自己 uid → 應被拒', async () => {
     await assertFails(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
@@ -399,6 +417,18 @@ async function main() {
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherCommentContentAt: '2026-07-06T00:00:00+08:00' }))
+    );
+  });
+
+  // 2026-07-19 補修：與上方 CREATE 分支同一批補上，見該處註解完整背景說明。
+  // UPDATE 一般編輯分支的鎖定寫法（.get('teacherCommentUpdated', false) == false）
+  // 跟 CREATE 分支完全相同，但驗證的是「學生一般編輯月記內容時，這個欄位必須歸零」
+  // 而不是「建立時必須是初始值」，是獨立的另一個分支、需要各自的測試守著。
+  await test('【2026-07-19】學生 UPDATE 自己月記（一般編輯）：偽造 teacherCommentUpdated=true → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { teacherCommentUpdated: true }))
     );
   });
 
