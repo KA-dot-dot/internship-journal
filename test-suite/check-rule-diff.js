@@ -7,12 +7,21 @@
  * 「檢查欄位不存在」(!hasAny([field]))——兩種寫法長得像，語意卻完全相反，
  * 光看整份 rule.txt 的 diff 很容易掃過去沒注意到。
  *
- * 這個腳本做兩件事：
+ * 這個腳本做三件事：
  *   1. 把 rule.txt 裡最容易出事的幾個區塊（students、journals 子集合、
  *      studentBindings，以及 schoolUser/emailKey/isAdmin 等輔助函式）單獨抽出來，
  *      新舊版本不一樣就完整印出來，逼自己仔細看這幾塊，而不是被全檔案的 diff洗掉。
  *   2. 掃描新版內容裡是否出現「用 !hasAny() 檢查 teacher 相關欄位不存在」這種
  *      已知會造成問題的寫法，無論是不是這次新改的，都直接示警。
+ *   3.（2026-07-18 新增）反向掃描：比對 rule.txt 的月記欄位驗證邏輯，跟
+ *      rules-tests/test-rules.js 實際測試過的欄位，找出兩邊「有落差」的地方——
+ *      這是前兩項檢查天生抓不到的一種漏洞（見下方「反向掃描」章節完整說明）。
+ *      源自 2026-07-16 那次稽核發現：journalSubmitNotifiedAt 這個欄位，
+ *      test-rules.js 明明測了 7 條「應該被 rule.txt 擋下」的情境，但 rule.txt
+ *      當時實際上完全沒有對應的驗證規則——RISK_TARGETS／DANGER_PATTERNS 兩層
+ *      機制都抓不到這種「從一開始就沒被寫進規則」的落差（前者只比對新舊版本的
+ *      diff，後者只認已知的錯誤寫法，兩者都假設規則本身「有寫、只是寫錯」，
+ *      沒有涵蓋「根本沒寫」這個情況）。
  *
  * 用法：
  *   node check-rule-diff.js                      → 自動比對 git HEAD 版本 vs 目前工作區的 rule.txt
@@ -22,7 +31,7 @@
  *
  * exit code：
  *   0 → 沒有高風險變更，或加了 --confirm
- *   1 → 偵測到高風險區塊變更或危險寫法，且未加 --confirm
+ *   1 → 偵測到高風險區塊變更、危險寫法，或反向掃描出現落差，且未加 --confirm
  */
 
 const fs = require('fs');
@@ -32,6 +41,13 @@ const { execSync } = require('child_process');
 const args = process.argv.slice(2);
 const confirmed = args.includes('--confirm');
 const fileArgs = args.filter((a) => a !== '--confirm');
+
+// 反向掃描要讀的 test-rules.js 路徑——check-rule-diff.js 本身放在 test-suite/ 底下，
+// test-rules.js 放在同層的 rules-tests/ 子資料夾（見 AI_測試架構說明.md 第二節檔案
+// 位置地圖）。找不到這個檔案時（例如有人把這支腳本單獨抽出來在別的地方跑），反向
+// 掃描直接跳過並印一行提示，不讓整支腳本因為這個新增功能而壞掉——前兩項既有檢查
+// （RISK_TARGETS／DANGER_PATTERNS）完全不依賴這個檔案，理應繼續正常運作。
+const TEST_RULES_PATH = path.join(__dirname, 'rules-tests', 'test-rules.js');
 
 // ── 取得要比對的舊／新內容 ──────────────────────────────────────
 function findGitRoot() {
@@ -304,6 +320,291 @@ function findUnmonitoredMatchBlocks(content) {
     .map(({ path }) => path);
 }
 
+// ── 反向掃描：test-rules.js 測到的月記欄位，跟 rule.txt 實際驗證的月記欄位，
+//    互相比對找落差（2026-07-18 新增）──────────────────────────────────
+//
+// 動機：2026-07-16 那次稽核發現 journalSubmitNotifiedAt 這個欄位，test-rules.js
+// 明明寫了 7 條「應該被 rule.txt 擋下」的測試，但 rule.txt 當時實際上完全沒有
+// 對應的驗證規則——上面兩層機制都抓不到這種「從一開始就沒被寫進規則」的落差：
+//   - RISK_TARGETS：只比對「監控中的區塊，新舊版本內容有沒有變」，一個從未存在過
+//     的欄位不會被算成「變更」。
+//   - DANGER_PATTERNS：只認已知的錯誤寫法（!hasAny() 誤用），規則裡完全沒寫這個
+//     欄位不算「寫錯」，只是「沒寫」。
+// 這裡换個角度：不看 rule.txt「改了什麼」，而是直接問「test-rules.js 覺得應該存在
+// 的驗證，rule.txt 裡到底有沒有」，以及反過來「rule.txt 已經在驗證的欄位，
+// test-rules.js 有沒有真的測到」。
+//
+// 範圍刻意只鎖定 /users/{userId}/journals/{journalId}（巢狀的月記子集合），
+// 不含 fcmTokens／admins／studentBindings，理由：
+//   ①journalSubmitNotifiedAt 那次真實漏洞就發生在這裡，是欄位數量最多（15+）、
+//     分支邏輯最複雜（CREATE + 3 個互斥 UPDATE 分支）、也最容易「改了程式碼、
+//     忘記同步改規則」的地方，投報率最高；
+//   ②fcmTokens/admins/studentBindings 欄位少（2~4 個）、規則簡單，驗證函式本身
+//     （validFcmTokenWrite()／validAdminWrite()）已被 RISK_TARGETS 監控，變更會被
+//     既有機制抓到，人工看 diff 也不容易漏；
+//   ③這些集合的欄位驗證邏輯有些落在 match 區塊之外的獨立頂層函式（例如
+//     validFcmTokenWrite() 定義在檔案最前面，不在 /users/{userId} 區塊內），混進來
+//     需要額外處理「這個欄位的驗證到底該去哪裡找」的歸屬問題，複雜度不成比例，
+//     先只做投報率最高的這一塊。
+//
+// ── 從一段程式碼文字裡，切出「最外層逗號分隔」的片段（尊重引號與括號巢狀）──
+// 不能直接用 split(',')，因為值裡可能有逗號（例如 new Date().toISOString() 沒有，
+// 但字串值理論上可能含逗號），也不能無視引號內容，否則 ISO 時間字串裡的冒號
+// （例如 '2026-07-06T00:00:00+08:00'）會被誤判成物件的 key/value 分界。
+function splitTopLevelSegments(inner) {
+  const segments = [];
+  let depth = 0;
+  let quote = null; // null | "'" | '"' | '`'
+  let cur = '';
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    const prev = inner[i - 1];
+    if (quote) {
+      cur += c;
+      if (c === quote && prev !== '\\') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (c === '{' || c === '(' || c === '[') {
+      depth++;
+      cur += c;
+      continue;
+    }
+    if (c === '}' || c === ')' || c === ']') {
+      depth--;
+      cur += c;
+      continue;
+    }
+    if (c === ',' && depth === 0) {
+      segments.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  if (cur.trim()) segments.push(cur);
+  return segments;
+}
+
+// 從一個物件字面量的內容（大括號中間那段文字）抽出所有 key。用上面的引號/括號感知
+// 分段，而不是天真地對整段文字做 /identifier\s*:/g 正規表達式——那樣會被字串值裡
+// 「看起來像 key:」的內容誤判，例如 ISO 時間字串 '...T00:00:00...' 裡的 'T00' 後面
+// 剛好接著冒號，會被誤認成一個叫 T00 的欄位。
+function extractKeysFromObjectLiteral(inner) {
+  const keys = [];
+  for (const seg of splitTopLevelSegments(inner)) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+    let depth = 0;
+    let quote = null;
+    let colonIdx = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const c = trimmed[i];
+      const prev = trimmed[i - 1];
+      if (quote) {
+        if (c === quote && prev !== '\\') quote = null;
+        continue;
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        quote = c;
+        continue;
+      }
+      if (c === '{' || c === '(' || c === '[') {
+        depth++;
+        continue;
+      }
+      if (c === '}' || c === ')' || c === ']') {
+        depth--;
+        continue;
+      }
+      if (c === ':' && depth === 0) {
+        colonIdx = i;
+        break;
+      }
+    }
+    // colonIdx === -1 代表這段沒有冒號，是 ES6 shorthand 寫法（例如 { email }），
+    // 這種情況下整段文字本身就是 key，不需要另外特判。
+    const keyPart = colonIdx === -1 ? trimmed : trimmed.slice(0, colonIdx);
+    const keyMatch = /^([A-Za-z_$][\w$]*)$/.exec(keyPart.trim());
+    if (keyMatch) keys.push(keyMatch[1]);
+  }
+  return keys;
+}
+
+// 從指定的開括號索引開始，找出對應的結束括號索引（處理巢狀）。跟檔案上方
+// extractBlock() 用的是同一種括號配對邏輯，這裡獨立一份是因為要配對的是
+// 圓括號/方括號，不是 extractBlock() 固定處理的大括號。
+function findMatchingClose(str, openIdx, openChar, closeChar) {
+  let depth = 0;
+  for (let i = openIdx; i < str.length; i++) {
+    if (str[i] === openChar) depth++;
+    else if (str[i] === closeChar) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// test-rules.js 是否為「journals 子集合」的路徑（巢狀在 users/{uid}/ 底下），
+// 不含頂層平面 /journals/{journalId}（那個是 isAdmin() 全權放行、設計上就不做
+// 欄位驗證，混進來只會產生恆定的假警報——已在開發這個功能時實際驗證過這個情境）。
+function isJournalSubcollectionPath(pathStr) {
+  return /^users\/[^/]+\/journals\//.test(pathStr);
+}
+
+// 從 test-rules.js 裡，抽出所有「journalDoc(uid, email, { ...overrides })」呼叫
+// 第三個參數（overrides 物件）用到的欄位名稱。
+function extractFieldsFromJournalDocCalls(testRulesContent) {
+  const keys = new Set();
+  const callRe = /journalDoc\s*\(/g;
+  let m;
+  while ((m = callRe.exec(testRulesContent))) {
+    // 跳過 journalDoc 自己的函式定義那一行（function journalDoc(uid, email, overrides = {}) {），
+    // 那一行的抓法由下面 extractJournalDocBaseFields() 另外處理。
+    const lineStart = testRulesContent.lastIndexOf('\n', m.index) + 1;
+    if (/function\s+$/.test(testRulesContent.slice(lineStart, m.index))) continue;
+
+    const openParen = testRulesContent.indexOf('(', m.index);
+    const closeParen = findMatchingClose(testRulesContent, openParen, '(', ')');
+    if (closeParen === -1) continue;
+    const argsText = testRulesContent.slice(openParen + 1, closeParen);
+    // 第三個參數（overrides）是唯一的物件字面量參數，前兩個（uid, email）是變數，
+    // 用「找第一個 {」的方式抓即可。
+    const braceOpen = argsText.indexOf('{');
+    if (braceOpen === -1) continue; // 沒有第三個參數，例如 journalDoc(STUDENT_UID, STUDENT_EMAIL)
+    const braceClose = findMatchingClose(argsText, braceOpen, '{', '}');
+    if (braceClose === -1) continue;
+    for (const k of extractKeysFromObjectLiteral(argsText.slice(braceOpen + 1, braceClose))) keys.add(k);
+  }
+  return keys;
+}
+
+// journalDoc() 函式定義本身的基底欄位（每次呼叫都會帶到的欄位，即使沒被 override）。
+function extractJournalDocBaseFields(testRulesContent) {
+  const m = /function\s+journalDoc\s*\([^)]*\)\s*\{/.exec(testRulesContent);
+  if (!m) return new Set();
+  const braceOpen = testRulesContent.indexOf('{', m.index + m[0].length - 1);
+  const braceClose = findMatchingClose(testRulesContent, braceOpen, '{', '}');
+  const body = testRulesContent.slice(braceOpen + 1, braceClose);
+  const retM = /return\s*\{/.exec(body);
+  if (!retM) return new Set();
+  const retBraceOpen = body.indexOf('{', retM.index);
+  const retBraceClose = findMatchingClose(body, retBraceOpen, '{', '}');
+  // 過濾掉 'overrides'：函式本體用 `...overrides` 展開最後一個參數，這個 key 本身
+  // 不是真正的欄位名稱，是 JS 語法的一部分，防禦性濾掉以防未來函式改寫法時誤抓。
+  return new Set(extractKeysFromObjectLiteral(body.slice(retBraceOpen + 1, retBraceClose)).filter((k) => k !== 'overrides'));
+}
+
+// 從 test-rules.js 裡，抽出所有「直接對 journals 路徑呼叫 .set({...}) 或 .update({...})」
+// （不是透過 journalDoc() helper）用到的欄位名稱——UPDATE 分支的測試（例如
+// .update({ teacherCommentUnread: false })、回覆分支的 studentReply/studentReplyUnread/
+// studentReplyAt/studentReplyContentAt）大多是這種直接 .update() 寫法，journalDoc() 那組
+// 函式只涵蓋 CREATE 與少數用整份 .set() 模擬的 UPDATE 測試，兩者互補，缺一都會漏掉
+// 大半欄位。
+function extractFieldsFromDirectSetUpdateCalls(testRulesContent) {
+  const keys = new Set();
+  const docCallRe = /\.doc\(\s*[`'"]([^`'"]*)[`'"]\s*\)/g;
+  let m;
+  while ((m = docCallRe.exec(testRulesContent))) {
+    const pathStr = m[1];
+    if (!isJournalSubcollectionPath(pathStr)) continue;
+    const afterDoc = testRulesContent.slice(m.index + m[0].length);
+    const nextCallM = /^\s*\.(set|update)\(/.exec(afterDoc);
+    if (!nextCallM) continue; // 後面接的不是 set/update（例如 .get()/.delete()），略過
+    const openParenIdx = testRulesContent.indexOf('(', m.index + m[0].length + nextCallM.index);
+    const closeParenIdx = findMatchingClose(testRulesContent, openParenIdx, '(', ')');
+    if (closeParenIdx === -1) continue;
+    const argsText = testRulesContent.slice(openParenIdx + 1, closeParenIdx);
+    // .set() 的參數若是 journalDoc(...) 呼叫，已經被 extractFieldsFromJournalDocCalls()
+    // 處理過，這裡只抓「第一個參數本身就是物件字面量」的情況，避免重複計算（雖然
+    // 重複計算對 Set 沒有影響，這裡跳過純粹是避免不必要的重複運算）。
+    if (/^journalDoc\s*\(/.test(argsText.trimStart())) continue;
+    const braceOpen = argsText.indexOf('{');
+    if (braceOpen === -1) continue;
+    const braceClose = findMatchingClose(argsText, braceOpen, '{', '}');
+    if (braceClose === -1) continue;
+    for (const k of extractKeysFromObjectLiteral(argsText.slice(braceOpen + 1, braceClose))) keys.add(k);
+  }
+  return keys;
+}
+
+// 從 rule.txt 的 /users/{userId} 區塊裡，抽出所有「結構上看得出來正在驗證」的欄位
+// 名稱——只認幾種固定語法：.get('field', default)、xxx.data.field ==／!=、
+// xxx.data.field is string/bool/number/list/map、xxx.data.field.size()。故意不做
+// 全文字串搜尋，只認這幾種「真的在檢查這個欄位」的結構化寫法，避免像 semester 這種
+// 詞恰好出現在完全無關的註解裡（/students/{docId} 講 docId 命名格式的註解就提過
+// 「{semester}_{seatNo}」，跟月記文件的 semester 欄位是否被驗證完全無關）却被誤判
+// 成「已經提過」。
+function extractRegulatedJournalFields(usersBlockText) {
+  const fields = new Set();
+  if (!usersBlockText) return fields;
+  const getRe = /\.get\(\s*['"]([a-zA-Z_][\w]*)['"]/g;
+  let m;
+  while ((m = getRe.exec(usersBlockText))) fields.add(m[1]);
+  const dotCompareRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:==|!=)/g;
+  while ((m = dotCompareRe.exec(usersBlockText))) fields.add(m[1]);
+  const dotTypeCheckRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:is\s+(?:string|bool|number|list|map)|\.size\(\))/g;
+  while ((m = dotTypeCheckRe.exec(usersBlockText))) fields.add(m[1]);
+  return fields;
+}
+
+// 少數已知、刻意排除的欄位——不是遺漏，是這個機制天生的假警報來源，逐一記錄理由：
+//   - content：月記的自由文字內容欄位。AI_CONTEXT.md 的 Excel 公式注入稽核已多次
+//     確認並記錄：rule.txt 對月記多數頂層欄位（date/month/semester/studentName/
+//     company/submittedAt/updatedAt 等）刻意不做規則層驗證，改在 Excel 匯出層防護
+//     （Firestore Rules 無法對這類內容欄位做有意義的格式限制），content 屬於這一類
+//     已評估、判定維持現狀的欄位，不是新發現。
+//   - month／semester：同上，屬於同一組已評估、判定不在規則層驗證的欄位。
+//   - extra：test-rules.js 裡刻意用來測試 hasOnly() 會拒絕「未列在允許清單裡的
+//     額外欄位」的假欄位名稱（例如 fcmTokens 的「夾帶未允許的額外欄位 → 應被拒」
+//     測試），這個欄位「不該」出現在 rule.txt 裡才是正確狀態，不是漏洞。
+// 未來若新增其他「刻意不在規則層驗證」的欄位，比照這裡的格式補上並註明理由，
+// 不要因為想讓警報清單變乾淨就默默加東西進來卻不寫理由。
+const KNOWN_UNVALIDATED_OR_TEST_ONLY_FIELDS = new Set(['content', 'month', 'semester', 'extra']);
+
+function runReverseFieldScan(newRuleContent) {
+  const result = { skipped: false, directionA: [], directionB: [] };
+
+  let testRulesContent;
+  try {
+    testRulesContent = fs.readFileSync(TEST_RULES_PATH, 'utf8');
+  } catch (e) {
+    result.skipped = true;
+    return result;
+  }
+
+  const testedFields = new Set([
+    ...extractJournalDocBaseFields(testRulesContent),
+    ...extractFieldsFromJournalDocCalls(testRulesContent),
+    ...extractFieldsFromDirectSetUpdateCalls(testRulesContent),
+  ]);
+
+  const usersBlock = extractBlock(newRuleContent, /match\s+\/users\/\{userId\}/);
+  const regulatedFields = extractRegulatedJournalFields(usersBlock);
+
+  // Direction A：test-rules.js 測到了，但 rule.txt 完全沒管——這正是
+  // journalSubmitNotifiedAt 那次真實漏洞的樣態。
+  for (const f of testedFields) {
+    if (KNOWN_UNVALIDATED_OR_TEST_ONLY_FIELDS.has(f)) continue;
+    if (!regulatedFields.has(f)) result.directionA.push(f);
+  }
+  result.directionA.sort();
+
+  // Direction B：rule.txt 有管，但 test-rules.js 完全沒測到——方向相反，抓的是
+  // 「規則寫了、但沒有回歸測試守著」的缺口（意外發現的真實案例：teacherCommentUpdated）。
+  for (const f of regulatedFields) {
+    if (!testedFields.has(f)) result.directionB.push(f);
+  }
+  result.directionB.sort();
+
+  return result;
+}
+
 // ── 主程式 ──────────────────────────────────────────────────────
 function main() {
   const { oldContent, newContent, oldLabel, newLabel } = getOldAndNewContent();
@@ -389,6 +690,43 @@ function main() {
     }
     console.log('  或逐一評估後，確認某些區塊風險極低、暫不需要監控，加 --confirm 略過。');
     console.log('');
+  }
+
+  const reverseScan = runReverseFieldScan(newContent);
+  if (reverseScan.skipped) {
+    console.log(`ℹ️  找不到 ${TEST_RULES_PATH}，略過反向掃描（不影響上面幾項既有檢查）。\n`);
+  } else {
+    if (reverseScan.directionA.length > 0) {
+      hasRiskChange = true;
+      console.log('🔍 反向掃描 A：rules-tests/test-rules.js 測試過這些月記欄位，但 rule.txt 目前完全沒有對應的驗證：\n');
+      for (const f of reverseScan.directionA) {
+        console.log(`  - ${f}`);
+      }
+      console.log('');
+      console.log('  這正是 2026-07-16 journalSubmitNotifiedAt 那次真實漏洞的樣態——test-rules.js');
+      console.log('  寫了「應該被 rule.txt 擋下」的測試，但規則本身從未真的補上，前面幾項檢查');
+      console.log('  （RISK_TARGETS／DANGER_PATTERNS）都抓不到這種「從一開始就沒寫」的落差。');
+      console.log('  請確認：①這個欄位是否真的需要規則層驗證，是的話在 rule.txt 補上對應的');
+      console.log('  .get(field, default) 檢查；②如果是刻意不驗證的欄位（例如自由文字內容），');
+      console.log('  在這支腳本的 KNOWN_UNVALIDATED_OR_TEST_ONLY_FIELDS 補上並註明理由後再加');
+      console.log('  --confirm 略過。');
+      console.log('');
+    }
+    if (reverseScan.directionB.length > 0) {
+      hasRiskChange = true;
+      console.log('🔍 反向掃描 B：rule.txt 有驗證這些月記欄位，但 rules-tests/test-rules.js 完全沒有測試涵蓋：\n');
+      for (const f of reverseScan.directionB) {
+        console.log(`  - ${f}`);
+      }
+      console.log('');
+      console.log('  方向相反：規則寫了，但沒有回歸測試守著，未來這條規則被改壞也不會被 Layer 1');
+      console.log('  的 Rules 單元測試抓到。建議在 test-rules.js 補上對應的「偽造這個欄位的值 →');
+      console.log('  應被拒」測試，或評估後確認風險低、暫不需要補測試，加 --confirm 略過。');
+      console.log('');
+    }
+    if (reverseScan.directionA.length === 0 && reverseScan.directionB.length === 0) {
+      console.log('✅ 反向掃描：月記欄位在 test-rules.js 與 rule.txt 之間沒有發現落差。\n');
+    }
   }
 
   console.log('══════════════════════════════════════');
