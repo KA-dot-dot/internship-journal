@@ -122,11 +122,13 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .badge-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
 /* 2026-07-18 新增：「已交X篇，尚差Y篇」附註共用排版元件——本月未完成徽章（.badge-incomplete）
    與已逾期清單（.stat-detail-row-progress）共用同一組 .entries-progress-main／
-   .entries-progress-detail 子元素命名，確保兩處排版邏輯一致。桌面版維持原本緊接在主文字
-   後方同一行顯示（不需額外樣式，flex 預設 gap 為 0）；.stat-detail-row 本身另有
-   gap:8px，這裡歸零避免兩個 span 之間出現不該有的間距。手機版換行寫法見下方
-   @media (max-width:768px) 區塊。 */
-.stat-detail-row.stat-detail-row-progress { gap: 0; }
+   .entries-progress-detail 子元素命名，確保兩處排版邏輯一致。用 flex-wrap:wrap 而非強制
+   flex-direction:column：寬度夠時（桌面版、或手機版已獨占一整行寬度時）維持原本緊接同一行
+   顯示，只有真的放不下才自然換行成兩行，不會不必要地把明明放得下的內容也拆成兩行。
+   .stat-detail-row 本身另有 gap:8px，這裡歸零＋改用 row-gap 控制換行後兩行的垂直間距，
+   避免兩個 span 之間出現不該有的水平間距。 */
+.badge-incomplete { flex-wrap: wrap; row-gap: 2px; }
+.stat-detail-row.stat-detail-row-progress { column-gap: 0; row-gap: 2px; flex-wrap: wrap; }
 
 #toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg3); border: 1px solid var(--border); padding: 14px 20px; border-radius: var(--radius-sm); font-size: 14px; z-index: 9999; transform: translateY(80px); opacity: 0; transition: all 0.3s; max-width: 320px; box-shadow: var(--shadow); }
 #toast.show { transform: translateY(0); opacity: 1; }
@@ -245,19 +247,19 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .stat-card { height: auto !important; min-height: 0; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 10px; row-gap: 4px; padding: 12px 14px; }
   .stat-card .stat-label { font-size: 12.5px; line-height: 1.3; margin-bottom: 0; }
   .stat-value { font-size: 20px; }
-  #s-this-month-status { margin-top: 0; }
+  /* 2026-07-18（第二輪）：#s-this-month-status（本月未完成徽章的容器）改用 flex-basis:100%，
+     跟 .stat-card-detail 同一招，固定佔滿卡片自己的新一行，不再跟「本月繳交狀態」標籤擠在
+     同一行——原本共用一行時，徽章可用寬度被標籤吃掉一部分，篇數不足時常常還是得靠
+     .badge-incomplete 的 flex-wrap 換成兩行；獨占一整行後寬度足夠，「🟣 本月未完成
+     （已交1篇，尚差1篇）」通常就能直接一行呈現，只有極窄螢幕才會觸發下方 .badge-incomplete
+     的 flex-wrap 安全網換行。margin-top 沿用桌面版同一條規則（見上方非 media 區塊），
+     不需要在這裡另外覆蓋成 0。 */
+  #s-this-month-status { flex-basis: 100%; }
   .stat-card-detail { flex-basis: 100%; }
   .stat-card-detail .stat-detail-row .journal-unread-badge,
   .stat-card-detail .stat-detail-row .journal-reviewed-badge,
   .stat-card-detail .stat-detail-row .journal-updated-badge,
   .stat-card-detail .stat-detail-row .journal-updated-read-badge { min-width: auto; margin-right: 4px !important; }
-  /* 2026-07-18 新增：手機版「已交X篇，尚差Y篇」附註強制換行——用 flex-direction:column
-     讓主文字（entries-progress-main）與附註（entries-progress-detail）各自獨立成一行，
-     不依賴 flex-basis:100% 這種需要容器有明確寬度才可靠的寫法，兩處（本月未完成徽章／
-     已逾期清單）共用同一套子元素命名，排版邏輯一致。桌面版不受影響（不在此 media 區塊內）。 */
-  .badge-incomplete { flex-direction: column; align-items: flex-start; row-gap: 2px; }
-  .stat-card-detail .stat-detail-row.stat-detail-row-progress { flex-direction: column; align-items: flex-start; row-gap: 2px; }
-  .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   .entry-item { padding: 10px; }
   .photo-thumb { width: 70px; height: 56px; }
@@ -1635,8 +1637,10 @@ async function loadStudentDashboard() {
     const currentEntriesCount = currentJournal ? (currentJournal.entries || []).length : 0;
     // 2026-07-18 起：badge-incomplete 內文拆成 entries-progress-main／entries-progress-detail
     // 兩個 span，桌面版 flex 預設 gap:0，視覺上仍是原本緊接同一行的「🟣 本月未完成（已交X篇，
-    // 尚差Y篇）」；手機版由 @media (max-width:768px) 的 .badge-incomplete{flex-direction:column}
-    // 讓兩者各自換行，避免窄螢幕擠壓成「本月未完成（已交\n1篇，尚差1篇）」這種不自然的斷字。
+    // 尚差Y篇）」。2026-07-18（第二輪）：手機版改為 #s-this-month-status{flex-basis:100%}
+    // 讓徽章獨占卡片自己的一整行（不再跟「本月繳交狀態」標籤擠同一行），寬度通常已足夠讓這
+    // 兩個 span 直接顯示在同一行；.badge-incomplete 的 flex-wrap:wrap 只在極窄螢幕真的放不下
+    // 時才當安全網换成兩行，不是強制 flex-direction:column 兩行顯示。
     document.getElementById('s-this-month-status').innerHTML = currentEntriesCount >= requiredThisMonth
       ? '<span class="badge badge-green">✅ 本月已繳</span>'
       : currentJournal
