@@ -16,9 +16,25 @@
 // 是更大的基礎建設工程；這裡優先覆蓋 parseAsInstant/alreadyNotified 這兩個函式，因為
 // 過去兩次真實 bug（2026-07-07 缺 ContentAt 導致無限重推、2026-07-08 稽核發現的
 // ContentAt DoS 疑慮）都是這兩個函式的時間比較邏輯，投資報酬率最高。
+//
+// 新增（逾期未繳月記通知）：getCurrentSemesterInfo()／getSemesterMonths()／
+// resolveMinEntries()／computeOverdueMonths()／isStudentOverdueForMonth() 這五個函式是
+// checkOverdue() 的核心決策邏輯（見 overdue-logic.js），同樣不碰 Firestore/網路，這裡是
+// Layer 1（純邏輯）。真正的查詢/寫入邏輯（checkOverdueCore() 本身，含撈名冊、撈月記、
+// 逐位學生逐月判斷、寫回 overdueNotifiedMonths 旗標）需要 Layer 2（Firebase Emulator +
+// 合成假資料 + 假 sendToTokenDocs）才能測到，這支測試檔不涵蓋。
 
 const assert = require('assert');
-const { parseAsInstant, alreadyNotified, emailToDocId } = require('./notify-logic');
+const {
+  parseAsInstant,
+  alreadyNotified,
+  emailToDocId,
+  getCurrentSemesterInfo,
+  getSemesterMonths,
+  resolveMinEntries,
+  computeOverdueMonths,
+  isStudentOverdueForMonth,
+} = require('./notify-logic');
 
 let pass = 0;
 let fail = 0;
@@ -159,6 +175,163 @@ async function main() {
     assert.strictEqual(emailToDocId(null), '');
     assert.strictEqual(emailToDocId(undefined), '');
     assert.strictEqual(emailToDocId(''), '');
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // getCurrentSemesterInfo()（逾期未繳月記通知新增）
+  // ════════════════════════════════════════════════════════════
+
+  await test('getCurrentSemesterInfo()：7月（第1學期起點）→ semesterNum=1，twYear不變', () => {
+    // 2026-07-15 台灣時間中午 = 2026-07-15T04:00:00Z
+    const r = getCurrentSemesterInfo(new Date('2026-07-15T04:00:00Z'));
+    assert.strictEqual(r.semester, '115-1');
+    assert.strictEqual(r.semesterNum, 1);
+  });
+
+  await test('getCurrentSemesterInfo()：1月（第1學期尾端，跨西元年）→ ROC年減1，semesterNum=1', () => {
+    // 2026-01-15 台灣時間中午 = 2026-01-15T04:00:00Z
+    const r = getCurrentSemesterInfo(new Date('2026-01-15T04:00:00Z'));
+    assert.strictEqual(r.semester, '114-1');
+    assert.strictEqual(r.semesterNum, 1);
+  });
+
+  await test('getCurrentSemesterInfo()：2月（第2學期起點）→ semesterNum=2', () => {
+    const r = getCurrentSemesterInfo(new Date('2026-02-15T04:00:00Z'));
+    assert.strictEqual(r.semester, '114-2');
+    assert.strictEqual(r.semesterNum, 2);
+  });
+
+  await test('getCurrentSemesterInfo()：6月（第2學期尾端）→ semesterNum=2', () => {
+    const r = getCurrentSemesterInfo(new Date('2026-06-15T04:00:00Z'));
+    assert.strictEqual(r.semester, '114-2');
+    assert.strictEqual(r.semesterNum, 2);
+  });
+
+  await test('getCurrentSemesterInfo()：UTC 傍晚跨進台灣隔天（迴歸：日期邊界時區換算）→ 用台灣當地日期判斷，不是 UTC 日期', () => {
+    // UTC 2026-06-30T16:30:00Z = 台灣時間 2026-07-01T00:30:00+08:00——如果誤用
+    // refDate.getUTCMonth() 不加時區偏移，會誤判成還在6月（114-2），但台灣當地已經是
+    // 7月1日，應該算115-1。這條測試直接鎖死換算方向正確，避免退化成只看 UTC 日期。
+    const r = getCurrentSemesterInfo(new Date('2026-06-30T16:30:00Z'));
+    assert.strictEqual(r.semester, '115-1');
+    assert.strictEqual(r.semesterNum, 1);
+  });
+
+  await test('getCurrentSemesterInfo()：未傳入參數或傳入非 Date → fallback 為目前時間，不拋例外', () => {
+    assert.doesNotThrow(() => getCurrentSemesterInfo());
+    assert.doesNotThrow(() => getCurrentSemesterInfo('not a date'));
+    assert.doesNotThrow(() => getCurrentSemesterInfo(new Date('invalid')));
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // getSemesterMonths()
+  // ════════════════════════════════════════════════════════════
+
+  await test('getSemesterMonths(1)：第1學期為 7~12月＋隔年1月，共7個月，順序不變', () => {
+    assert.deepStrictEqual(getSemesterMonths(1), [7, 8, 9, 10, 11, 12, 1]);
+  });
+
+  await test('getSemesterMonths(2)：第2學期為 2~6月，共5個月', () => {
+    assert.deepStrictEqual(getSemesterMonths(2), [2, 3, 4, 5, 6]);
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // resolveMinEntries()（與 teacher.html 同名函式行為一致）
+  // ════════════════════════════════════════════════════════════
+
+  await test('resolveMinEntries()：deadlineDoc 為 undefined（該月從未設定期限）→ fallback 1', () => {
+    assert.strictEqual(resolveMinEntries(undefined), 1);
+  });
+
+  await test('resolveMinEntries()：minEntries 欄位不存在 → fallback 1', () => {
+    assert.strictEqual(resolveMinEntries({ closeDate: '2026-07-31' }), 1);
+  });
+
+  await test('resolveMinEntries()：minEntries 為合法 >=1 整數 → 直接採用', () => {
+    assert.strictEqual(resolveMinEntries({ minEntries: 3 }), 3);
+  });
+
+  await test('resolveMinEntries()：minEntries 為 0 或負數（不合法）→ fallback 1', () => {
+    assert.strictEqual(resolveMinEntries({ minEntries: 0 }), 1);
+    assert.strictEqual(resolveMinEntries({ minEntries: -2 }), 1);
+  });
+
+  await test('resolveMinEntries()：minEntries 為非整數（含字串型數字）→ fallback 1', () => {
+    assert.strictEqual(resolveMinEntries({ minEntries: 2.5 }), 1);
+    assert.strictEqual(resolveMinEntries({ minEntries: '3' }), 1);
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // computeOverdueMonths()
+  // ════════════════════════════════════════════════════════════
+
+  await test('computeOverdueMonths()：該月沒有 deadlines 文件 → 不列入逾期範圍（不是「不逾期」，是「沒有答案」）', () => {
+    const result = computeOverdueMonths([9], {}, new Date('2026-09-15T04:00:00Z'));
+    assert.deepStrictEqual(result, []);
+  });
+
+  await test('computeOverdueMonths()：deadlines 文件存在但截止日尚未到 → 不列入', () => {
+    const dd = { 9: { closeDate: '2026-09-30' } };
+    const result = computeOverdueMonths([9], dd, new Date('2026-09-15T04:00:00Z'));
+    assert.deepStrictEqual(result, []);
+  });
+
+  await test('computeOverdueMonths()：截止日已過 → 列入，且帶上 resolveMinEntries() 算好的 minEntries', () => {
+    const dd = { 7: { closeDate: '2026-07-31', minEntries: 2 }, 8: { closeDate: '2026-08-31' } };
+    const result = computeOverdueMonths([7, 8], dd, new Date('2026-09-15T04:00:00Z'));
+    assert.deepStrictEqual(result, [
+      { month: 7, minEntries: 2 },
+      { month: 8, minEntries: 1 },
+    ]);
+  });
+
+  await test('computeOverdueMonths()：邊界值——現在剛好是截止日 23:59:59 台灣時間 → 尚未逾期（跟 isOverdueIncomplete 的 <= 語意一致，不提早算逾期）', () => {
+    const dd = { 7: { closeDate: '2026-07-31' } };
+    const result = computeOverdueMonths([7], dd, new Date('2026-07-31T15:59:59Z')); // = 台灣 23:59:59
+    assert.deepStrictEqual(result, []);
+  });
+
+  await test('computeOverdueMonths()：邊界值——截止日過後 1 秒 → 判定逾期', () => {
+    const dd = { 7: { closeDate: '2026-07-31' } };
+    const result = computeOverdueMonths([7], dd, new Date('2026-07-31T16:00:00Z')); // = 台灣 8/1 00:00:00
+    assert.deepStrictEqual(result, [{ month: 7, minEntries: 1 }]);
+  });
+
+  await test('computeOverdueMonths()：closeDate 格式不合法的垃圾字串 → 保守跳過，不拋例外、不誤判為逾期', () => {
+    const dd = { 7: { closeDate: '不是日期字串' } };
+    assert.doesNotThrow(() => {
+      const result = computeOverdueMonths([7], dd, new Date('2026-09-15T04:00:00Z'));
+      assert.deepStrictEqual(result, []);
+    });
+  });
+
+  await test('computeOverdueMonths()：months 為空陣列或 undefined → 回傳空陣列，不拋例外', () => {
+    assert.deepStrictEqual(computeOverdueMonths([], {}, new Date()), []);
+    assert.deepStrictEqual(computeOverdueMonths(undefined, {}, new Date()), []);
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // isStudentOverdueForMonth()
+  // ════════════════════════════════════════════════════════════
+
+  await test('isStudentOverdueForMonth()：篇數少於門檻 → true（需要提醒）', () => {
+    assert.strictEqual(isStudentOverdueForMonth(1, 2), true);
+    assert.strictEqual(isStudentOverdueForMonth(0, 1), true);
+  });
+
+  await test('isStudentOverdueForMonth()：篇數達到或超過門檻 → false（不論是否曾經遲交，都不需要提醒）', () => {
+    assert.strictEqual(isStudentOverdueForMonth(2, 2), false);
+    assert.strictEqual(isStudentOverdueForMonth(5, 2), false);
+  });
+
+  await test('isStudentOverdueForMonth()：entriesCount 為 0／null／undefined 皆視為 0 篇，不拋例外', () => {
+    assert.strictEqual(isStudentOverdueForMonth(0, 1), true);
+    assert.strictEqual(isStudentOverdueForMonth(null, 1), true);
+    assert.strictEqual(isStudentOverdueForMonth(undefined, 1), true);
+  });
+
+  await test('isStudentOverdueForMonth()：minEntries 不合法（0／負數／非整數）→ fallback 為 1 再比較', () => {
+    assert.strictEqual(isStudentOverdueForMonth(1, 0), false); // fallback=1，1篇已達標
+    assert.strictEqual(isStudentOverdueForMonth(0, 0), true); // fallback=1，0篇未達標
   });
 
   // ════════════════════════════════════════════════════════════

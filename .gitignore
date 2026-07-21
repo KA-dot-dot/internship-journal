@@ -13,3 +13,7 @@ test-suite/rules-tests/firestore.rules
 test-suite/rules-tests/firestore-debug.log
 test-suite/test-report.txt
 test-suite/screenshots/
+test-suite/session-teacher.json
+notify-service/firebase-debug.log
+notify-service/firestore-debug.log
+notify-service/node_modules/

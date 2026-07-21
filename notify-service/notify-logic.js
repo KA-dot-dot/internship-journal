@@ -53,4 +53,112 @@ function emailToDocId(email) {
   return (email || '').trim().toLowerCase().replace(/[@.]/g, '_');
 }
 
-module.exports = { parseAsInstant, alreadyNotified, emailToDocId };
+// ---------------------------------------------------------------------------
+// 逾期未繳月記 → 通知學生本人（新增）
+// ---------------------------------------------------------------------------
+// 以下五個函式是 checkOverdue()／overdue-logic.js 的核心決策邏輯，逐一複刻
+// teacher.html 對應函式的行為（而非重新發明一套判斷標準），理由：老師主頁「本月未繳」
+// 統計卡跟這裡的推播判斷必須是同一套標準，否則會出現「老師主頁顯示已繳，學生卻收到
+// 逾期推播」這種自相矛盾的使用者體驗。這些函式全部不碰 Firestore/網路，純粹是日期與
+// 數字計算，可以被 test-notify-logic.js 直接測試邊界情況。
+
+/**
+ * 複刻 teacher.html 的 getCurrentSemester()/getCurrentSemMonth()（~1626 行），但這支腳本
+ * 跑在 GitHub Actions runner 上（預設 UTC 時區，不是台灣時間），不能直接用
+ * refDate.getFullYear()/getMonth() 讀值——那會拿到 UTC 的年月，跟前端「使用者裝置本地
+ * 時間＝台灣時間」的假設不一致，尤其在台灣午夜前後 8 小時的窗口內，UTC 日期會跟台灣
+ * 日期相差一天，讓學期/月份算錯（這正是 alreadyNotified() 那組時區教訓的同一類問題，
+ * 這裡從一開始就用同樣的「先加 8 小時再用 getUTC*() 讀值」手法避開，不使用
+ * refDate.getMonth() 這種依賴執行環境時區設定的寫法）。
+ *
+ * 回傳的 semesterNum（1 或 2）是「半」，供 getSemesterMonths() 直接使用，不需要呼叫端
+ * 再次切割 semester 字串（teacher.html getSemesterMonths(semKey) 是切割完整字串，這裡
+ * 刻意拆成兩步，讓 getCurrentSemesterInfo() 一次算好、getSemesterMonths() 保持單純）。
+ */
+function getCurrentSemesterInfo(refDate) {
+  const base = refDate instanceof Date && !Number.isNaN(refDate.getTime()) ? refDate : new Date();
+  const taipei = new Date(base.getTime() + 8 * 60 * 60 * 1000);
+  const y = taipei.getUTCFullYear();
+  const month = taipei.getUTCMonth() + 1;
+  const twYear = y - 1911;
+  let semester;
+  let semesterNum;
+  if (month >= 7) {
+    semester = `${twYear}-1`;
+    semesterNum = 1;
+  } else if (month === 1) {
+    semester = `${twYear - 1}-1`;
+    semesterNum = 1;
+  } else {
+    semester = `${twYear - 1}-2`;
+    semesterNum = 2;
+  }
+  return { semester, semesterNum };
+}
+
+/**
+ * 跟 teacher.html 的 getDeadlineSemMonths(half)（~3561 行）完全一致——第1學期
+ * 7~12月＋隔年1月，第2學期2~6月。teacher.html 另有一個簽名不同的 getSemesterMonths(semKey)
+ * （接完整 "115-1" 字串），這裡刻意採用 getDeadlineSemMonths() 的簽名（接 1/2 的半），
+ * 因為呼叫端（getCurrentSemesterInfo()）已經算好 semesterNum，不需要重新切割字串。
+ */
+function getSemesterMonths(half) {
+  return half === 1 ? [7, 8, 9, 10, 11, 12, 1] : [2, 3, 4, 5, 6];
+}
+
+/**
+ * 跟 teacher.html 的 resolveMinEntries()（~2630 行）完全一致：deadlineDoc 可能是
+ * undefined（該月從未設定過期限），或 minEntries 欄位不存在/不是 >=1 整數（舊資料、
+ * 或老師沒特別調整過），一律 fallback 為 1。
+ */
+function resolveMinEntries(deadlineDoc) {
+  const v = deadlineDoc && deadlineDoc.minEntries;
+  return Number.isInteger(v) && v >= 1 ? v : 1;
+}
+
+/**
+ * 從「目前學期全部月份」篩出「已經逾期」的月份清單（deadlines 文件存在、closeDate 是合法
+ * 日期字串、且已早於 refNow）。deadlineDataByMonth 是 { 月份數字: deadlines文件資料 } 的
+ * map，由呼叫端（overdue-logic.js）平行查詢目前學期全部月份的 /deadlines/{semester}-{m}
+ * 文件後組出。截止日比較沿用 checkMonthDeadline() 等既有函式的寫法：
+ * new Date(closeDate + 'T23:59:59+08:00')，明確帶台灣時區，不依賴執行環境的預設時區。
+ *
+ * 回傳陣列裡每個元素帶上該月的 minEntries（已呼叫 resolveMinEntries() 算好 fallback），
+ * 呼叫端不需要再重新查一次 deadlineDataByMonth。
+ */
+function computeOverdueMonths(months, deadlineDataByMonth, refNow) {
+  const base = refNow instanceof Date && !Number.isNaN(refNow.getTime()) ? refNow : new Date();
+  const nowMs = base.getTime();
+  const result = [];
+  for (const m of months || []) {
+    const dd = deadlineDataByMonth && deadlineDataByMonth[m];
+    if (!dd || typeof dd.closeDate !== 'string' || !dd.closeDate) continue; // 該月從未設定截止日，不列入逾期範圍判斷
+    const deadlineMs = new Date(`${dd.closeDate}T23:59:59+08:00`).getTime();
+    if (Number.isNaN(deadlineMs)) continue; // closeDate 格式不合法，保守跳過而非誤判
+    if (nowMs <= deadlineMs) continue; // 還沒過期
+    result.push({ month: m, minEntries: resolveMinEntries(dd) });
+  }
+  return result;
+}
+
+/**
+ * 「這位學生、這個月」是否篇數不足需要提醒——跟 teacher.html 的 isJournalComplete()／
+ * statusSymbolForJournal()（~3969 行）判斷「✗ 未繳」與「△ 篇數不足」這兩種狀態的標準
+ * 完全一致（entriesCount < minEntries）。刻意不理會「▲ 遲繳」與「✓ 已達標」——這兩種
+ * 狀態代表學生已經交齊篇數，不論是否遲交，都不需要自動推播提醒。
+ */
+function isStudentOverdueForMonth(entriesCount, minEntries) {
+  const required = Number.isInteger(minEntries) && minEntries >= 1 ? minEntries : 1;
+  return (entriesCount || 0) < required;
+}
+
+module.exports = {
+  parseAsInstant,
+  alreadyNotified,
+  emailToDocId,
+  getCurrentSemesterInfo,
+  getSemesterMonths,
+  resolveMinEntries,
+  computeOverdueMonths,
+  isStudentOverdueForMonth,
+};

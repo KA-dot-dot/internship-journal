@@ -22,6 +22,21 @@
 //      會在同一次的 log 裡就看到三條建立索引的連結，不需要為了看到後面的連結而特地再跑
 //      第二、三次。點過三個連結各自建好索引（通常一兩分鐘生效）後，之後每次排程執行都
 //      不會再遇到這個錯誤。
+//   3) checkOverdue()（逾期未繳月記通知，新增）**不需要**額外建立任何索引——它完全不對
+//      collectionGroup 做複合條件查詢，只有兩種查詢形狀：①對一般集合 `students` 做單一
+//      欄位等號查詢（`where('semester','==',...)`，Firestore 對一般集合的單欄位查詢預設
+//      就自動建有索引，不需要手動步驟）；②用月記文件固定可推算出的 ID
+//      （`{seatNo}-{semester}-{month}`）直接 `.doc(id).get()`，doc 直接讀取從來不需要索引。
+//      這點跟另外三個檢查不同，故意記在這裡避免以後誤以為它也會跳出建索引的錯誤連結。
+//
+// 逾期未繳月記通知專用環境變數（可選）：
+//   OVERDUE_TEST_SEAT_WHITELIST — 逗號分隔的座號字串（例如 "00,50,98,99"）。開發/測試期間
+//     設定此變數時，checkOverdue() 只會處理名單內的座號，其餘座號一律跳過、不查、不推、
+//     不寫任何旗標，即使他們真的逾期，這一輪也完全不會被算進去。**這是這個子系統第一個
+//     「一次觸發會影響一整班」的檢查**（跟前三種「只影響觸發那一筆」的性質不同），手動
+//     workflow_dispatch 一次就可能對全班真人推播「你逾期未繳」；開發階段務必先設定這個
+//     環境變數限定測試座號範圍，確認邏輯正確無誤後，再從 GitHub Actions Secrets/Variables
+//     移除這個變數（留空或不設定＝正式模式，處理全部在籍學生）。
 
 const admin = require('firebase-admin');
 // 2026-07（稽核修正）：parseAsInstant()／alreadyNotified()／emailToDocId() 抽到
@@ -30,6 +45,15 @@ const admin = require('firebase-admin');
 // 下面的 admin.initializeApp()，沒辦法安全地被測試檔直接引用）。三個函式的行為與
 // 原本完全相同，只是搬了位置，詳見 notify-logic.js 內的完整註解。
 const { parseAsInstant, alreadyNotified, emailToDocId } = require('./notify-logic');
+// checkOverdueCore() 是逾期未繳月記通知（新增）的核心邏輯，抽到 overdue-logic.js 並採用
+// 依賴注入設計（db／sendToTokenDocs／now 皆由呼叫端傳入），理由跟 notify-logic.js 完全
+// 一樣——這支檔案本體被 require() 就會立刻建立 Admin SDK 連線，沒辦法安全地被測試檔引用；
+// 但 checkOverdueCore() 本身的查詢/寫入邏輯比另外三個檢查複雜得多（多一層「先篩出哪些
+// 月份逾期、再逐位學生逐月判斷」的邏輯），只做純函式層級（parseAsInstant 那種）的測試
+// 覆蓋不夠，依賴注入讓它可以額外被 Layer 2（Firebase Emulator + 合成假資料 + 一個只負責
+// 記錄呼叫內容、不會真的打 FCM 的假 sendToTokenDocs）完整測試查詢/寫入邏輯本身，細節見
+// overdue-logic.js 開頭註解。
+const { checkOverdueCore } = require('./overdue-logic');
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
@@ -425,7 +449,46 @@ async function checkNewJournals() {
 }
 
 // ---------------------------------------------------------------------------
-// 主流程：三項檢查各自獨立 try/catch，其中一個因缺索引等原因失敗時，
+// 逾期未繳月記 → 通知學生本人（新增）
+// ---------------------------------------------------------------------------
+// 跟前三種通知本質不同：那三種都是「有人做了某個動作」才觸發，天生侷限在那一筆文件；
+// 「逾期」是對全班掃一次差集算出來的，沒有單一觸發來源，一次執行可能同時通知到很多位
+// 學生（見上方檔案開頭 OVERDUE_TEST_SEAT_WHITELIST 的說明）。核心邏輯（撈目前學期全部
+// 月份的 deadlines、篩出已逾期的月份、逐位在籍學生逐月比對月記篇數、通知、寫回
+// overdueNotifiedMonths 旗標）都在 checkOverdueCore()（overdue-logic.js）裡，這裡只是
+// 把真正的 db／sendToTokenDocs／目前時間／開發期座號白名單／SITE_BASE_URL 這些「正式
+// 執行環境才有的東西」組成參數傳進去，本身不含任何判斷邏輯。
+//
+// 「已通知過」旗標掛在 /students/{semester}_{seatNo} 這份名冊文件上（例如
+// overdueNotifiedMonths['115-1-9']: true），跟 journalSubmitNotifiedAt（掛在月記文件上）
+// 是同一套「用一個欄位當開關」的哨兵值設計精神，只是掛的文件不同——這份名冊文件只要
+// 學生還在籍就一定存在，不像月記文件要學生自己交過東西才會出現，解決了「完全沒交的人
+// 沒地方掛旗標」的問題。
+async function checkOverdue() {
+  const whitelistRaw = process.env.OVERDUE_TEST_SEAT_WHITELIST || '';
+  const seatWhitelist = whitelistRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (seatWhitelist.length) {
+    console.log(`checkOverdue: ⚠️ 目前限定測試座號 [${seatWhitelist.join(',')}]，其餘座號本輪一律跳過（正式上線前記得移除 OVERDUE_TEST_SEAT_WHITELIST 環境變數）`);
+  }
+
+  const result = await checkOverdueCore({
+    db,
+    sendToTokenDocs,
+    now: new Date(),
+    seatWhitelist,
+    siteBaseUrl: SITE_BASE_URL,
+  });
+
+  console.log(
+    `checkOverdue: 學期 ${result.semester}，已逾期月份 [${result.overdueMonths.join(',')}]，本輪通知 ${result.notified.length} 筆，跳過 ${result.skipped.length} 筆`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 主流程：四項檢查各自獨立 try/catch，其中一個因缺索引等原因失敗時，
 // 其餘仍會照常執行；只要任一項失敗，整體以非 0 結束碼結束，
 // 讓 GitHub Actions 的 Actions 分頁能看到這次執行標記為失敗（方便注意到）。
 // ---------------------------------------------------------------------------
@@ -451,6 +514,13 @@ async function checkNewJournals() {
   } catch (e) {
     hadError = true;
     console.error('checkNewJournals 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);
+  }
+
+  try {
+    await checkOverdue();
+  } catch (e) {
+    hadError = true;
+    console.error('checkOverdue 失敗：', e);
   }
 
   process.exit(hadError ? 1 : 0);

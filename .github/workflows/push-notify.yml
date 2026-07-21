@@ -1,4 +1,4 @@
-name: 推播通知輪詢（老師評語／學生回覆）
+name: 推播通知輪詢（老師評語／學生回覆／學生首次繳交／逾期未繳）
 
 on:
   schedule:
@@ -47,11 +47,22 @@ jobs:
         working-directory: notify-service
         run: npm test
 
+      # 逾期未繳月記通知（新增）專用的開發期安全閥：checkOverdue() 一次觸發會影響
+      # 一整班（跟另外三種「只影響觸發那一筆」的通知不同），OVERDUE_TEST_SEAT_WHITELIST
+      # 非空時只會處理名單內的座號，其餘座號完全跳過、不查、不推、不寫任何旗標。
+      # 刻意用 vars（Repository variables，非 Secret）而不是 secrets——這個值本身
+      # 只是幾個座號數字，不是敏感資訊，用 vars 可以直接在 GitHub 網頁上改，不需要
+      # 改這支 workflow 檔案再重新 push。設定方式：repo 的 Settings → Secrets and
+      # variables → Actions → Variables 分頁 → New repository variable，名稱填
+      # OVERDUE_TEST_SEAT_WHITELIST，值填測試座號（例如 00,50,98,99）。開發/測試期間
+      # 務必先設定這個變數，確認 checkOverdue() 邏輯正確無誤後，再把這個 repository
+      # variable 刪除或清空——留空／不存在＝正式模式，會處理全部在籍學生。
       - name: Send pending push notifications
         working-directory: notify-service
         run: node send-push-notifications.js
         env:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          OVERDUE_TEST_SEAT_WHITELIST: ${{ vars.OVERDUE_TEST_SEAT_WHITELIST }}
 
       # 2026-07（稽核修正 #6）：先前只有 canary.yml（系統A／Layer 2）在失敗時會推 Discord
       # 通知，這支排程本身輪詢默默壞掉不會有人發現，只能等有人剛好翻 Actions 分頁才知道。
