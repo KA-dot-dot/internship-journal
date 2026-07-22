@@ -4365,14 +4365,21 @@ async function loadLocationStats() {
     getDocs(collection(db, 'students'))
   ]);
   const studentMap = {};
-  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
+  // 2026-07-22 修正：改用「學期＋座號」當 key（比照 exportAllStatsExcel() 的
+  // studentMap 寫法），不再用裸座號合併整個 /students 集合。這裡只是「月記自己沒填
+  // company/姓名時」的備援查詢（company 本身已是月記優先，見下方），但裸座號在備援
+  // 查詢時仍可能跨學期撈到不相干的舊資料（例如座號被重新分配給別的學生）。找不到
+  // semester（學期前綴架構上線之前的舊格式文件）的資料無法安全歸類到特定學期，不納入
+  // 這份 map，其對應座號的名記錄只能靠月記自己的欄位處理，不受影響。
   stuCompSnap.docs.forEach(d => {
-    const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
-    studentMap[sno] = d.data();
+    const data = d.data();
+    const sno = data.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+    const sem = data.semester || (d.id.includes('_') ? d.id.split('_')[0] : null);
+    if (sem) studentMap[`${sem}-${sno}`] = data;
   });
   let journals = userJournalDocs(snap).map(d => {
     const data = d.data();
-    const s = studentMap[data.seatNo] || {};
+    const s = studentMap[`${data.semester}-${data.seatNo}`] || {};
     return {
       ...data,
       studentName: data.studentName || s.name || '',
@@ -4743,14 +4750,20 @@ async function loadWorkTypeStats() {
       getDocs(collection(db, 'students'))
     ]);
     const studentMap = {};
+    // 2026-07-22 修正：改用「學期＋座號」當 key（比照 exportAllStatsExcel()／
+    // loadLocationStats() 的 studentMap 寫法），不再用裸座號合併整個 /students 集合，
+    // 避免月記自己沒填 company/姓名時，備援查詢跨學期撈到不相干的舊資料。找不到
+    // semester 的舊格式文件不納入這份 map。
     stuSnap.docs.forEach(d => {
-      const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
-      studentMap[sno] = d.data();
+      const data = d.data();
+      const sno = data.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+      const sem = data.semester || (d.id.includes('_') ? d.id.split('_')[0] : null);
+      if (sem) studentMap[`${sem}-${sno}`] = data;
     });
     let journals = userJournalData(snap).map(j => ({
       ...j,
-      studentName: j.studentName || studentMap[j.seatNo]?.name || '',
-      company: j.company || studentMap[j.seatNo]?.company || ''
+      studentName: j.studentName || studentMap[`${j.semester}-${j.seatNo}`]?.name || '',
+      company: j.company || studentMap[`${j.semester}-${j.seatNo}`]?.company || ''
     }));
     if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
     // 2026-07-22 新增：跟 loadLocationStats()／loadSalaryStats() 一致，補上公司篩選
@@ -4903,14 +4916,19 @@ async function fetchJournalsFromServer() {
     getDocsWithFallback(collection(db, 'students'), '學生名單')
   ]);
   const studentMap = {};
-  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
+  // 2026-07-22 修正：改用「學期＋座號」當 key（比照 exportAllStatsExcel()／
+  // loadLocationStats()／loadWorkTypeStats() 的 studentMap 寫法），不再用裸座號合併
+  // 整個 /students 集合，避免月記自己沒填 company/姓名時，備援查詢跨學期撈到不相干
+  // 的舊資料（例如座號被重新分配給別的學生）。找不到 semester 的舊格式文件不納入。
   stuSnap.docs.forEach(d => {
-    const sno = d.data().seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
-    studentMap[sno] = d.data();
+    const data = d.data();
+    const sno = data.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
+    const sem = data.semester || (d.id.includes('_') ? d.id.split('_')[0] : null);
+    if (sem) studentMap[`${sem}-${sno}`] = data;
   });
   return userJournalDocs(snap).map(d => {
     const j = d.data();
-    const s = studentMap[j.seatNo] || {};
+    const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
     return {
       ...j,
       studentName: j.studentName || s.name || '已刪除學生',
