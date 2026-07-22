@@ -4142,8 +4142,12 @@ async function exportAllStatsExcel() {
       // 姓名 fallback 到 j.studentName、日期(entries[].date)、公司 fallback 到 j.company
       // 皆為未經 rule.txt 驗證的欄位，技術使用者可直接 API 寫入任意字串繞過正常路徑，
       // 補上 sanitizeExcelCell() 防護。
+      // 2026-07-22 修正：公司欄位改為「月記自己當時寫入的 company 優先，名冊備援」，
+      // 跟「統計總覽」三頁籤（地點／薪資／工作類型）統一邏輯——原本「名冊優先」會讓
+      // 換過公司的學生，舊月記也被追溯算成名冊上「目前」登記的那一間，見
+      // getJournalCompany() 上方註解完整說明。
       locationRows.push({
-        公司: sanitizeExcelCell(s.company || j.company || ''),
+        公司: sanitizeExcelCell(j.company || s.company || ''),
         座號: j.seatNo || '',
         姓名: sanitizeExcelCell(s.name || j.studentName || ''),
         日期: sanitizeExcelCell(e.date || ''),
@@ -4177,10 +4181,11 @@ async function exportAllStatsExcel() {
     .map(j => {
       const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
       // 2026-07-01 補修（同批次）：姓名 fallback、公司 fallback、月份同樣未經 rule.txt 驗證，補上防護
+      // 2026-07-22 修正：公司欄位改為月記優先、名冊備援，理由同上方 locationRows
       return {
         座號: j.seatNo || '',
         姓名: sanitizeExcelCell(s.name || j.studentName || ''),
-        公司: sanitizeExcelCell(s.company || j.company || ''),
+        公司: sanitizeExcelCell(j.company || s.company || ''),
         月份: sanitizeExcelCell(`${j.month}月`),
         '薪資(元)': Number(j.salary) || 0,
         '師傅/學長姐': sanitizeExcelCell(j.mentor || '')
@@ -4198,7 +4203,8 @@ async function exportAllStatsExcel() {
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
   journals.filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary))).forEach(j => {
-    const c = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
+    // 2026-07-22 修正：公司分組改為月記優先、名冊備援，理由同上方 locationRows
+    const c = sanitizeExcelCell(j.company || (studentMap[`${j.semester}-${j.seatNo}`]?.company) || '未填寫');
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
     companyAggMap[c].studentSet.add(j.seatNo);
     companyAggMap[c].salaries.push(Number(j.salary));
@@ -4244,7 +4250,8 @@ async function exportAllStatsExcel() {
     const s = studentMap[`${j.semester}-${j.seatNo}`] || {};
     // 2026-07-01 補修（同批次）：姓名／公司 fallback 同上；說明欄內嵌 j.semester 且無任何前置字元，
     // 是四項裡風險最直接的一處，整串套 sanitizeExcelCell() 防護
-    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:sanitizeExcelCell(s.company || j.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
+    // 2026-07-22 修正：公司欄位改為月記優先、名冊備援，理由同上方 locationRows
+    salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:sanitizeExcelCell(j.company || s.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
   });
   salaryCompanyList.map(c => {
     const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
@@ -4276,7 +4283,8 @@ async function exportAllStatsExcel() {
   // ── 公司 × 工作類型統計 ──
   const companyWorktypeMap = {};
   journals.forEach(j => {
-    const company = sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.company) || j.company || '未填寫');
+    // 2026-07-22 修正：公司分組改為月記優先、名冊備援，理由同上方 locationRows
+    const company = sanitizeExcelCell(j.company || (studentMap[`${j.semester}-${j.seatNo}`]?.company) || '未填寫');
     (j.entries || []).forEach(e => {
       const raw = (e.type || '').trim();
       // 2026-07-01 補修：正常 UI 流程下 type 只會是 WORK_TYPES 固定選項之一，或符合
@@ -4373,12 +4381,15 @@ async function loadLocationStats() {
   });
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
 
-  // 建立公司清單（從學生資料讀取，而非月記，確保反映最新公司名）
-  const companySet = new Set();
-  stuCompSnap.docs.forEach(d => { if (d.data().company) companySet.add(d.data().company); });
-  // 補上月記中出現但學生資料已沒有的舊公司（降級處理）
-  journals.forEach(j => { if (j.company && !companySet.has(j.company)) companySet.add(j.company); });
-  const companies = [...companySet].sort();
+  // 2026-07-22 修正：公司清單改成只從「目前日期範圍內的月記」自己的 company 欄位
+  // 建立，不再讀取整個 /students 集合。原本「從學生資料讀取」的寫法會把整個
+  // /students 集合裡任何學期、任何格式（含跨學期同座號的舊格式殘留文件）登記過的
+  // 公司名稱全部塞進篩選清單，即使那間公司跟目前查詢範圍內任何一份月記都無關（例如
+  // 某座號舊學期待過的公司，本學期同座號已換成別的學生）——這正是篩選清單裡會冒出
+  // 跟目前資料無關的舊公司選項的根本原因。改為只從已套用日期篩選、且 company 欄位
+  // 本身已是月記優先（見上方 journals 組裝邏輯）的 journals 陣列取值，篩選清單永遠
+  // 只會列出「這個範圍內真的有月記」的公司。
+  const companies = journals.map(j => j.company).filter(Boolean);
   populateCompanyFilter(companies);
   // 把 journals 存到全域供篩選用
   window.journals_cache = journals;
@@ -4626,7 +4637,9 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
 
   function missingItems(items) {
     return items.slice(0, 5).map(j => {
-      const company = stuCompanyMap[j.seatNo] || j.company || '-';
+      // 2026-07-22 修正：改用 getJournalCompany()（月記優先、名冊備援），跟其餘薪資
+      // 統計欄位使用同一套判斷依據，不再自己另外維護一份「名冊優先」的邏輯。
+      const company = getJournalCompany(j, stuCompanyMap) || '-';
       return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(j.seatNo || '-')} ${escapeHtml(j.studentName || '-')}</div><div class="salary-alert-note">${escapeHtml(company)}｜${escapeHtml(j.semester || '')} ${escapeHtml(j.month || '')}月</div></div><strong>未填</strong></div>`;
     }).join('');
   }
@@ -4646,8 +4659,16 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   el.innerHTML = boxes.map(b => `<div class="salary-alert-box ${b.cls}"><div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div><div class="salary-alert-list">${b.html}</div></div>`).join('');
 }
 
+// 2026-07-22 修正：改成「月記自己當時寫入的 company 欄位優先」，名冊只在月記本身
+// 完全沒有 company（理論上不該發生，僅作保底備援）時才使用。原本「名冊優先」的寫法，
+// 會讓已經換過公司的學生（每份月記各自記錄當時真正待的公司）全部被硬套上「名冊目前
+// 登記的那一間」；若名冊資料還混進跨學期同座號的舊格式殘留文件（見 loadSalaryStats()／
+// loadLocationStats() 的 studentMap／stuCompanyMap 建立方式，只用裸座號當 key，不分
+// 學期），甚至可能整份查詢結果被歸到一個查詢範圍內根本不存在的舊公司，被公司篩選清單
+// 排除在外——這正是徐偉哲（12號）7月的薪資記錄從「統計總覽→薪資統計」消失、卻能正常
+// 出現在 Excel 匯出（Excel 當時已是月記優先）與 Firebase 實際文件裡的根本原因。
 function getJournalCompany(j, stuCompanyMap = {}) {
-  return normalizeCompanyName(stuCompanyMap[j.seatNo] || j.company);
+  return normalizeCompanyName(j.company || stuCompanyMap[j.seatNo]);
 }
 
 function renderSalaryStatsFromCache(cache) {
@@ -4732,6 +4753,13 @@ async function loadWorkTypeStats() {
       company: j.company || studentMap[j.seatNo]?.company || ''
     }));
     if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
+    // 2026-07-22 新增：跟 loadLocationStats()／loadSalaryStats() 一致，補上公司篩選
+    // 清單建立呼叫，避免這個頁籤的篩選清單完全依賴「地點統計／薪資統計哪一個先跑完」
+    // 這個競態——三個統計頁籤各自有獨立的日期區間選擇器，若本頁籤自己不建立清單，
+    // 使用者停留在「工作類型」頁籤時看到的公司清單，可能是另一個頁籤用不同日期範圍
+    // 算出來的結果。
+    const companies = journals.map(j => j.company).filter(Boolean);
+    populateCompanyFilter(companies);
     const selectedCompanies = getSelectedCompanies();
     renderWorkTypeStats(journals, selectedCompanies);
   } catch(e) {
@@ -4847,7 +4875,10 @@ async function loadSalaryStats() {
     .map(j => ({
       ...j,
       studentName: j.studentName || stuInfoMap[j.seatNo]?.name || '',
-      company: j.company || getJournalCompany(j, stuCompanyMap)
+      // 2026-07-22 簡化：直接呼叫 getJournalCompany()（本身已是「月記優先、名冊備援」
+      // 的完整判斷），不再手動重複一次「j.company || ...」的判斷邏輯——避免同一套
+      // 判斷分別寫在兩個地方，未來只改其中一處、忘記同步另一處。
+      company: getJournalCompany(j, stuCompanyMap)
     }));
   if (start && end) allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
 
