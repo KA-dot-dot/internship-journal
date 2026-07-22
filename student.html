@@ -2132,11 +2132,18 @@ async function checkMonthDeadline(skipFill = false) {
   // select 的 onchange 直接呼叫、未 await，且本身完全沒有 showLoading() 鎖住畫面，若學生
   // 切換學期/月份後在這裡的查詢真正完成「前」就按下儲存，沒有這兩個欄位會讓 saveJournal()
   // 無從分辨快取到底是不是當下選定月份的資料。
+  // 2026-07-22 補修：快取補上 company（這份月記自己記錄的公司，不是目前名冊上的公司），
+  // 供 saveJournal() 判斷一般編輯時該保留哪個公司值（詳見 saveJournal() 對應註解）。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, sem, month, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
+    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
     : { exists: false, sem, month };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
+    // 2026-07-22 修正：顯示這份月記「當時」實際記錄的公司，不是目前名冊上的公司——
+    // 避免學生換公司後回頭查看/編輯舊月份，畫面顯示的公司跟儲存時實際保留的公司對不
+    // 起來（saveJournal() 對既有月記一律保留原公司，不再套用目前名冊公司，詳見該函式
+    // 對應註解）。找不到 company（理論上不會發生的舊資料）才退回目前名冊公司。
+    document.getElementById('write-company').value = j.company || currentUser.company || '';
     document.getElementById('write-salary').value = j.salary ?? '';
     document.getElementById('write-mentor').value = j.mentor || '';
     document.getElementById('write-reflection').value = j.reflection || '';
@@ -3456,7 +3463,7 @@ async function saveJournal() {
     try {
       const freshSnap = await getDoc(journalRef);
       window._currentJournalCache = freshSnap.exists()
-        ? { exists: true, sem, month, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false }
+        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false }
         : { exists: false, sem, month };
     } catch (e) {
       // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
@@ -3469,7 +3476,15 @@ async function saveJournal() {
   const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
-    studentName: currentUser.name, company: currentUser.company || '',
+    studentName: currentUser.name,
+    // 2026-07-22 修正：只有第一次繳交（isFirstSubmit）才使用「目前」的 currentUser.company；
+    // 一般編輯改保留這份月記自己當初記錄的公司（window._currentJournalCache.company），
+    // 避免學生事後換公司後，回頭編輯舊月份月記時，把當時真正待的公司覆蓋成現在待的新
+    // 公司（例如7月在A公司、8月換到B公司後，若回頭編輯7月月記，公司原本會被誤改成B）
+    // ——跟 submittedAt 只在第一次記錄當下時間、之後一律保留原值是同一種思路。找不到
+    // 快取公司值（理論上不會發生，見上方新鮮度檢查）時才退回目前名冊公司，避免寫入
+    // 空字串。既有已被誤改過的歷史資料不會被這個修正自動復原，需要另外手動更正。
+    company: isFirstSubmit ? (currentUser.company || '') : (window._currentJournalCache?.company || currentUser.company || ''),
     city: currentUser.city || '', semester: sem, month,
     salary: salary ?? null, mentor: mentor || '', salaryPhoto: salaryPhoto || '',
     reflection, entries: entries.map(e => ({ date: e.date||'', type: e.type||'', content: e.content||'', address: e.address||'', distance: e.distance??null, noPhoto: e.noPhoto||false, photos: e.photos||[] })),
@@ -3873,9 +3888,11 @@ async function editJournal(seatNo, sem, month) {
   // 2026-07-13 補修：補上 sem/month，跟 checkMonthDeadline() 的快取結構保持一致，
   // 讓 saveJournal() 的快取新鮮度比對在「先編輯再儲存、未切換月份」這條路徑上能正確
   // 判定快取有效、不需要多一次不必要的現查。
+  // 2026-07-22 補修：補上 company，理由同 checkMonthDeadline() 對應註解。
   window._currentJournalCache = {
     exists: true,
     sem, month,
+    company: j.company,
     submittedAt: j.submittedAt,
     updatedAt: j.updatedAt,
     teacherReviewed: j.teacherReviewed,
@@ -3894,6 +3911,8 @@ async function editJournal(seatNo, sem, month) {
   document.getElementById('write-salary').value = j.salary || '';
   document.getElementById('write-mentor').value = j.mentor || '';
   document.getElementById('write-reflection').value = j.reflection || '';
+  // 2026-07-22 修正：顯示這份月記當時實際記錄的公司，理由同 checkMonthDeadline() 對應註解
+  document.getElementById('write-company').value = j.company || currentUser.company || '';
   if (j.salaryPhoto) {
     document.getElementById('salary-photo-preview').innerHTML = `<div style="position:relative;display:inline-block"><img src="${escapeHtml(resolveImgSrc(j.salaryPhoto))}" data-base64="${escapeHtml(j.salaryPhoto)}" style="max-width:200px;max-height:140px;border-radius:6px;border:1px solid var(--border)"><button onclick="document.getElementById('salary-photo-preview').innerHTML=''" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px">×</button></div>`;
   }
