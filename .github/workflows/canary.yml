@@ -15,16 +15,24 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-07-18：student.test.js 72 項〔68個具名呼叫點 + 4次頁籤切換迴圈，
-    #     新增 S-SEC-38，補齊 push-enable-modal（#push-enable-modal／
-    #     maybeShowPushEnableModal()／enablePushFromModal()）先前完全零測試覆蓋的缺口，
-    #     同時驗證 maybeShowPushEnableModal() 新補的登入狀態守門〕、teacher.test.js 65 項
-    #     〔57個具名呼叫點 + 8次頁籤切換迴圈，新增對稱的 T-SEC-42〕。本機終端機截圖已確認
-    #     137/137 全過（學生端72/72、老師端65/65，含 T-SEC-42 正確通過）。
-    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18 過期四次，見
-    #     AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後新增/刪除
-    #     測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 72 項 + 老師端 65 項）
+    #    （目前對應 2026-07-23：student.test.js 73 項〔69個具名呼叫點 + 4次頁籤切換迴圈，
+    #     新增 S-SEC-39，驗證 saveJournal() 只在第一次繳交時使用目前名冊公司，一般編輯改
+    #     保留這份月記自己原本記錄的公司〕、teacher.test.js 69 項〔61個具名呼叫點 + 8次
+    #     頁籤切換迴圈，新增 T-SEC-43～46：getJournalCompany() 月記優先於名冊備援（12號
+    #     徐偉哲換公司後從薪資統計消失的根本修正）、地點/薪資/工作類型三頁籤公司篩選清單
+    #     統一改由目前日期範圍內的月記自己的 company 建立、四處名冊備援 studentMap／
+    #     stuCompanyMap／stuInfoMap 改用「學期＋座號」當 key（2026-07-23 稍後補齊第4處
+    #     loadSalaryStats() 自己的 stuCompanyMap／stuInfoMap，T-SEC-45 同步擴充覆蓋範圍，
+    #     測試數量不變）、Excel 匯出五處公司欄位統一月記優先；另外 T-SEC-40 本身
+    #     二度修正——第一次（2026-07-18）修的是「沒等背景 loadTeacherDashboard() 跑完就
+    #     覆寫合成資料」，這次找到的是不同的坑：改成先把 window._missingWithCount 清空成
+    #     undefined 再等它變回真正陣列，不再被其他跟這次載入無關的背景動作騙過去〕。
+    #     test-report.txt（2026/7/23 下午7:33:23 執行）確認 142/142 全過（學生端73/73、
+    #     老師端69/69，含本輪全部新增/修正測試皆正確通過）。
+    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18 過期四次，這是
+    #     第五次，見 AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後
+    #     新增/刪除測試時務必記得回來改這一行）。
+    name: 完整自動化測試（學生端 73 項 + 老師端 69 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼

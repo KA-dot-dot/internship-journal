@@ -1,7 +1,41 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v23
+ * 老師端自動化測試 v25
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v25（2026-07-23，同一輪對話延伸）：T-SEC-45 補齊第四處——`loadSalaryStats()` 自己的
+ * `stuCompanyMap`／`stuInfoMap` 先前不在範圍內（原本使用者只點名 loadLocationStats()／
+ * loadWorkTypeStats()／fetchJournalsFromServer() 三處），這次確認一併補上，`getJournalCompany()`
+ * 讀取時同步改用學期＋座號 key。測試數量不變，仍是「新增4條、修正1條」——只是把 T-SEC-45
+ * 原本檢查的範圍從 3 個函式擴充為 4 個函式（同一條測試，不是新增測試 ID）。
+ *
+ * v24 新增／修正（2026-07-23）：對應同一輪對話發現並修正的「換公司後薪資統計/公司篩選清單
+ * 出現學生消失／舊公司殘留」問題（起因：徐偉哲12號從沙鹿冷氣換到金華節能空調後，7月薪資
+ * 記錄從「統計總覽→薪資統計」消失，但 Excel 匯出跟 Firebase 實際文件都正常）。新增 4 條、
+ * 修正 1 條既有測試：
+ *   T-SEC-43  getJournalCompany() 改為月記優先於名冊備援（直接呼叫函式驗證，含
+ *             loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式，不再各自
+ *             重複維護一份「名冊優先」判斷）——這是根本修正，其餘測試都是圍繞這個修法
+ *             的周邊一致性檢查
+ *   T-SEC-44  地點／薪資／工作類型三個統計頁籤的公司篩選清單，都改成從「目前日期範圍內
+ *             的月記」自己的 company 建立，不再讀取整個 /students 集合；loadWorkTypeStats()
+ *             補上跟另外兩個統計一致的 populateCompanyFilter() 呼叫，不再讓篩選清單完全
+ *             依賴「地點統計／薪資統計哪一個先跑完」這個競態
+ *   T-SEC-45  loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer()／
+ *             loadSalaryStats() 的名冊備援 studentMap／stuCompanyMap／stuInfoMap 皆改用
+ *             「學期＋座號」當 key（比照 exportAllStatsExcel() 既有寫法），不再用裸座號
+ *             合併整個 /students 集合（loadSalaryStats() 這第4處是 v25 才補齊，見上方）
+ *   T-SEC-46  exportAllStatsExcel() 五處公司欄位（locationRows／salaryRows／薪資缺漏／
+ *             各公司薪資分組／各公司工作類型分組）統一改為月記優先，跟「統計總覽」三頁籤
+ *             的邏輯一致
+ *   T-SEC-40  修正既有測試本身「時好時壞」的第二次競態條件（2026-07-18 第一次修法本身
+ *             不夠可靠）：原本靠等待全站共用的 #loading-overlay 重新隱藏來判斷
+ *             loadTeacherDashboard() 是否跑完，但這個元素全檔至少 52 處呼叫，任何無關的
+ *             背景動作都可能讓這個快照式檢查提早通過，完全沒等到「這次」的背景載入真正
+ *             結束。改成先清空 window._missingWithCount，再直接等待它變回真正的陣列——
+ *             因為全檔只有 loadTeacherDashboard() 內部那一行會寫入它，不會被其他函式的
+ *             loading 遮罩開關或「巧合殘留的舊值」誤觸發。測試數量不變（修正既有測試，
+ *             非新增）。
  *
  * v23 新增（2026-07-17）：對應 teacher.html／student.html 新增「每月最少應繳篇數
  * （minEntries）」概念後，補齊的一批回歸測試——背景是使用者實測發現「統計總覽→繳交狀況」
@@ -2025,27 +2059,37 @@ async function runTeacherTests(page, log) {
     const hasFn = await page.evaluate(() => typeof copyMissingList === 'function');
     if (!hasFn) return;
 
-    await page.evaluate(() => { if (typeof showPage === 'function') showPage('t-dashboard'); });
+    // 2026-07-23 修正（T-SEC-40 間歇性失敗的第二次修正，2026-07-18 那次修法本身不夠）：
+    // 先清空 window._missingWithCount，再觸發 showPage('t-dashboard')。理由見下方等待
+    // 邏輯的註解——這一步是讓下面「等它變回陣列」的檢查有意義的前提。
+    await page.evaluate(() => {
+      window._missingWithCount = undefined;
+      if (typeof showPage === 'function') showPage('t-dashboard');
+    });
     await waitForPage(page, 't-dashboard', 6000);
-    // 2026-07-18 修正（真實 bug，非 copyMissingList() 本身的問題）：showPage('t-dashboard')
+
+    // 2026-07-18 第一次修正（真實 bug，非 copyMissingList() 本身的問題）：showPage('t-dashboard')
     // 內部呼叫 loadTeacherDashboard() 是 fire-and-forget（loaders[pageId]() 沒有 await，
     // 見 teacher.html showPage()），waitForPage() 只確認 DOM 的 .hidden class 被拿掉，
     // 完全不保證 loadTeacherDashboard() 的三個 Firestore 集合查詢（Promise.all）已經跑完。
-    // 若這裡直接覆寫 window._missingWithCount，loadTeacherDashboard() 稍後才完成時會用
-    // 真實班級資料把它蓋掉；而 copyMissingList() 本身在讀取 window._missingWithCount 之前
-    // 還有自己的一次 await getDoc()（讀取當月截止日），這個 await 空檔正好給了背景中的
-    // loadTeacherDashboard() 完成並覆寫的機會，造成本測試間歇性失敗（成功與否取決於兩個
-    // Firestore 讀取誰先完成，屬於典型的競態，不是 copyMissingList()／labelNoName 欄位本身
-    // 有問題——已核對 teacher.html 原始碼，copyMissingList() 讀的欄位名稱與這裡合成資料
-    // 使用的欄位名稱一致，都是 labelNoName，AI_CONTEXT.md 先前記載的 entriesNote 是文件
-    // 落後於程式碼的舊描述，並非目前實際欄位名）。
-    // 修法：明確等待 loadTeacherDashboard() 的 loading 遮罩重新隱藏（其 finally 區塊會呼叫
-    // hideLoading()，代表三個 Promise.all 查詢與後續同步計算皆已完成），才繼續往下設定
-    // 合成資料，確保不會再被背景載入蓋掉。
-    await page.waitForFunction(() => {
-      const el = document.getElementById('loading-overlay');
-      return el && el.classList.contains('hidden');
-    }, { timeout: 8000 }).catch(() => {});
+    // 當時的修法是等待 #loading-overlay 重新變回 hidden，才繼續往下設定合成資料。
+    //
+    // 2026-07-23 第二次修正：上面那個修法本身仍不夠可靠，才是「時好時壞、遇到很多次」的
+    // 真正原因——`hideLoading()` 是全站共用同一個 #loading-overlay 元素，全檔至少 52 處
+    // 呼叫，任何跟這次 dashboard 載入無關的背景動作（甚至只是先前某次操作殘留、剛好還沒
+    // 被下一次 showLoading() 蓋掉的「hidden」狀態）都可能讓這個快照式檢查一開始就通過，
+    // 完全沒有真的等到「這次」showPage() 觸發的 loadTeacherDashboard() 跑完——這是比
+    // 「完全沒等」更隱蔽的競態，多數情況下巧合仍會等到足夠久，只有少數情況才會提早通過
+    // 而失敗，符合使用者回報的「時好時壞」現象。
+    // 修法：改成直接等待 window._missingWithCount 本身變回真正的陣列。因為上面已經先把它
+    // 清空成 undefined，只有 loadTeacherDashboard() 內部真正執行到寫入這個全域變數那一行
+    // （teacher.html 全檔只有這一處會寫入它）才會讓它變回陣列，不會被其他無關函式的
+    // loading 遮罩開關誤觸發，也不會被「巧合殘留的舊值」騙過去。
+    try {
+      await page.waitForFunction(() => Array.isArray(window._missingWithCount), { timeout: 15000 });
+    } catch (e) {
+      throw new Error('等待 loadTeacherDashboard() 真正完成逾時（window._missingWithCount 15 秒內未變回陣列），可能是背景載入本身卡住或逾時，非本測試邏輯問題');
+    }
 
     const result = await page.evaluate(async () => {
       let captured = null;
@@ -2176,6 +2220,231 @@ async function runTeacherTests(page, log) {
       throw new Error('enterApp() 找不到 setTimeout(maybeShowPushEnableModal, 1500)，彈窗機制的唯一觸發點消失');
     if (!result.modalElExists)
       throw new Error('#push-enable-modal 這個 DOM 元素不存在於頁面上，maybeShowPushEnableModal() 顯示的目標消失了');
+  });
+
+  await test('T-SEC-43 getJournalCompany() 改為月記優先於名冊備援，loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式（12號徐偉哲換公司後從薪資統計消失的根本修正）', async () => {
+    // 背景：getJournalCompany() 原本是「名冊優先」（stuCompanyMap[j.seatNo] || j.company），
+    // 導致已經換過公司的學生，舊月記也被追溯算成名冊上「目前」登記的那一間；若名冊資料
+    // 又混進跨學期同座號的舊格式殘留文件，甚至可能整份查詢結果被歸到查詢範圍內根本不
+    // 存在的舊公司、被公司篩選清單排除在外——這正是徐偉哲（12號）7月薪資記錄從「統計
+    // 總覽→薪資統計」消失的根本原因。修法：改成「月記自己的 company 優先，名冊只在
+    // 月記完全沒填時才當備援」。這裡直接呼叫真正的函式驗證行為，而非只做原始碼字串比對。
+    const result = await page.evaluate(() => {
+      if (typeof getJournalCompany !== 'function' || typeof normalizeCompanyName !== 'function')
+        return { skip: true };
+
+      const stuCompanyMap = { '12': '金華節能空調科技有限公司' };
+
+      // 核心情境：月記自己有 company，名冊是不同（更新過）的公司 → 必須以月記為準
+      const journalWins = getJournalCompany({ seatNo: '12', company: '沙鹿冷氣有限公司' }, stuCompanyMap) === '沙鹿冷氣有限公司';
+      // 備援情境：月記完全沒有 company（理論上不該發生的舊資料）→ 才退回名冊
+      const rosterFallback = getJournalCompany({ seatNo: '12', company: '' }, stuCompanyMap) === '金華節能空調科技有限公司';
+      // 兩者皆無資料 → normalizeCompanyName() 的預設值「未填寫」
+      const bothMissingFallback = getJournalCompany({ seatNo: '99', company: '' }, {}) === '未填寫';
+
+      // loadSalaryStats() 不應再重複維護一份「j.company || getJournalCompany(...)」的判斷，
+      // 應直接呼叫共用函式本身——避免同一套邏輯分別寫在兩處、忘記同步。先用 codeOnly()
+      // 過濾掉整行都是註解的行再檢查，避開「regex 命中函式內部解釋性註解」這個本專案
+      // 已經記錄過好幾次的陷阱（S-SEC-08／T-SEC-30／T-SEC-34 等）。
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const salaryFnStr = (typeof loadSalaryStats === 'function') ? codeOnly(loadSalaryStats.toString()) : '';
+      const salaryUsesSharedFn = /company:\s*getJournalCompany\(\s*j\s*,\s*stuCompanyMap\s*\)/.test(salaryFnStr);
+      const salaryNoDuplicateLogic = !/company:\s*j\.company\s*\|\|\s*getJournalCompany/.test(salaryFnStr);
+
+      // renderSalaryAlerts() 的「薪資缺漏」清單（missingItems）同樣應改呼叫共用函式，
+      // 不再自己另外維護一份 stuCompanyMap[j.seatNo] || j.company 的判斷
+      const alertsFnStr = (typeof renderSalaryAlerts === 'function') ? codeOnly(renderSalaryAlerts.toString()) : '';
+      const alertsUsesSharedFn = /const company = getJournalCompany\(\s*j\s*,\s*stuCompanyMap\s*\)/.test(alertsFnStr);
+      const alertsNoOldPattern = !/stuCompanyMap\[j\.seatNo\]\s*\|\|\s*j\.company/.test(alertsFnStr);
+
+      return {
+        skip: false, journalWins, rosterFallback, bothMissingFallback,
+        salaryUsesSharedFn, salaryNoDuplicateLogic, alertsUsesSharedFn, alertsNoOldPattern,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.journalWins)
+      throw new Error('getJournalCompany() 仍是名冊優先——這正是換過公司的學生從薪資統計消失的根本原因，尚未修正');
+    if (!result.rosterFallback)
+      throw new Error('getJournalCompany() 在月記完全沒有 company 時，未正確退回名冊備援值');
+    if (!result.bothMissingFallback)
+      throw new Error('getJournalCompany() 兩者皆無資料時，未正確 fallback 為「未填寫」');
+    if (!result.salaryUsesSharedFn)
+      throw new Error('loadSalaryStats() 未直接呼叫 getJournalCompany() 設定 company 欄位');
+    if (!result.salaryNoDuplicateLogic)
+      throw new Error('loadSalaryStats() 仍殘留「j.company || getJournalCompany(...)」的重複判斷，未簡化為直接呼叫共用函式');
+    if (!result.alertsUsesSharedFn)
+      throw new Error('renderSalaryAlerts() 的薪資缺漏清單未改呼叫 getJournalCompany()');
+    if (!result.alertsNoOldPattern)
+      throw new Error('renderSalaryAlerts() 仍殘留舊的「stuCompanyMap[j.seatNo] || j.company」名冊優先判斷');
+  });
+
+  await test('T-SEC-44 公司篩選清單改由「目前日期範圍內的月記」自己的 company 欄位建立，不再讀取整個 /students 集合；loadWorkTypeStats() 補上一致的清單建立呼叫', async () => {
+    // 背景：loadLocationStats() 原本用「從學生資料讀取」建立公司篩選清單（讀整個
+    // /students 集合，任何學期、任何格式皆算入），會把跨學期同座號殘留的舊公司名稱
+    // 一起塞進篩選清單，即使那間公司跟目前查詢範圍內任何一份月記都無關——這正是篩選
+    // 清單裡會冒出「沙鹿」這類跟目前資料無關的舊公司選項的根本原因。loadWorkTypeStats()
+    // 原本完全沒有呼叫 populateCompanyFilter()，篩選清單完全被動依賴「地點統計／薪資
+    // 統計哪一個先跑完」這個競態（三個頁籤各自有獨立日期區間，可能顯示到不相干範圍
+    // 算出來的清單）。這裡用 codeOnly() 過濾掉整行都是註解的行再檢查。
+    const result = await page.evaluate(() => {
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const locFnStr = (typeof loadLocationStats === 'function') ? codeOnly(loadLocationStats.toString()) : '';
+      const worktypeFnStr = (typeof loadWorkTypeStats === 'function') ? codeOnly(loadWorkTypeStats.toString()) : '';
+      const salaryFnStr = (typeof loadSalaryStats === 'function') ? codeOnly(loadSalaryStats.toString()) : '';
+      if (!locFnStr || !worktypeFnStr || !salaryFnStr) return { skip: true };
+
+      const locNoOldRosterCompanySet = !/companySet\.add\(\s*d\.data\(\)\.company\s*\)/.test(locFnStr);
+      const locBuildsFromJournals = /const companies = journals\.map\(j => j\.company\)\.filter\(Boolean\)/.test(locFnStr);
+      const locCallsPopulate = /populateCompanyFilter\(companies\)/.test(locFnStr);
+
+      const worktypeBuildsFromJournals = /const companies = journals\.map\(j => j\.company\)\.filter\(Boolean\)/.test(worktypeFnStr);
+      const worktypeCallsPopulate = /populateCompanyFilter\(companies\)/.test(worktypeFnStr);
+      // populateCompanyFilter() 必須在 getSelectedCompanies() 之前呼叫，篩選清單才能在
+      // 讀取「目前勾選了哪些公司」之前先被刷新成這個頁籤自己算出來的清單
+      const populateIdx = worktypeFnStr.indexOf('populateCompanyFilter(companies)');
+      const selectedIdx = worktypeFnStr.indexOf('getSelectedCompanies()');
+      const worktypeOrderOK = populateIdx !== -1 && selectedIdx !== -1 && populateIdx < selectedIdx;
+
+      const salaryCallsPopulate = /populateCompanyFilter\(companies\)/.test(salaryFnStr);
+
+      return {
+        skip: false,
+        locNoOldRosterCompanySet, locBuildsFromJournals, locCallsPopulate,
+        worktypeBuildsFromJournals, worktypeCallsPopulate, worktypeOrderOK,
+        salaryCallsPopulate,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.locNoOldRosterCompanySet)
+      throw new Error('loadLocationStats() 仍殘留從整個 /students 集合建立公司清單的舊寫法（沙鹿等跨學期舊公司名稱會重新混入篩選清單）');
+    if (!result.locBuildsFromJournals)
+      throw new Error('loadLocationStats() 的公司清單未改成從目前日期範圍內的 journals 建立');
+    if (!result.locCallsPopulate)
+      throw new Error('loadLocationStats() 未呼叫 populateCompanyFilter(companies)');
+    if (!result.worktypeBuildsFromJournals)
+      throw new Error('loadWorkTypeStats() 未補上跟另外兩個統計一致的公司清單建立邏輯');
+    if (!result.worktypeCallsPopulate)
+      throw new Error('loadWorkTypeStats() 未呼叫 populateCompanyFilter(companies)，篩選清單仍會完全依賴地點/薪資統計哪個先跑完');
+    if (!result.worktypeOrderOK)
+      throw new Error('loadWorkTypeStats() 的 populateCompanyFilter() 沒有寫在 getSelectedCompanies() 之前，篩選清單刷新的時機不對');
+    if (!result.salaryCallsPopulate)
+      throw new Error('loadSalaryStats() 未呼叫 populateCompanyFilter(companies)');
+  });
+
+  await test('T-SEC-45 loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer()／loadSalaryStats() 的名冊備援 studentMap／stuCompanyMap／stuInfoMap 皆改用「學期＋座號」當 key，不再用裸座號合併整個 /students 集合', async () => {
+    // 背景：這四個函式建立「月記自己沒填 company/姓名時」的備援查詢表時，原本只用裸
+    // 座號當 key（studentMap[sno] = d.data() 或 stuCompanyMap[sno] = ...），會把不同
+    // 學期、同一個座號的多份 /students 文件互相覆蓋——即使 company 本身已是月記優先、
+    // 只在真的缺資料時才會用到這份備援，裸座號合併仍可能讓備援值跨學期撈到不相干的
+    // 舊資料（例如座號被重新分配給別的學生）。修法比照 exportAllStatsExcel() 既有的
+    // studentMap[`${s.semester}-${s.seatNo}`] 寫法，改用「學期＋座號」當 key；找不到
+    // semester 的舊格式文件（學期前綴架構上線之前）無法安全歸類，不納入這份備援 map。
+    // 2026-07-23 補齊第四處：loadSalaryStats() 自己的 stuCompanyMap／stuInfoMap（先前
+    // 三處已改，這處使用者確認範圍才一併補上，變數名不同（stuCompanyMap／stuInfoMap
+    // 而非 studentMap），連帶要求 getJournalCompany() 讀取時也同步改用學期＋座號 key，
+    // 否則不論其他三處建 map 的方式再正確，透過 getJournalCompany() 讀取這份 map 的
+    // 呼叫端（loadSalaryStats() 本身與 renderSalaryAlerts()）一樣會查不到、退回舊行為。
+    const result = await page.evaluate(() => {
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const locFnStr = (typeof loadLocationStats === 'function') ? codeOnly(loadLocationStats.toString()) : '';
+      const worktypeFnStr = (typeof loadWorkTypeStats === 'function') ? codeOnly(loadWorkTypeStats.toString()) : '';
+      const fetchFnStr = (typeof fetchJournalsFromServer === 'function') ? codeOnly(fetchJournalsFromServer.toString()) : '';
+      const salaryFnStr = (typeof loadSalaryStats === 'function') ? codeOnly(loadSalaryStats.toString()) : '';
+      const getCompanyFnStr = (typeof getJournalCompany === 'function') ? codeOnly(getJournalCompany.toString()) : '';
+      if (!locFnStr || !worktypeFnStr || !fetchFnStr || !salaryFnStr || !getCompanyFnStr) return { skip: true };
+
+      const check = (fnStr) => ({
+        writesSemesterScoped: /studentMap\[`\$\{sem\}-\$\{sno\}`\]\s*=/.test(fnStr),
+        noBareSeatNoWrite: !/studentMap\[sno\]\s*=\s*d\.data\(\)/.test(fnStr),
+      });
+
+      const loc = check(locFnStr);
+      const worktype = check(worktypeFnStr);
+      const fetchJ = check(fetchFnStr);
+
+      const locReadsSemesterScoped = /studentMap\[`\$\{data\.semester\}-\$\{data\.seatNo\}`\]/.test(locFnStr);
+      const worktypeReadsSemesterScoped = /studentMap\[`\$\{j\.semester\}-\$\{j\.seatNo\}`\]/.test(worktypeFnStr);
+      const fetchReadsSemesterScoped = /studentMap\[`\$\{j\.semester\}-\$\{j\.seatNo\}`\]/.test(fetchFnStr);
+
+      // loadSalaryStats() 用的是 stuCompanyMap／stuInfoMap，變數名跟另外三處不同，
+      // 分開檢查；寫入是 `${sem}-${sno}` 複合 key，且不再出現舊的裸座號寫法。
+      const salaryWritesSemesterScoped =
+        /stuCompanyMap\[`\$\{sem\}-\$\{sno\}`\]\s*=/.test(salaryFnStr) &&
+        /stuInfoMap\[`\$\{sem\}-\$\{sno\}`\]\s*=/.test(salaryFnStr);
+      const salaryNoBareSeatNoWrite =
+        !/stuCompanyMap\[sno\]\s*=/.test(salaryFnStr) &&
+        !/stuInfoMap\[sno\]\s*=/.test(salaryFnStr);
+      const salaryReadsSemesterScopedInfoMap = /stuInfoMap\[`\$\{j\.semester\}-\$\{j\.seatNo\}`\]/.test(salaryFnStr);
+      // getJournalCompany() 本身讀 stuCompanyMap 也要改成學期＋座號 key，否則
+      // loadSalaryStats()／renderSalaryAlerts() 兩個呼叫端都會查不到剛剛存進去的值。
+      const getCompanyReadsSemesterScoped = /stuCompanyMap\[`\$\{j\.semester\}-\$\{j\.seatNo\}`\]/.test(getCompanyFnStr);
+      const getCompanyNoOldBareRead = !/stuCompanyMap\[j\.seatNo\]/.test(getCompanyFnStr);
+
+      return {
+        skip: false,
+        loc, worktype, fetchJ,
+        locReadsSemesterScoped, worktypeReadsSemesterScoped, fetchReadsSemesterScoped,
+        salaryWritesSemesterScoped, salaryNoBareSeatNoWrite, salaryReadsSemesterScopedInfoMap,
+        getCompanyReadsSemesterScoped, getCompanyNoOldBareRead,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.loc.writesSemesterScoped || !result.loc.noBareSeatNoWrite)
+      throw new Error('loadLocationStats() 的 studentMap 仍用裸座號當 key，未改成學期＋座號範圍');
+    if (!result.worktype.writesSemesterScoped || !result.worktype.noBareSeatNoWrite)
+      throw new Error('loadWorkTypeStats() 的 studentMap 仍用裸座號當 key，未改成學期＋座號範圍');
+    if (!result.fetchJ.writesSemesterScoped || !result.fetchJ.noBareSeatNoWrite)
+      throw new Error('fetchJournalsFromServer() 的 studentMap 仍用裸座號當 key，未改成學期＋座號範圍');
+    if (!result.locReadsSemesterScoped)
+      throw new Error('loadLocationStats() 下游讀取 studentMap 時未使用學期＋座號 key');
+    if (!result.worktypeReadsSemesterScoped)
+      throw new Error('loadWorkTypeStats() 下游讀取 studentMap 時未使用學期＋座號 key');
+    if (!result.fetchReadsSemesterScoped)
+      throw new Error('fetchJournalsFromServer() 下游讀取 studentMap 時未使用學期＋座號 key');
+    if (!result.salaryWritesSemesterScoped || !result.salaryNoBareSeatNoWrite)
+      throw new Error('loadSalaryStats() 的 stuCompanyMap／stuInfoMap 仍用裸座號當 key，未改成學期＋座號範圍');
+    if (!result.salaryReadsSemesterScopedInfoMap)
+      throw new Error('loadSalaryStats() 下游讀取 stuInfoMap 時未使用學期＋座號 key');
+    if (!result.getCompanyReadsSemesterScoped || !result.getCompanyNoOldBareRead)
+      throw new Error('getJournalCompany() 讀取 stuCompanyMap 時未改成學期＋座號 key，loadSalaryStats()／renderSalaryAlerts() 會查不到剛存進去的值');
+  });
+
+  await test('T-SEC-46 exportAllStatsExcel() 五處公司欄位皆改為「月記優先、名冊備援」，跟「統計總覽」三頁籤統一邏輯', async () => {
+    // 背景：locationRows／salaryRows／salaryAlertRows「薪資缺漏」／companyAggMap
+    // （各公司薪資分組）／companyWorktypeMap（各公司工作類型分組）原本都是
+    // 「s.company || j.company」名冊優先，會讓已經換過公司的學生，Excel 匯出把整學期
+    // 所有月記都算成名冊上「目前」登記的那一間，即使某些月記當時實際待的是別間公司
+    // ——跟「統計總覽」三頁籤原本的 bug 是同一種問題。已確認統一改成月記優先，一次改
+    // 5 處，這裡驗證兩種寫法各自的出現次數，並確認舊的名冊優先寫法不再殘留。
+    const result = await page.evaluate(() => {
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = (typeof exportAllStatsExcel === 'function') ? codeOnly(exportAllStatsExcel.toString()) : '';
+      if (!fnStr) return { skip: true };
+
+      // locationRows／salaryRows／salaryAlertRows「薪資缺漏」共 3 處：
+      // 公司: sanitizeExcelCell(j.company || s.company || '')
+      const journalFirstSimpleCount = (fnStr.match(/公司\s*:\s*sanitizeExcelCell\(j\.company \|\| s\.company \|\| ''\)/g) || []).length;
+      // companyAggMap／companyWorktypeMap 分組 key 共 2 處：sanitizeExcelCell(j.company || (studentMap[...
+      const journalFirstStudentMapCount = (fnStr.match(/sanitizeExcelCell\(j\.company \|\| \(studentMap\[/g) || []).length;
+      // 舊的「名冊優先」寫法不應再出現在這個函式裡
+      const noOldRosterFirstPattern =
+        !/sanitizeExcelCell\(s\.company \|\| j\.company/.test(fnStr) &&
+        !/sanitizeExcelCell\(\(studentMap\[[^\]]*\][^)]*\)\?\.company\)\s*\|\|\s*j\.company/.test(fnStr);
+
+      return { skip: false, journalFirstSimpleCount, journalFirstStudentMapCount, noOldRosterFirstPattern };
+    });
+
+    if (result.skip) return;
+    if (result.journalFirstSimpleCount < 3)
+      throw new Error(`「公司: sanitizeExcelCell(j.company || s.company || '')」（月記優先）出現次數只有 ${result.journalFirstSimpleCount}（應為3：locationRows／salaryRows／salaryAlertRows 薪資缺漏），至少一處仍是名冊優先或退化`);
+    if (result.journalFirstStudentMapCount < 2)
+      throw new Error(`「sanitizeExcelCell(j.company || (studentMap[...）」（月記優先）出現次數只有 ${result.journalFirstStudentMapCount}（應為2：companyAggMap／companyWorktypeMap 分組），至少一處仍是名冊優先或退化`);
+    if (!result.noOldRosterFirstPattern)
+      throw new Error('exportAllStatsExcel() 仍殘留「s.company || j.company」名冊優先的舊寫法，跟「統計總覽」三頁籤的月記優先邏輯不一致');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

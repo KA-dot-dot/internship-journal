@@ -4669,13 +4669,22 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
 // 2026-07-22 修正：改成「月記自己當時寫入的 company 欄位優先」，名冊只在月記本身
 // 完全沒有 company（理論上不該發生，僅作保底備援）時才使用。原本「名冊優先」的寫法，
 // 會讓已經換過公司的學生（每份月記各自記錄當時真正待的公司）全部被硬套上「名冊目前
-// 登記的那一間」；若名冊資料還混進跨學期同座號的舊格式殘留文件（見 loadSalaryStats()／
-// loadLocationStats() 的 studentMap／stuCompanyMap 建立方式，只用裸座號當 key，不分
-// 學期），甚至可能整份查詢結果被歸到一個查詢範圍內根本不存在的舊公司，被公司篩選清單
-// 排除在外——這正是徐偉哲（12號）7月的薪資記錄從「統計總覽→薪資統計」消失、卻能正常
-// 出現在 Excel 匯出（Excel 當時已是月記優先）與 Firebase 實際文件裡的根本原因。
+// 登記的那一間」；若名冊資料還混進跨學期同座號的舊格式殘留文件（原本 loadSalaryStats()／
+// loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer() 的 studentMap／
+// stuCompanyMap 建立方式，都只用裸座號當 key，不分學期），甚至可能整份查詢結果被歸到
+// 一個查詢範圍內根本不存在的舊公司，被公司篩選清單排除在外——這正是徐偉哲（12號）7月
+// 的薪資記錄從「統計總覽→薪資統計」消失、卻能正常出現在 Excel 匯出（Excel 當時已是
+// 月記優先）與 Firebase 實際文件裡的根本原因。
+// 2026-07-23 補修：上面提到的四處「名冊備援用裸座號當key」問題，先前只修了
+// loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer() 三處，
+// loadSalaryStats() 自己的 stuCompanyMap／stuInfoMap 當時沒有一併處理（範圍只涵蓋
+// 使用者當時明確點名的三處）。這次補齊第四處：loadSalaryStats() 建立 stuCompanyMap
+// 時改用「學期＋座號」複合key（見該函式），這裡的查詢也同步改用同一種key格式，讓
+// getJournalCompany() 不論被哪個函式呼叫，只要傳入的 stuCompanyMap 是用複合key建的，
+// 就能正確運作——不需要在每個呼叫點各自處理，只要求「呼叫端建 map 時用這個 key 格式」
+// 這一個共同約定即可。
 function getJournalCompany(j, stuCompanyMap = {}) {
-  return normalizeCompanyName(j.company || stuCompanyMap[j.seatNo]);
+  return normalizeCompanyName(j.company || stuCompanyMap[`${j.semester}-${j.seatNo}`]);
 }
 
 function renderSalaryStatsFromCache(cache) {
@@ -4691,7 +4700,7 @@ function renderSalaryStatsFromCache(cache) {
     if (!studentMap[j.seatNo]) {
       studentMap[j.seatNo] = {
         seatNo: j.seatNo,
-        name: j.studentName || stuInfoMap[j.seatNo]?.name || '',
+        name: j.studentName || stuInfoMap[`${j.semester}-${j.seatNo}`]?.name || '',
         company: currentCompany,
         salaries: []
       };
@@ -4876,18 +4885,27 @@ async function loadSalaryStats() {
   ]);
   const stuCompanyMap = {};
   const stuInfoMap = {};
-  // 兼容新格式（{sem}_{seatNo}）與舊格式（無前綴）
+  // 2026-07-23 補修：改用「學期＋座號」當 key（比照 loadLocationStats()／
+  // loadWorkTypeStats()／fetchJournalsFromServer()／exportAllStatsExcel() 已修正的
+  // 寫法），不再用裸座號合併整個 /students 集合——這是 getJournalCompany() 上方註解
+  // 記錄的四處「名冊備援用裸座號」問題裡最後一處。找不到 semester（學期前綴架構上線
+  // 之前的舊格式文件）的資料無法安全歸類到特定學期，不納入這份 map，其對應座號只能
+  // 靠月記自己的 company 欄位處理（getJournalCompany() 本來就是月記優先，這份 map
+  // 只是備援）。
   stuSnap.docs.forEach(d => {
     const s = d.data();
     const sno = s.seatNo || (d.id.includes('_') ? d.id.split('_').slice(1).join('_') : d.id);
-    stuCompanyMap[sno] = normalizeCompanyName(s.company);
-    stuInfoMap[sno] = { seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
+    const sem = s.semester || (d.id.includes('_') ? d.id.split('_')[0] : null);
+    if (sem) {
+      stuCompanyMap[`${sem}-${sno}`] = normalizeCompanyName(s.company);
+      stuInfoMap[`${sem}-${sno}`] = { seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
+    }
   });
 
   let allActiveJournals = userJournalData(snap)
     .map(j => ({
       ...j,
-      studentName: j.studentName || stuInfoMap[j.seatNo]?.name || '',
+      studentName: j.studentName || stuInfoMap[`${j.semester}-${j.seatNo}`]?.name || '',
       // 2026-07-22 簡化：直接呼叫 getJournalCompany()（本身已是「月記優先、名冊備援」
       // 的完整判斷），不再手動重複一次「j.company || ...」的判斷邏輯——避免同一套
       // 判斷分別寫在兩個地方，未來只改其中一處、忘記同步另一處。

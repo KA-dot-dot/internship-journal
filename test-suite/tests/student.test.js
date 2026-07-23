@@ -1,7 +1,17 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v24
+ * 學生端自動化測試 v25
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v25 新增（2026-07-23）：對應同一輪對話發現並修正的「換公司後回頭編輯舊月份月記，公司
+ * 被覆蓋成目前名冊公司」問題（起因：徐偉哲12號從沙鹿冷氣換到金華節能空調後，7月薪資記錄
+ * 出現公司對不上的狀況）：
+ *   S-SEC-39  saveJournal() 只在第一次繳交時使用目前名冊公司，一般編輯改保留這份月記
+ *             自己原本記錄的公司（window._currentJournalCache.company），跟既有
+ *             submittedAt 只在第一次記錄、之後一律保留原值是同一種思路；連帶驗證
+ *             checkMonthDeadline()／editJournal() 的快取都補上 company，且畫面上的
+ *             write-company 顯示值在編輯既有月份時也改顯示這份月記當時的公司，不是
+ *             一律顯示目前名冊公司
  *
  * v24 新增（2026-07-17）：對應 student.html 新增「每月最少應繳篇數（minEntries）」概念——
  * 背景是 teacher.html 主頁 2026-07-16 起已改用篇數判斷是否已繳，但 student.html 對這個概念
@@ -2391,6 +2401,79 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('enterApp() 找不到 setTimeout(maybeShowPushEnableModal, 1500)，彈窗機制的唯一觸發點消失');
     if (!result.modalElExists)
       throw new Error('#push-enable-modal 這個 DOM 元素不存在於頁面上，maybeShowPushEnableModal() 顯示的目標消失了');
+  });
+
+  await test('S-SEC-39 saveJournal() 只在第一次繳交時使用目前名冊公司，一般編輯改保留這份月記自己原本記錄的公司', async () => {
+    // 2026-07-23 新增。背景：saveJournal() 原本無條件寫入 company: currentUser.company（目前
+    // 名冊上的公司），不分「這是第一次繳交」還是「回頭編輯任何舊月份」。若學生7月在A公司、
+    // 8月換到B公司後，回頭編輯7月月記並儲存，會把7月的 company 也覆蓋成B——老師端因此看到
+    // 7月顯示錯誤的公司。修法：比照既有 submittedAt 只在第一次記錄、之後一律保留原值的
+    // 做法，company 也只在 isFirstSubmit 為真時才用 currentUser.company，一般編輯改保留
+    // window._currentJournalCache.company（這份月記自己當初記錄的值）。
+    //
+    // 連帶修正：checkMonthDeadline()／editJournal() 的快取都要補上 company（否則
+    // saveJournal() 讀不到「原本記錄的公司」可以保留），且畫面上的「本月實習公司」欄位在
+    // 編輯既有月份時也要顯示這份月記當時的公司，不能一律顯示目前名冊公司，避免畫面顯示
+    // 跟實際儲存行為對不上（見 checkMonthDeadline()／editJournal() 各自補上的 write-company
+    // 顯示邏輯）。
+    //
+    // 驗證五項特徵（缺一即退化）：
+    //   1. checkMonthDeadline() 的 exists:true 快取分支有記錄 company
+    //   2. checkMonthDeadline() 在既有月記存在時，把 write-company 的顯示值設成
+    //      j.company || currentUser.company（不是只用 currentUser.company）
+    //   3. editJournal() 的快取物件也記錄 company，且同樣更新 write-company 顯示值
+    //   4. saveJournal() 的 freshSnap 現查快取（快取不新鮮時的備援路徑）也記錄 company，
+    //      否則快取新鮮度不符、需要現查時會漏記這個欄位
+    //   5. saveJournal() 寫入的 data.company 是「isFirstSubmit 才用 currentUser.company，
+    //      否則保留 _currentJournalCache.company」的條件式，不是無條件套用目前名冊公司
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      if (!checkFnStr || !saveFnStr || !editFnStr) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const checkCode = codeOnly(checkFnStr);
+      const saveCode = codeOnly(saveFnStr);
+      const editCode = codeOnly(editFnStr);
+
+      const checkCacheHasCompany = /exists:\s*true,\s*sem,\s*month,\s*company:\s*journalSnap\.data\(\)\.company/.test(checkCode);
+      const checkDisplaysJournalCompany = /write-company['"]\)\.value\s*=\s*j\.company\s*\|\|\s*currentUser\.company/.test(checkCode);
+
+      const editCacheHasCompany = /company:\s*j\.company\s*,/.test(editCode);
+      const editDisplaysJournalCompany = /write-company['"]\)\.value\s*=\s*j\.company\s*\|\|\s*currentUser\.company/.test(editCode);
+
+      const freshSnapCacheHasCompany = /company:\s*freshSnap\.data\(\)\.company/.test(saveCode);
+
+      const dataCompanyIsConditional =
+        /company:\s*isFirstSubmit\s*\?\s*\(currentUser\.company\s*\|\|\s*''\)\s*:\s*\(window\._currentJournalCache\?\.company\s*\|\|\s*currentUser\.company\s*\|\|\s*''\)/.test(saveCode);
+      // 不應再殘留舊的「無條件套用 currentUser.company」寫法
+      const noOldUnconditionalWrite = !/studentName:\s*currentUser\.name,\s*company:\s*currentUser\.company\s*\|\|\s*''/.test(saveCode);
+
+      return {
+        skip: false,
+        checkCacheHasCompany, checkDisplaysJournalCompany,
+        editCacheHasCompany, editDisplaysJournalCompany,
+        freshSnapCacheHasCompany,
+        dataCompanyIsConditional, noOldUnconditionalWrite,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.checkCacheHasCompany)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支找不到 company，saveJournal() 一般編輯時無法保留這份月記原本記錄的公司');
+    if (!result.checkDisplaysJournalCompany)
+      throw new Error('checkMonthDeadline() 載入既有月記時，write-company 顯示值未改成「這份月記自己的公司優先」，畫面仍只會顯示目前名冊公司，跟實際儲存行為對不上');
+    if (!result.editCacheHasCompany)
+      throw new Error('editJournal() 的快取物件找不到 company');
+    if (!result.editDisplaysJournalCompany)
+      throw new Error('editJournal() 未更新 write-company 顯示值為這份月記自己的公司');
+    if (!result.freshSnapCacheHasCompany)
+      throw new Error('saveJournal() 的快取新鮮度現查（freshSnap）備援路徑找不到 company，快取不新鮮需要現查時會漏記這個欄位');
+    if (!result.dataCompanyIsConditional)
+      throw new Error('saveJournal() 的 data.company 沒有「isFirstSubmit 才用目前名冊公司，否則保留原快取公司」的條件式寫法——換公司後回頭編輯舊月份仍可能把公司覆蓋掉');
+    if (!result.noOldUnconditionalWrite)
+      throw new Error('saveJournal() 仍殘留「company: currentUser.company || \'\'」無條件套用目前名冊公司的舊寫法');
   });
 
 
