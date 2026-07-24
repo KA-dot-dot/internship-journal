@@ -2134,8 +2134,12 @@ async function checkMonthDeadline(skipFill = false) {
   // 無從分辨快取到底是不是當下選定月份的資料。
   // 2026-07-22 補修：快取補上 company（這份月記自己記錄的公司，不是目前名冊上的公司），
   // 供 saveJournal() 判斷一般編輯時該保留哪個公司值（詳見 saveJournal() 對應註解）。
+  // 2026-07-24 補修：快取補上 entriesCount／entriesCompleteAt——「遲交」判斷改用「篇數
+  // 真正達到 minEntries 那一刻的時間」而非「第一次存檔的時間」（submittedAt），saveJournal()
+  // 需要知道「這次儲存之前」篇數是幾篇、以及先前是否已經記錄過達標時間，才能判斷這次存檔
+  // 是「維持已達標」還是「這次才剛好跨過門檻」，詳見 saveJournal() 對應註解。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false }
+    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false, entriesCount: (journalSnap.data().entries || []).length, entriesCompleteAt: journalSnap.data().entriesCompleteAt || null }
     : { exists: false, sem, month };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -3305,10 +3309,16 @@ async function saveJournal() {
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
   const { doc, getDoc, setDoc } = firebase_funcs;
+  // 2026-07-24 補修：順手記下這個月的 minEntries 原始值（沿用同一次既有的 deadlineSnap
+  // 查詢，不額外多打一次 Firestore），供下面計算 entriesCompleteAt（「篇數真正達到最少
+  // 應繳篇數那一刻」的時間）時使用；查詢失敗或找不到截止日文件時維持 undefined，
+  // resolveMinEntries() 本身的 fallback（未設定視為1）會處理這個情況。
+  let deadlineMinEntriesRaw;
   try {
     const deadlineSnap = await getDoc(doc(db, 'deadlines', `${sem}-${month}`));
     if (deadlineSnap.exists()) {
       const deadline = deadlineSnap.data();
+      deadlineMinEntriesRaw = deadline.minEntries;
       const now = new Date();
       const open = new Date(deadline.openDate + 'T00:00:00+08:00');
       if (now < open) return toast(`此月份尚未開放，開放日：${deadline.openDate}`, 'error');
@@ -3463,7 +3473,7 @@ async function saveJournal() {
     try {
       const freshSnap = await getDoc(journalRef);
       window._currentJournalCache = freshSnap.exists()
-        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false }
+        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null }
         : { exists: false, sem, month };
     } catch (e) {
       // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
@@ -3474,6 +3484,30 @@ async function saveJournal() {
     }
   }
   const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
+  // 2026-07-24 新增：entriesCompleteAt——記錄「篇數真正達到當月最少應繳篇數（minEntries）
+  // 那一刻」的時間，取代原本 teacher.html isJournalLate() 直接拿 submittedAt（第一次存檔
+  // 時間）判斷遲交的做法。背景：submittedAt 只在第一次存檔時寫死、之後編輯永遠不變，若
+  // 學生在截止日前搶先存了一份「篇數不足」的月記（例如只寫1篇，規定要2篇），之後不論拖
+  // 多久才補齊篇數，submittedAt 都還是那次準時的存檔時間，會讓系統誤判為「準時」，反而
+  // 比「完全沒動、到期限後才第一次動手寫」的學生更早被認定為已繳，不符合校方「篇數補齊
+  // 那一刻才算真正繳交完成」的判斷邏輯。
+  // 判斷方式：比較「這次存檔前」（entriesCountBefore，讀自快取）與「這次存檔後」
+  // （entries.length）的篇數是否都已達到目前的 minEntries 門檻——
+  //   ①這次存檔後仍未達標 → entriesCompleteAt 清空為 null（例如篇數不足月記做一般編輯，
+  //     或老師事後把 minEntries 調高導致原本已達標的月記重新變成不足，理當跟著清空）；
+  //   ②這次存檔前就已達標（wasCompleteBefore）→ 維持快取裡既有的 entriesCompleteAt 不變
+  //     （包含這個功能上線前就已經達標、從未有過這個欄位的舊資料，此時維持 null，讓
+  //     isJournalLate() 的 fallback 自動退回用 submittedAt 判斷，不會把一次單純編輯內容、
+  //     完全沒動到篇數的存檔，誤判成「現在才剛好達標」而錯誤蓋掉原本正確的準時記錄）；
+  //   ③這次存檔前還沒達標、這次才剛好跨過門檻 → 記錄現在的時間，這正是「真正達到最少
+  //     篇數要求」的那一刻。
+  const requiredMinEntries = resolveMinEntries({ minEntries: deadlineMinEntriesRaw });
+  const entriesCountBefore = window._currentJournalCache?.exists ? (window._currentJournalCache.entriesCount ?? 0) : 0;
+  const wasCompleteBefore = entriesCountBefore >= requiredMinEntries;
+  const isCompleteNow = entries.length >= requiredMinEntries;
+  const entriesCompleteAt = !isCompleteNow
+    ? null
+    : (wasCompleteBefore ? (window._currentJournalCache?.entriesCompleteAt || null) : localISOStr());
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name,
@@ -3492,6 +3526,7 @@ async function saveJournal() {
       ? localISOStr()                              // 第一次才記錄當下時間
       : window._currentJournalCache.submittedAt,    // 保留第一次繳交時間
     updatedAt: localISOStr(),                      // 每次儲存都更新
+    entriesCompleteAt,                             // 2026-07-24 新增：篇數真正達到 minEntries 那一刻的時間（見上方計算註解），null 表示尚未達標
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
     storagePath: 'user',
@@ -3889,6 +3924,7 @@ async function editJournal(seatNo, sem, month) {
   // 讓 saveJournal() 的快取新鮮度比對在「先編輯再儲存、未切換月份」這條路徑上能正確
   // 判定快取有效、不需要多一次不必要的現查。
   // 2026-07-22 補修：補上 company，理由同 checkMonthDeadline() 對應註解。
+  // 2026-07-24 補修：補上 entriesCount／entriesCompleteAt，理由同 checkMonthDeadline() 對應註解。
   window._currentJournalCache = {
     exists: true,
     sem, month,
@@ -3898,7 +3934,9 @@ async function editJournal(seatNo, sem, month) {
     teacherReviewed: j.teacherReviewed,
     teacherComment: j.teacherComment,
     studentReply: j.studentReply || null,
-    studentReplyUnread: j.studentReplyUnread || false
+    studentReplyUnread: j.studentReplyUnread || false,
+    entriesCount: (j.entries || []).length,
+    entriesCompleteAt: j.entriesCompleteAt || null
   };
   // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
   if (j.teacherCommentUnread) {

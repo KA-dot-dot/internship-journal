@@ -3951,11 +3951,20 @@ function buildDeadlineMap(deadlineSnap) {
   return map;
 }
 
+// 2026-07-24 修改：遲交判斷改用「篇數真正達到 minEntries 那一刻」的時間（entriesCompleteAt，
+// student.html saveJournal() 新增，見該檔案對應註解），取代原本直接用 submittedAt（第一次
+// 存檔時間）判斷。背景：submittedAt 只在第一次存檔時寫死、之後編輯不會再變，若學生在截止日
+// 前搶先存了一份「篇數不足」的月記（例如只寫1篇，規定要2篇），事後不論拖多久才補齊篇數，
+// submittedAt 都還是那次準時存檔的時間，會讓系統誤判為準時——等於「先隨便存一篇」反而比
+// 「完全沒動、到期限後才第一次動手寫」更早被判定為已繳，不符合「篇數補齊那一刻才算真正
+// 繳交完成」的判斷邏輯。entriesCompleteAt 為 null 或不存在（例如這個修法上線前就已經存在、
+// 從未有過這個欄位的舊資料）時，退回用 submittedAt 判斷，維持這批舊資料原本的判定結果不變，
+// 不需要額外的一次性遷移腳本。
 function isJournalLate(j, deadlineMap) {
   if (!j) return false;
   const closeDate = deadlineMap[`${j.semester}-${j.month}`]?.closeDate || '';
-  const submittedDate = j.submittedAt?.slice(0, 10) || '';
-  return !!(closeDate && submittedDate && submittedDate > closeDate);
+  const referenceDate = (j.entriesCompleteAt || j.submittedAt || '').slice(0, 10);
+  return !!(closeDate && referenceDate && referenceDate > closeDate);
 }
 
 // 2026-07-17 新增：月記是否「篇數達標」，跟 loadTeacherDashboard() 的 resolveMinEntries()
