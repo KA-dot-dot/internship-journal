@@ -3,11 +3,24 @@
  * 老師端自動化測試 v25
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
  *
- * v25（2026-07-23，同一輪對話延伸）：T-SEC-45 補齊第四處——`loadSalaryStats()` 自己的
+ * v25（2026-07-23，同一輪對話延伸）：
+ * ①T-SEC-45 補齊第四處——`loadSalaryStats()` 自己的
  * `stuCompanyMap`／`stuInfoMap` 先前不在範圍內（原本使用者只點名 loadLocationStats()／
  * loadWorkTypeStats()／fetchJournalsFromServer() 三處），這次確認一併補上，`getJournalCompany()`
- * 讀取時同步改用學期＋座號 key。測試數量不變，仍是「新增4條、修正1條」——只是把 T-SEC-45
- * 原本檢查的範圍從 3 個函式擴充為 4 個函式（同一條測試，不是新增測試 ID）。
+ * 讀取時同步改用學期＋座號 key。
+ * ②連帶修正 T-SEC-43 本身的測試固定資料（fixture）：`getJournalCompany()` 改成讀取
+ * `stuCompanyMap[\`${j.semester}-${j.seatNo}\`]`（複合 key）後，T-SEC-43 原本 mock 的
+ * `stuCompanyMap = { '12': ... }`（裸座號）與月記物件（沒有 `semester` 欄位）就對不上
+ * 新的 key 格式，導致「備援情境」那個斷言（月記完全沒有 company 時應退回名冊值）在
+ * GitHub Actions 上真的跑出失敗（真實 Playwright 執行結果：老師端 68/69，唯一失敗項
+ * 正是 T-SEC-43 這條）。**這不是 `getJournalCompany()` 本身的邏輯錯誤**——production
+ * 環境的月記文件一定有 `semester` 欄位，只有這條測試自己手刻的 mock 資料沒補上，是
+ * 測試固定資料沒跟著新的 key 格式同步更新（跟本專案先前「新增 seatNo 必填驗證後測試
+ * 固定資料未同步補欄位」是同一類問題）。修法：`stuCompanyMap` 改成
+ * `{ '115-1-12': ... }`，三個 mock 月記物件都補上 `semester: '115-1'`。已用實際
+ * `normalizeCompanyName()`／`getJournalCompany()` 邏輯在 Node 裡重新跑過這三個斷言，
+ * 確認修正後全數為 true。測試數量不變（仍是「新增4條、修正1條」，T-SEC-45 是延伸範圍
+ * 不是新測試，T-SEC-43 是修正既有測試的固定資料不是新增）。
  *
  * v24 新增／修正（2026-07-23）：對應同一輪對話發現並修正的「換公司後薪資統計/公司篩選清單
  * 出現學生消失／舊公司殘留」問題（起因：徐偉哲12號從沙鹿冷氣換到金華節能空調後，7月薪資
@@ -2233,14 +2246,18 @@ async function runTeacherTests(page, log) {
       if (typeof getJournalCompany !== 'function' || typeof normalizeCompanyName !== 'function')
         return { skip: true };
 
-      const stuCompanyMap = { '12': '金華節能空調科技有限公司' };
+      // 2026-07-23 補修：stuCompanyMap 改用「學期＋座號」複合 key（跟 getJournalCompany()
+      // 現在的讀取方式一致，見下方 loadSalaryStats() 那次補齊第4處的修法），mock 的月記
+      // 物件也補上 semester 欄位——真實 Firestore 月記文件一定有 semester，這裡原本沒帶
+      // 這個欄位單純是因為寫測試當下 getJournalCompany() 還是裸座號查找，這次一併同步。
+      const stuCompanyMap = { '115-1-12': '金華節能空調科技有限公司' };
 
       // 核心情境：月記自己有 company，名冊是不同（更新過）的公司 → 必須以月記為準
-      const journalWins = getJournalCompany({ seatNo: '12', company: '沙鹿冷氣有限公司' }, stuCompanyMap) === '沙鹿冷氣有限公司';
+      const journalWins = getJournalCompany({ seatNo: '12', semester: '115-1', company: '沙鹿冷氣有限公司' }, stuCompanyMap) === '沙鹿冷氣有限公司';
       // 備援情境：月記完全沒有 company（理論上不該發生的舊資料）→ 才退回名冊
-      const rosterFallback = getJournalCompany({ seatNo: '12', company: '' }, stuCompanyMap) === '金華節能空調科技有限公司';
+      const rosterFallback = getJournalCompany({ seatNo: '12', semester: '115-1', company: '' }, stuCompanyMap) === '金華節能空調科技有限公司';
       // 兩者皆無資料 → normalizeCompanyName() 的預設值「未填寫」
-      const bothMissingFallback = getJournalCompany({ seatNo: '99', company: '' }, {}) === '未填寫';
+      const bothMissingFallback = getJournalCompany({ seatNo: '99', semester: '115-1', company: '' }, {}) === '未填寫';
 
       // loadSalaryStats() 不應再重複維護一份「j.company || getJournalCompany(...)」的判斷，
       // 應直接呼叫共用函式本身——避免同一套邏輯分別寫在兩處、忘記同步。先用 codeOnly()
