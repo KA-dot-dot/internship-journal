@@ -838,6 +838,108 @@ async function main() {
   });
 
   // ════════════════════════════════════════════════════════════
+  // entriesCompleteAt（2026-07-25 新增：「篇數真正達到 minEntries 那一刻」的時間戳記，
+  // 2026-07-24 由 student.html saveJournal() 新增寫入，供 teacher.html isJournalLate()
+  // 判斷遲交用，取代原本只看 submittedAt 的做法，詳見 rule.txt 對應段落的完整說明）
+  // ════════════════════════════════════════════════════════════
+  // 跟 journalSubmitNotifiedAt／teacherCommentContentAt 等欄位不同，這個欄位在 CREATE
+  // 當下不是永遠固定為 null——學生若第一次繳交就直接寫滿達標篇數，entriesCompleteAt
+  // 在 CREATE 當下就會是一個真正的時間戳，不是 null，所以下面 CREATE 的測試組刻意
+  // 同時驗證「null 應成功」與「合法格式的時間戳應成功」兩種情境，不能只測其中一種。
+
+  await test('【2026-07-25】學生 CREATE 月記：entriesCompleteAt: null（篇數尚未達標，最常見的情境）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: null }))
+    );
+  });
+
+  await test('【2026-07-25】學生 CREATE 月記：完全不提 entriesCompleteAt 欄位 → 應成功（.get() 帶預設值對缺欄位一樣視為 null，理由同 journalSubmitNotifiedAt 對應測試）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-02`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL))
+    );
+  });
+
+  await test('【2026-07-25】學生 CREATE 月記：entriesCompleteAt 為合法格式的時間戳（第一次繳交就直接寫滿達標篇數的真實情境，見 saveJournal() isCompleteNow/wasCompleteBefore 判斷）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-03`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: '2026-07-24T10:30:00' }))
+    );
+  });
+
+  await test('【2026-07-25】學生 CREATE 月記：entriesCompleteAt 格式不符（帶毫秒/Z，非 localISOStr() 格式，同 studentReplyContentAt 那條測試的典型錯誤示範）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-04`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: new Date().toISOString() }))
+    );
+  });
+
+  await test('【2026-07-25】學生 CREATE 月記：entriesCompleteAt 為空字串（字典序比較下會被誤判「準時」的零成本偽造，正是這條格式驗證要擋的核心情境，見 rule.txt 對應段落說明）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-05`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: '' }))
+    );
+  });
+
+  await test('【2026-07-25】學生 CREATE 月記：entriesCompleteAt 寫入數字（非 string/null）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-complete-create-06`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: 20260724103000 }))
+    );
+  });
+
+  // 下面三條驗證一般編輯：entriesCompleteAt 沒有像 journalSubmitNotifiedAt 那樣「必須維持
+  // 原值不變」的限制，可以合法在 null 與時間戳之間雙向切換（篇數補齊/篇數又不足），故用
+  // withSecurityRulesDisabled 分別種好兩種舊值再測 merge:true 轉換，對稱驗證雙向都放行，
+  // 只有格式本身不合法才會被擋（第三條）。
+
+  await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 從既有的 null 變成合法時間戳（這次編輯剛好補齊篇數）→ 應成功', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: null }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '這次編輯補齊篇數', entriesCompleteAt: '2026-07-24T11:00:00' }), { merge: true })
+    );
+  });
+
+  await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 從既有的合法時間戳變回 null（篇數又不足，或老師調高 minEntries）→ 應成功', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: '2026-07-24T11:00:00' }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '這次編輯後篇數又不足', entriesCompleteAt: null }), { merge: true })
+    );
+  });
+
+  await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 塞入格式不合法的字串 → 應被拒', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: null }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想塞垃圾格式', entriesCompleteAt: '不是日期格式的字串' }), { merge: true })
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════
   // GET / LIST / DELETE
   // ════════════════════════════════════════════════════════════
   await test('學生可以 get 自己的月記', async () => {

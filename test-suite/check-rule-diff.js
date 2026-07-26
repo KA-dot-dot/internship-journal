@@ -147,6 +147,14 @@ const RISK_TARGETS = [
   // （DANGER_PATTERNS 漏 studentReply 家族）、2026-07-04（RISK_TARGETS 漏
   // /admins/{adminId} 區塊本身）是同一種「新增東西時監控清單忘記同步擴充」的模式。
   { name: 'function validFcmTokenWrite()', regex: /function\s+validFcmTokenWrite\s*\(/ },
+  // 2026-07-25 補上：validEntriesCompleteAt() 是跟 validFcmTokenWrite() 同層級的頂層輔助
+  // 函式（鎖住 entriesCompleteAt 欄位的格式——「篇數真正達到 minEntries 那一刻」的時間戳，
+  // 見 rule.txt 對應函式上方註解），CREATE／UPDATE 兩處呼叫端都巢狀在已監控的
+  // /users/{userId} 區塊裡才會被連帶抓到，函式定義本體自己需要獨立一條，否則弱化這個函式
+  // 內部驗證（例如拿掉格式正則、只剩 is string）不會被標記為高風險變更——跟
+  // validFcmTokenWrite() 當初補上這條的理由完全相同，這次是新增當下就同步補上，不是像
+  // 前幾次（2026-07-03／07-04／07-10）事後稽核才發現的模式。
+  { name: 'function validEntriesCompleteAt()', regex: /function\s+validEntriesCompleteAt\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },
@@ -533,23 +541,109 @@ function extractFieldsFromDirectSetUpdateCalls(testRulesContent) {
   return keys;
 }
 
-// 從 rule.txt 的 /users/{userId} 區塊裡，抽出所有「結構上看得出來正在驗證」的欄位
-// 名稱——只認幾種固定語法：.get('field', default)、xxx.data.field ==／!=、
+// 從全文抓出所有頂層 function 的定義本體（name -> 函式本體文字，不含 function 宣告
+// 那一行跟外層大括號本身）。2026-07-25 新增，供 extractRegulatedJournalFields() 使用——
+// 見該函式上方的完整說明：驗證邏輯如果被抽成共用函式（例如 validEntriesCompleteAt()），
+// 呼叫端只留下一個函式呼叫、看不到實際的 .get()／比對語法，反向掃描原本只看區塊字面文字
+// 會誤判成「完全沒有驗證」。用跟 extractBlock() 同一種括號配對邏輯抓出函式本體。
+//
+// 跟 findDeclaredFunctions() 一樣要求「function」出現在該行實際程式碼的開頭（trim 後），
+// 不能只是全文寬鬆搜尋——否則跟這次開發 callRe 那段一樣，會被解釋性註解裡提到的函式名稱
+// 字面文字誤判（例如某處註解寫「這個函式跟 function validXxx() 那種寫法類似」，字面上
+// 完全符合 regex 但不是真正的宣告）。做法：正規表達式全文搜尋到候選位置後，回頭檢查
+// 這個位置所在行、從行首到這個位置之間是否只有空白字元，不是的話代表「function」前面
+// 還有其他文字（最典型就是出現在 // 開頭的註解裡），視為假匹配並跳過。
+function extractTopLevelFunctionBodies(fullContent) {
+  const bodies = {};
+  const fnRe = /function\s+(\w+)\s*\([^)]*\)\s*\{/g;
+  let m;
+  while ((m = fnRe.exec(fullContent))) {
+    const lineStart = fullContent.lastIndexOf('\n', m.index) + 1;
+    const linePrefix = fullContent.slice(lineStart, m.index);
+    if (linePrefix.trim() !== '') continue; // 前面還有文字，不是真正的行首宣告，跳過
+    const name = m[1];
+    const braceOpen = fullContent.indexOf('{', m.index + m[0].length - 1);
+    const braceClose = findMatchingClose(fullContent, braceOpen, '{', '}');
+    if (braceClose === -1) continue;
+    bodies[name] = fullContent.slice(braceOpen + 1, braceClose);
+  }
+  return bodies;
+}
+
+
+// 從 rule.txt 的 /users/{userId}/journals/{journalId} 區塊裡，抽出所有「結構上看得出來
+// 正在驗證」的欄位名稱——只認幾種固定語法：.get('field', default)、xxx.data.field ==／!=、
 // xxx.data.field is string/bool/number/list/map、xxx.data.field.size()。故意不做
 // 全文字串搜尋，只認這幾種「真的在檢查這個欄位」的結構化寫法，避免像 semester 這種
 // 詞恰好出現在完全無關的註解裡（/students/{docId} 講 docId 命名格式的註解就提過
 // 「{semester}_{seatNo}」，跟月記文件的 semester 欄位是否被驗證完全無關）却被誤判
 // 成「已經提過」。
-function extractRegulatedJournalFields(usersBlockText) {
+//
+// 2026-07-25 補修：新增第二個參數 fullContent（完整 rule.txt 內容，選填）。起因：
+// entriesCompleteAt 的格式驗證抽成共用函式 validEntriesCompleteAt()（比照
+// validFcmTokenWrite() 的既有模式）後，journals 區塊裡只留下一個 `validEntriesCompleteAt()`
+// 呼叫，看不到實際的 `.get()`／格式比對語法本身，導致反向掃描誤判成「這個欄位完全沒有
+// 驗證」（Direction A 假警報——已用這次真實案例實測到，見下方 runReverseFieldScan()
+// 呼叫處的說明）。修法：如果有傳入 fullContent，額外找出區塊文字裡呼叫到的頂層共用函式
+// （零參數呼叫，例如 `validEntriesCompleteAt()`），把該函式的本體也一併納入掃描——這些
+// 函式雖然定義在區塊外，但驗證的欄位邏輯上仍屬於這個區塊，只是抽出去重用而已。
+//
+// 刻意只掃描「/journals/{journalId} 巢狀子區塊」本身（不是整個外層 /users/{userId}，
+// 那個還包含平行的 /fcmTokens/{tokenId} 子區塊）——原因：若掃描範圍是整個
+// /users/{userId}，區塊文字裡也會出現 `validFcmTokenWrite()` 這個呼叫（在
+// /fcmTokens/{tokenId} 底下），一旦解析函式呼叫，會把它的本體（驗證 createdAt／
+// userAgent，這兩個是 fcmTokens 文件的欄位，不是月記欄位）也納入「月記欄位」的掃描
+// 範圍，反而製造出新的假警報（誤判 createdAt／userAgent 是「規則有驗證但測試沒覆蓋」
+// 的月記欄位）。縮小範圍到只有 journals 子區塊本身，能同時解決這兩個問題：既修正
+// entriesCompleteAt 的假警報，也不會意外把 fcmTokens 的欄位混進來。
+function extractRegulatedJournalFields(usersBlockText, fullContent) {
   const fields = new Set();
   if (!usersBlockText) return fields;
-  const getRe = /\.get\(\s*['"]([a-zA-Z_][\w]*)['"]/g;
-  let m;
-  while ((m = getRe.exec(usersBlockText))) fields.add(m[1]);
-  const dotCompareRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:==|!=)/g;
-  while ((m = dotCompareRe.exec(usersBlockText))) fields.add(m[1]);
-  const dotTypeCheckRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:is\s+(?:string|bool|number|list|map)|\.size\(\))/g;
-  while ((m = dotTypeCheckRe.exec(usersBlockText))) fields.add(m[1]);
+
+  const scanText = (text) => {
+    const getRe = /\.get\(\s*['"]([a-zA-Z_][\w]*)['"]/g;
+    let mm;
+    while ((mm = getRe.exec(text))) fields.add(mm[1]);
+    const dotCompareRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:==|!=)/g;
+    while ((mm = dotCompareRe.exec(text))) fields.add(mm[1]);
+    const dotTypeCheckRe = /(?:request\.resource\.data|resource\.data)\.([a-zA-Z_][\w]*)\s*(?:is\s+(?:string|bool|number|list|map)|\.size\(\))/g;
+    while ((mm = dotTypeCheckRe.exec(text))) fields.add(mm[1]);
+  };
+
+  // 只鎖定巢狀的 /journals/{journalId} 子區塊（若抓不到就退回整個傳入的文字，維持
+  // 呼叫端沒有這個巢狀結構時仍可運作，不會直接壞掉）。
+  const journalsBlock = extractBlock(usersBlockText, /match\s+\/journals\/\{journalId\}/) || usersBlockText;
+  scanText(journalsBlock);
+
+  if (fullContent) {
+    const fnBodies = extractTopLevelFunctionBodies(fullContent);
+    // 2026-07-25 開發時期實測踩到的陷阱（跟這份文件自己記錄過四次的 S-SEC-08／T-SEC-30／
+    // S-SEC-29／T-SEC-34 同一種模式，這次是在寫「反向掃描」機制本身時犯的）：直接對
+    // journalsBlock 原始文字找零參數函式呼叫，會命中這次新增的解釋性註解本身——例如
+    // 「entriesCompleteAt 格式驗證抽成共用函式 validEntriesCompleteAt()（定義於檔案前段、
+    // validFcmTokenWrite() 旁，...)」這句話裡提到的 `validFcmTokenWrite()`，字面上跟真正
+    // 的函式呼叫語法一模一樣，但只是在說明「這個函式定義在哪裡附近」，不是真的呼叫它。
+    // 若不過濾就直接解析，會把 validFcmTokenWrite() 的本體（驗證 createdAt／userAgent，
+    // fcmTokens 的欄位、不是月記欄位）誤納入月記欄位的掃描範圍，製造新的假警報。修法：
+    // 逐行過濾掉註解（整行是註解的行整行跳過；行內文字後面接的 `//` 註解也一併截斷），
+    // 只對剩餘的程式碼文字找函式呼叫。
+    const codeOnlyText = journalsBlock
+      .split('\n')
+      .map((line) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//')) return '';
+        const commentIdx = line.indexOf('//');
+        return commentIdx === -1 ? line : line.slice(0, commentIdx);
+      })
+      .join('\n');
+    const callRe = /\b([a-zA-Z_]\w*)\s*\(\s*\)/g;
+    let m;
+    while ((m = callRe.exec(codeOnlyText))) {
+      const fnName = m[1];
+      if (fnBodies[fnName]) scanText(fnBodies[fnName]);
+    }
+  }
+
   return fields;
 }
 
@@ -585,7 +679,7 @@ function runReverseFieldScan(newRuleContent) {
   ]);
 
   const usersBlock = extractBlock(newRuleContent, /match\s+\/users\/\{userId\}/);
-  const regulatedFields = extractRegulatedJournalFields(usersBlock);
+  const regulatedFields = extractRegulatedJournalFields(usersBlock, newRuleContent);
 
   // Direction A：test-rules.js 測到了，但 rule.txt 完全沒管——這正是
   // journalSubmitNotifiedAt 那次真實漏洞的樣態。

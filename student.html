@@ -1594,6 +1594,34 @@ function resolveMinEntries(deadlineDoc) {
   return (Number.isInteger(v) && v >= 1) ? v : 1;
 }
 
+// 2026-07-25 新增：把 entriesCompleteAt（「篇數真正達到當月最少應繳篇數 minEntries 那一刻」
+// 的時間戳，2026-07-24 隨遲交判斷修正一起新增，見 saveJournal() 呼叫處）的計算邏輯抽成
+// 獨立純函式，跟 resolveMinEntries() 放在一起。抽出前這段判斷直接寫在 saveJournal() 內部，
+// 只能靠原始碼字串比對測試，沒辦法真正驗證每個分支的行為；抽出後可以像
+// resolveMinEntries() 一樣直接餵合成資料呼叫、斷言回傳值。
+// 參數：
+//   entriesCountBefore      這次存檔前的篇數（呼叫端讀自快取，快取不存在時視為0）
+//   entriesCompleteAtBefore 這次存檔前快取裡既有的 entriesCompleteAt 值（可能是 null）
+//   entriesCountAfter       這次存檔後的篇數（entries.length）
+//   requiredMinEntries      這個月的最少應繳篇數（resolveMinEntries() 算出的值）
+//   nowStr                  這次存檔的目前時間字串（呼叫端傳入 localISOStr()，這個純函式
+//                            本身不讀系統時間，同樣輸入必得到同樣輸出，才能被穩定測試）
+// 三種結果：
+//   ①這次存檔後仍未達標 → 回傳 null（篇數不足月記做一般編輯，或老師事後把 minEntries
+//     調高導致原本已達標的月記重新變成不足，理當跟著清空）
+//   ②這次存檔前就已達標 → 維持既有的 entriesCompleteAt 不變（包含這個欄位上線前就已經
+//     達標、從未有過這個欄位的舊資料，此時維持 null，讓 isJournalLate() 的 fallback
+//     自動退回用 submittedAt 判斷，不會把一次單純編輯內容、完全沒動到篇數的存檔，誤判成
+//     「現在才剛好達標」而錯誤蓋掉原本正確的準時記錄）
+//   ③這次存檔前還沒達標、這次才剛好跨過門檻 → 回傳 nowStr，這正是「真正達到最少篇數
+//     要求」的那一刻
+function computeEntriesCompleteAt(entriesCountBefore, entriesCompleteAtBefore, entriesCountAfter, requiredMinEntries, nowStr) {
+  const wasCompleteBefore = entriesCountBefore >= requiredMinEntries;
+  const isCompleteNow = entriesCountAfter >= requiredMinEntries;
+  if (!isCompleteNow) return null;
+  return wasCompleteBefore ? (entriesCompleteAtBefore || null) : nowStr;
+}
+
 // 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但篇數未達標的月份
 // （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）。
 // 2026-07-17 起：不再是「完全沒有月記文件」才算逾期，改用跟 teacher.html
@@ -3503,11 +3531,16 @@ async function saveJournal() {
   //     篇數要求」的那一刻。
   const requiredMinEntries = resolveMinEntries({ minEntries: deadlineMinEntriesRaw });
   const entriesCountBefore = window._currentJournalCache?.exists ? (window._currentJournalCache.entriesCount ?? 0) : 0;
-  const wasCompleteBefore = entriesCountBefore >= requiredMinEntries;
-  const isCompleteNow = entries.length >= requiredMinEntries;
-  const entriesCompleteAt = !isCompleteNow
-    ? null
-    : (wasCompleteBefore ? (window._currentJournalCache?.entriesCompleteAt || null) : localISOStr());
+  // 2026-07-25 補修：判斷邏輯抽成 computeEntriesCompleteAt()（定義於檔案前段、
+  // resolveMinEntries() 旁，供回歸測試直接呼叫驗證），這裡只負責從快取／DOM 讀值、
+  // 組裝參數呼叫它，行為與抽出前完全相同。
+  const entriesCompleteAt = computeEntriesCompleteAt(
+    entriesCountBefore,
+    window._currentJournalCache?.entriesCompleteAt,
+    entries.length,
+    requiredMinEntries,
+    localISOStr()
+  );
   const data = {
     seatNo: currentUser.seatNo, studentId: currentUser.studentId || '',
     studentName: currentUser.name,

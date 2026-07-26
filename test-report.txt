@@ -1,7 +1,7 @@
 ══════════════════════════════════════════════════
 產學班實習月記系統 自動化測試
-執行時間：2026/7/24 上午6:48:53
-對應 AI_CONTEXT.md 版本：2026-07-23
+執行時間：2026/7/26 下午2:00:52
+對應 AI_CONTEXT.md 版本：2026-07-25
 ══════════════════════════════════════════════════
 
 🤖 偵測到老師帳號 .env 設定，自動產生老師 session...
@@ -110,11 +110,13 @@
   ✅ S-SEC-37 loadStudentDashboard() 本月繳交狀態改用篇數判斷，並與 getOverdueMonths() 共用同一次 deadlines 查詢
   ✅ S-SEC-38 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門
   ✅ S-SEC-39 saveJournal() 只在第一次繳交時使用目前名冊公司，一般編輯改保留這份月記自己原本記錄的公司
+  ✅ S-SEC-40 computeEntriesCompleteAt() 篇數達標時間戳計算邏輯正確（涵蓋 2026-07-24 遲交判斷修正驗證過的 5 組情境＋1 組防止時間戳被無關編輯往前推進的補充情境）
+  ✅ S-SEC-41 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesCount／entriesCompleteAt，且 saveJournal() 寫入 payload 確實含 entriesCompleteAt 欄位
 
 ──────────────────────────────────────────────────
-學生端 測試結果：73/73 通過，0 失敗
+學生端 測試結果：75/75 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：22.3s
+耗時：21.8s
 
 ══════════════════════════════════════════════════
 老師端測試（teacher.html）
@@ -185,29 +187,26 @@
   ✅ T-SEC-40 copyMissingList() 複製到剪貼簿的文字不含姓名，只留座號＋篇數註記
   ✅ T-SEC-41 「本月已繳名單」（_statLists.submitted）改用 completeSeats 篩選，避免跟「本月已繳」卡片矛盾
   ✅ T-SEC-42 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門
-  ❌ T-SEC-43 getJournalCompany() 改為月記優先於名冊備援，loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式（12號徐偉哲換公司後從薪資統計消失的根本修正）
-     原因：getJournalCompany() 在月記完全沒有 company 時，未正確退回名冊備援值
+  ✅ T-SEC-43 getJournalCompany() 改為月記優先於名冊備援，loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式（12號徐偉哲換公司後從薪資統計消失的根本修正）
   ✅ T-SEC-44 公司篩選清單改由「目前日期範圍內的月記」自己的 company 欄位建立，不再讀取整個 /students 集合；loadWorkTypeStats() 補上一致的清單建立呼叫
   ✅ T-SEC-45 loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer()／loadSalaryStats() 的名冊備援 studentMap／stuCompanyMap／stuInfoMap 皆改用「學期＋座號」當 key，不再用裸座號合併整個 /students 集合
   ✅ T-SEC-46 exportAllStatsExcel() 五處公司欄位皆改為「月記優先、名冊備援」，跟「統計總覽」三頁籤統一邏輯
+  ✅ T-SEC-47 isJournalLate() 優先讀 entriesCompleteAt、缺欄位時退回用 submittedAt，且 isJournalComplete()／statusSymbolForJournal() 未被這次修改牽動
   ✅ T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
 
 ──────────────────────────────────────────────────
-老師端 測試結果：68/69 通過，1 失敗
-失敗項目：
-  ✗ T-SEC-43 getJournalCompany() 改為月記優先於名冊備援，loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式（12號徐偉哲換公司後從薪資統計消失的根本修正）
-    getJournalCompany() 在月記完全沒有 company 時，未正確退回名冊備援值
+老師端 測試結果：70/70 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：14.3s
+耗時：14.2s
 
 ══════════════════════════════════════════════════
 整體測試結果
 ══════════════════════════════════════════════════
-✅ 學生端：73/73 通過（22.3s）
-❌ 老師端：68/69 通過（14.3s）
+✅ 學生端：75/75 通過（21.8s）
+✅ 老師端：70/70 通過（14.2s）
 
-合計：141/142 通過，1 失敗
-總耗時：84.4s
+合計：145/145 通過，0 失敗
+總耗時：49.1s
 ══════════════════════════════════════════════════
 
 報告已儲存至：test-report.txt

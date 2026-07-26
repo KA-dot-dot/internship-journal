@@ -15,24 +15,31 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-07-23：student.test.js 73 項〔69個具名呼叫點 + 4次頁籤切換迴圈，
-    #     新增 S-SEC-39，驗證 saveJournal() 只在第一次繳交時使用目前名冊公司，一般編輯改
-    #     保留這份月記自己原本記錄的公司〕、teacher.test.js 69 項〔61個具名呼叫點 + 8次
-    #     頁籤切換迴圈，新增 T-SEC-43～46：getJournalCompany() 月記優先於名冊備援（12號
-    #     徐偉哲換公司後從薪資統計消失的根本修正）、地點/薪資/工作類型三頁籤公司篩選清單
-    #     統一改由目前日期範圍內的月記自己的 company 建立、四處名冊備援 studentMap／
-    #     stuCompanyMap／stuInfoMap 改用「學期＋座號」當 key（2026-07-23 稍後補齊第4處
-    #     loadSalaryStats() 自己的 stuCompanyMap／stuInfoMap，T-SEC-45 同步擴充覆蓋範圍，
-    #     測試數量不變）、Excel 匯出五處公司欄位統一月記優先；另外 T-SEC-40 本身
-    #     二度修正——第一次（2026-07-18）修的是「沒等背景 loadTeacherDashboard() 跑完就
-    #     覆寫合成資料」，這次找到的是不同的坑：改成先把 window._missingWithCount 清空成
-    #     undefined 再等它變回真正陣列，不再被其他跟這次載入無關的背景動作騙過去〕。
-    #     test-report.txt（2026/7/23 下午7:33:23 執行）確認 142/142 全過（學生端73/73、
-    #     老師端69/69，含本輪全部新增/修正測試皆正確通過）。
-    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18 過期四次，這是
-    #     第五次，見 AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後
-    #     新增/刪除測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 73 項 + 老師端 69 項）
+    #    （目前對應 2026-07-25：student.test.js 75 項〔71個具名呼叫點 + 4次頁籤切換迴圈，
+    #     新增 S-SEC-40／S-SEC-41〕、teacher.test.js 70 項〔62個具名呼叫點 + 8次頁籤切換
+    #     迴圈，新增 T-SEC-47〕，對應「7月截止日前只先寫1篇（規定2篇），8/1才補齊第2篇，
+    #     算不算遲繳？」這個情境提問後發現並修正的「遲交」判斷邏輯缺口——原本
+    #     teacher.html isJournalLate() 直接用 submittedAt（月記第一次存檔時間）比對截止
+    #     日，但 submittedAt 只在第一次存檔時寫死、之後編輯永遠不變，會把「先隨便存一篇
+    #     佔位」誤判成比「到期限後才第一次動手寫」更早繳交完成。修法新增
+    #     entriesCompleteAt（篇數真正達到 minEntries 那一刻的時間），isJournalLate()
+    #     改用 entriesCompleteAt || submittedAt 判斷；student.html 這部分的計算邏輯先
+    #     從 saveJournal() 內部抽成獨立純函式 computeEntriesCompleteAt()（跟
+    #     resolveMinEntries() 放在一起，行為完全不變，已用144組窮舉組合驗證新舊邏輯輸出
+    #     一致）才能被 S-SEC-40 直接呼叫帶合成資料測試；S-SEC-41 驗證三處快取 fallback
+    #     （checkMonthDeadline()／editJournal()／saveJournal() 自己的現查 fallback）皆
+    #     補上 entriesCount／entriesCompleteAt，且 saveJournal() 送出的 payload 確實含
+    #     這個欄位；T-SEC-47 直接呼叫 isJournalLate()／statusSymbolForJournal() 驗證
+    #     entriesCompleteAt 優先於 submittedAt、缺欄位時正確退回 submittedAt，並確認
+    #     isJournalComplete()／statusSymbolForJournal() 的既有判斷順序未被牽動。這輪
+    #     另外同步新增 rule.txt 對 entriesCompleteAt 的格式驗證（獨立函式
+    #     validEntriesCompleteAt()，比照 validFcmTokenWrite() 的既有模式）與
+    #     test-rules.js 對應的 9 條規則層回歸測試（111→120），完整技術細節見
+    #     AI_CONTEXT.md／AI_測試架構說明.md 對應更新。
+    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18／2026-07-23
+    #     過期五次，這是第六次，見 AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md
+    #     第四節陷阱17，之後新增/刪除測試時務必記得回來改這一行）。
+    name: 完整自動化測試（學生端 75 項 + 老師端 70 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼

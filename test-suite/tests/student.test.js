@@ -1,7 +1,24 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v25
+ * 學生端自動化測試 v26
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v26 新增（2026-07-25）：對應 2026-07-24「遲交」判斷修正（entriesCompleteAt 取代
+ * submittedAt）補上自動化測試——當時 AI_CONTEXT.md 明確記載「本輪未新增自動化測試，
+ * 列為已知缺口」，只用 Node 手動模擬跑過5組情境。這次先把計算邏輯從 saveJournal() 內部
+ * 抽成獨立純函式 computeEntriesCompleteAt()（定義於 resolveMinEntries() 旁，student.html
+ * 本身的重構，行為完全不變，已用 144 組窮舉組合驗證新舊邏輯輸出完全一致），再補上：
+ *   S-SEC-40  computeEntriesCompleteAt() 直接呼叫函式本體帶合成資料，驗證 2026-07-24
+ *             那次驗證過的5組情境（含核心目標情境「7月準時寫1篇、8/1才補齊第2篇→應
+ *             記錄8/1而非7月」）＋1組補充情境（已達標後續再新增篇數不應把時間戳往前推進）
+ *             皆回傳正確值
+ *   S-SEC-41  checkMonthDeadline()／editJournal()／saveJournal() 自己的快取新鮮度現查
+ *             fallback 三處，皆有把 entriesCount／entriesCompleteAt 補進快取物件（不只
+ *             是 S-SEC-40 驗證的計算邏輯本身正確，這條計算邏輯依賴的兩個輸入來源——
+ *             快取——也要確實補齊，否則邏輯再對也拿不到正確輸入）；並確認 saveJournal()
+ *             最終送出的 Firestore payload 確實含 entriesCompleteAt 欄位（shorthand
+ *             寫法），且用負向 lookbehind 排除掉呼叫 computeEntriesCompleteAt() 時作為
+ *             參數傳入的同名字串，避免測試誤判
  *
  * v25 新增（2026-07-23）：對應同一輪對話發現並修正的「換公司後回頭編輯舊月份月記，公司
  * 被覆蓋成目前名冊公司」問題（起因：徐偉哲12號從沙鹿冷氣換到金華節能空調後，7月薪資記錄
@@ -2474,6 +2491,138 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('saveJournal() 的 data.company 沒有「isFirstSubmit 才用目前名冊公司，否則保留原快取公司」的條件式寫法——換公司後回頭編輯舊月份仍可能把公司覆蓋掉');
     if (!result.noOldUnconditionalWrite)
       throw new Error('saveJournal() 仍殘留「company: currentUser.company || \'\'」無條件套用目前名冊公司的舊寫法');
+  });
+
+  await test('S-SEC-40 computeEntriesCompleteAt() 篇數達標時間戳計算邏輯正確（涵蓋 2026-07-24 遲交判斷修正驗證過的 5 組情境＋1 組防止時間戳被無關編輯往前推進的補充情境）', async () => {
+    // 2026-07-25 新增。背景：2026-07-24 那輪「遲交」判斷修正（entriesCompleteAt 取代
+    // submittedAt 判斷準時/遲繳）當時只用 Node 手動模擬跑過 5 組情境，AI_CONTEXT.md
+    // 明確記載「本輪未新增自動化測試，列為已知缺口」。這條測試把當時的手動驗證變成真正的
+    // 回歸測試：判斷邏輯本身已抽成獨立純函式 computeEntriesCompleteAt()（定義於
+    // resolveMinEntries() 旁），直接呼叫函式本體帶合成資料驗證回傳值，不做原始碼字串比對。
+    const result = await page.evaluate(() => {
+      if (typeof computeEntriesCompleteAt !== 'function') return { skip: true };
+      const NOW = '2026-08-01T09:00:00';
+
+      // 情境1：完全沒交，8/1 才第一次寫完整規定的2篇 → 應記錄現在（8/1）的時間，
+      // 之後 isJournalLate() 拿這個時間跟7月截止日比較會判定遲繳。
+      const case1 = computeEntriesCompleteAt(0, null, 2, 2, NOW);
+
+      // 情境2a：7月準時只先寫1篇（規定2篇，尚未達標）→ 應為 null。
+      const case2a = computeEntriesCompleteAt(0, null, 1, 2, '2026-07-20T09:00:00');
+      // 情境2b：緊接著 8/1 才補齊第2篇（entriesCountBefore 讀自情境2a存檔後的快取，
+      // entriesCompleteAtBefore 也是情境2a算出的 null）→ 應記錄現在（8/1）的時間，
+      // 不是7月那次「準時但不足額」的存檔時間——這正是本次修法要解決的核心情境：
+      // 「先隨便存一篇佔位」不該比「到期限後才第一次動手寫」更早被判定為已繳。
+      const case2b = computeEntriesCompleteAt(1, case2a, 2, 2, NOW);
+
+      // 情境3：準時一次寫足2篇（規定2篇）→ 應記錄現在（準時）的時間。
+      const case3 = computeEntriesCompleteAt(0, null, 2, 2, '2026-07-20T09:00:00');
+
+      // 情境4：這個功能上線前就已達標的舊資料（entriesCompleteAtBefore 從未寫過、是
+      // null），之後單純編輯心得、entries 數量完全不變（篇數維持達標）→ 應維持 null
+      // 不變，不能因為一次跟篇數無關的編輯就被誤判成「現在才剛好達標」，讓
+      // isJournalLate() 的 fallback 繼續退回用 submittedAt 判斷，不錯誤蓋掉原本
+      // 正確的準時記錄。
+      const case4 = computeEntriesCompleteAt(2, null, 2, 2, NOW);
+
+      // 情境5：篇數不足做一般編輯（規定2篇、still只有1篇）→ 應維持 null（這個情境
+      // 本來就不會被 isJournalLate() 讀到，因為 statusSymbolForJournal() 會先被
+      // isJournalComplete() 擋在 △，但 computeEntriesCompleteAt() 本身仍要正確清空）。
+      const case5 = computeEntriesCompleteAt(1, null, 1, 2, NOW);
+
+      // 情境6（補充）：已達標且已有既有時間戳，之後又新增一篇（entries 數量增加，但
+      // 早已達標），例如規定2篇、原本3篇存過的時間戳是7月的準時值，這次編輯變成4篇
+      // → 應維持原本 7 月那個既有時間戳不變，不會因為篇數繼續增加就被推進到現在，
+      // 避免「達標之後任何一次編輯都被誤判成新的達標時刻」。
+      const existingTimestamp = '2026-07-20T09:00:00';
+      const case6 = computeEntriesCompleteAt(3, existingTimestamp, 4, 2, NOW);
+
+      return {
+        skip: false,
+        case1, case2a, case2b, case3, case4, case5, case6,
+      };
+    });
+
+    if (result.skip) return;
+    if (result.case1 !== '2026-08-01T09:00:00')
+      throw new Error(`情境1（完全沒交、8/1才第一次寫完2篇）應記錄現在的時間，實際得到 ${result.case1}`);
+    if (result.case2a !== null)
+      throw new Error(`情境2a（準時但只交1篇、規定2篇）應為 null（尚未達標），實際得到 ${result.case2a}`);
+    if (result.case2b !== '2026-08-01T09:00:00')
+      throw new Error(`情境2b（7月準時寫1篇、8/1才補齊第2篇）應記錄8/1補齊當下的時間，不能沿用7月那次不足額的存檔時間，實際得到 ${result.case2b}——這正是本次遲交判斷修正要解決的核心情境，若此測試失敗代表修法可能已被還原`);
+    if (result.case3 !== '2026-07-20T09:00:00')
+      throw new Error(`情境3（準時一次寫足2篇）應記錄準時當下的時間，實際得到 ${result.case3}`);
+    if (result.case4 !== null)
+      throw new Error(`情境4（功能上線前已達標的舊資料，單純編輯心得不動篇數）應維持 null 讓 isJournalLate() 退回用 submittedAt 判斷，實際得到 ${result.case4}——不該被無關的編輯誤判成剛好達標`);
+    if (result.case5 !== null)
+      throw new Error(`情境5（篇數不足做一般編輯）應維持 null，實際得到 ${result.case5}`);
+    if (result.case6 !== '2026-07-20T09:00:00')
+      throw new Error(`情境6（已達標後續新增篇數不應推進時間戳）應維持原本的既有時間戳不變，實際得到 ${result.case6}`);
+  });
+
+  await test('S-SEC-41 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesCount／entriesCompleteAt，且 saveJournal() 寫入 payload 確實含 entriesCompleteAt 欄位', async () => {
+    // 2026-07-25 新增。背景：computeEntriesCompleteAt()（S-SEC-40）驗證的是計算邏輯本身
+    // 「輸入正確時輸出對不對」，但這條計算邏輯的兩個輸入（entriesCountBefore／
+    // entriesCompleteAtBefore）都讀自 window._currentJournalCache——如果快取寫入的地方
+    // 漏了這兩個欄位，S-SEC-40 驗證過的邏輯再正確也沒用（永遠拿到 undefined，
+    // entriesCountBefore 會被 saveJournal() 的 `?? 0` 救回來，但 entriesCompleteAtBefore
+    // 沒有這層防護，undefined 在 computeEntriesCompleteAt() 內部 `entriesCompleteAtBefore
+    // || null` 這一步雖然結果上跟 null 相同，仍然值得直接鎖住快取寫入本身，而不是依賴
+    // 這個巧合）。這條測試直接檢查三處快取寫入（checkMonthDeadline() 的 exists:true 分支、
+    // editJournal()、saveJournal() 自己的現查 fallback）與最終送出的 payload，跟
+    // S-SEC-32（檢查 sem/month）是同一類「快取結構完整性」測試，只是這次檢查的是另外
+    // 兩個新欄位。刻意用「精確錨定實際賦值語法」而非寬鬆字串搜尋，避開這份專案已經記錄
+    // 過四次的「regex 命中函式內部解釋性註解」陷阱——這幾處函式上方的中文說明本身就會
+    // 反覆提到 entriesCount／entriesCompleteAt 這兩個字，若只檢查「字串裡有沒有出現」
+    // 會恆為真、測不出任何退化。
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!checkFnStr || !editFnStr || !saveFnStr) return { skip: true };
+
+      // checkMonthDeadline() 的 exists:true 分支（journalSnap.data() 讀值）
+      const checkHasEntriesCount = checkFnStr.includes('entriesCount: (journalSnap.data().entries || []).length');
+      const checkHasEntriesCompleteAt = checkFnStr.includes('entriesCompleteAt: journalSnap.data().entriesCompleteAt || null');
+
+      // editJournal() 的快取物件（j 是 journalSnap.data()）
+      const editHasEntriesCount = editFnStr.includes('entriesCount: (j.entries || []).length');
+      const editHasEntriesCompleteAt = editFnStr.includes('entriesCompleteAt: j.entriesCompleteAt || null');
+
+      // saveJournal() 自己的「快取新鮮度現查」fallback（freshSnap 讀值）
+      const saveFallbackHasEntriesCount = saveFnStr.includes('entriesCount: (freshSnap.data().entries || []).length');
+      const saveFallbackHasEntriesCompleteAt = saveFnStr.includes('entriesCompleteAt: freshSnap.data().entriesCompleteAt || null');
+
+      // saveJournal() 最終送出的 payload——用 shorthand property 寫法 `entriesCompleteAt,`，
+      // 用負向 lookbehind 排除前面接 `.` 的情況（例如呼叫 computeEntriesCompleteAt() 時
+      // 傳入的 `window._currentJournalCache?.entriesCompleteAt,` 這個參數，同樣文字但
+      // 是讀取快取值當參數，不是最終要寫入 Firestore 的 payload 欄位本身，兩者不能混淆）
+      const payloadMatches = saveFnStr.match(/(?<!\.)\bentriesCompleteAt\s*,/g) || [];
+
+      return {
+        skip: false,
+        checkHasEntriesCount, checkHasEntriesCompleteAt,
+        editHasEntriesCount, editHasEntriesCompleteAt,
+        saveFallbackHasEntriesCount, saveFallbackHasEntriesCompleteAt,
+        payloadMatchCount: payloadMatches.length,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.checkHasEntriesCount)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支缺少 entriesCount');
+    if (!result.checkHasEntriesCompleteAt)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支缺少 entriesCompleteAt');
+    if (!result.editHasEntriesCount)
+      throw new Error('editJournal() 的快取物件缺少 entriesCount');
+    if (!result.editHasEntriesCompleteAt)
+      throw new Error('editJournal() 的快取物件缺少 entriesCompleteAt');
+    if (!result.saveFallbackHasEntriesCount)
+      throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少 entriesCount，快取不新鮮需要現查時會漏記這個欄位');
+    if (!result.saveFallbackHasEntriesCompleteAt)
+      throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少 entriesCompleteAt');
+    if (result.payloadMatchCount !== 1)
+      throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
   });
 
 

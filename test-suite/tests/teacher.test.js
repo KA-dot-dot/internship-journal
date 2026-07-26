@@ -1,7 +1,20 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v25
+ * 老師端自動化測試 v26
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v26 新增（2026-07-25）：對應 2026-07-24「遲交」判斷修正（isJournalLate() 改用
+ * entriesCompleteAt || submittedAt，取代直接用 submittedAt）補上自動化測試——當時
+ * AI_CONTEXT.md 明確記載「本輪未新增自動化測試，列為已知缺口」。isJournalLate() 本身
+ * 已經是乾淨的獨立函式，不需要像 student.html 那樣先重構才能測：
+ *   T-SEC-47  isJournalLate() 直接呼叫函式本體帶合成資料，驗證 entriesCompleteAt 優先於
+ *             submittedAt（含核心目標情境「entriesCompleteAt遲交、submittedAt若被誤讀
+ *             會判準時」）、entriesCompleteAt 為 null／欄位不存在兩種情況皆正確退回用
+ *             submittedAt；並用 statusSymbolForJournal() 端對端驗證目標情境本身（篇數
+ *             達標、submittedAt準時、entriesCompleteAt遲交 → 應顯示▲）；另外兩項回歸
+ *             確認 isJournalComplete()／statusSymbolForJournal() 沒有被這次修改牽動
+ *             （isJournalComplete() 完全不提 entriesCompleteAt，statusSymbolForJournal()
+ *             仍然是先擋 isJournalComplete() 才判斷 isJournalLate()，順序沒有被調換）
  *
  * v25（2026-07-23，同一輪對話延伸）：
  * ①T-SEC-45 補齊第四處——`loadSalaryStats()` 自己的
@@ -2462,6 +2475,106 @@ async function runTeacherTests(page, log) {
       throw new Error(`「sanitizeExcelCell(j.company || (studentMap[...）」（月記優先）出現次數只有 ${result.journalFirstStudentMapCount}（應為2：companyAggMap／companyWorktypeMap 分組），至少一處仍是名冊優先或退化`);
     if (!result.noOldRosterFirstPattern)
       throw new Error('exportAllStatsExcel() 仍殘留「s.company || j.company」名冊優先的舊寫法，跟「統計總覽」三頁籤的月記優先邏輯不一致');
+  });
+
+  await test('T-SEC-47 isJournalLate() 優先讀 entriesCompleteAt、缺欄位時退回用 submittedAt，且 isJournalComplete()／statusSymbolForJournal() 未被這次修改牽動', async () => {
+    // 2026-07-25 新增。背景：2026-07-24 那輪「遲交」判斷修正——isJournalLate() 從直接用
+    // submittedAt（月記第一次存檔時間）比對截止日，改成優先讀 entriesCompleteAt（篇數
+    // 真正達到 minEntries 那一刻的時間），缺這個欄位時才退回用 submittedAt——當時
+    // AI_CONTEXT.md 明確記載「本輪未新增自動化測試，列為已知缺口」。這條測試直接呼叫
+    // isJournalLate()／statusSymbolForJournal() 本體帶合成資料驗證，不做原始碼字串比對。
+    //
+    // 驗證六項：
+    //   caseA  entriesCompleteAt 有值且準時（即使 submittedAt 若被誤讀會判成遲交）→ 準時
+    //   caseB  entriesCompleteAt 有值且遲交（即使 submittedAt 若被誤讀會判成準時）→ 遲交，
+    //          這正是 2026-07-24 修法要解決的核心情境本身：學生7月準時先存一份篇數不足
+    //          的月記（submittedAt=準時），8/1才真正補齊篇數（entriesCompleteAt=遲）
+    //   caseC  entriesCompleteAt 為 null（例如篇數不足的文件，或這個功能上線前已達標的
+    //          舊資料）→ 退回用 submittedAt 判斷，這裡準時
+    //   caseD  entriesCompleteAt 欄位完全不存在（更貼近真實舊資料的形狀——Firestore
+    //          文件本來就不會有從未寫過的欄位）→ 同樣退回用 submittedAt，這裡遲交
+    //   caseE  端對端（statusSymbolForJournal()）：篇數已達標（2/2）、submittedAt準時、
+    //          entriesCompleteAt遲交 → 應顯示▲，不是✓，重現目標情境本身
+    //   caseF  篇數不足（1/2）、entriesCompleteAt 刻意塞一個很早的日期 → 應顯示△，不會
+    //          被 isJournalLate() 讀到（isJournalComplete() 先擋下），驗證「entries不夠時
+    //          偽造 entriesCompleteAt 沒有用」這件事本身沒有被意外破壞
+    // 另外兩項回歸確認：isJournalComplete() 完全不提 entriesCompleteAt（沒有被這次修改
+    // 誤觸），statusSymbolForJournal() 仍然是先呼叫 isJournalComplete() 才呼叫
+    // isJournalLate()（順序沒有被調換，維持「篇數不夠時完全不看遲交判斷」的既有行為）。
+    const result = await page.evaluate(() => {
+      if (typeof isJournalLate !== 'function' || typeof statusSymbolForJournal !== 'function' || typeof isJournalComplete !== 'function') {
+        return { skip: true };
+      }
+      const deadlineMap = { '115-1-7': { minEntries: 2, closeDate: '2026-07-31' } };
+
+      const caseA = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-08-10T00:00:00',
+        entriesCompleteAt: '2026-07-20T00:00:00',
+      }, deadlineMap);
+
+      const caseB = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-08-01T00:00:00',
+      }, deadlineMap);
+
+      const caseC = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: null,
+      }, deadlineMap);
+
+      const caseD = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-08-15T00:00:00',
+      }, deadlineMap);
+
+      const caseE = statusSymbolForJournal({
+        semester: '115-1', month: 7,
+        entries: [{}, {}],
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-08-01T00:00:00',
+      }, deadlineMap);
+
+      const caseF = statusSymbolForJournal({
+        semester: '115-1', month: 7,
+        entries: [{}],
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-01-01T00:00:00',
+      }, deadlineMap);
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const isJournalCompleteUntouched = !codeOnly(isJournalComplete.toString()).includes('entriesCompleteAt');
+      const statusFnCode = codeOnly(statusSymbolForJournal.toString());
+      const completeCallIdx = statusFnCode.indexOf('isJournalComplete(');
+      const lateCallIdx = statusFnCode.indexOf('isJournalLate(');
+      const completeCheckedBeforeLate = completeCallIdx !== -1 && lateCallIdx !== -1 && completeCallIdx < lateCallIdx;
+
+      return {
+        skip: false,
+        caseA, caseB, caseC, caseD, caseE, caseF,
+        isJournalCompleteUntouched, completeCheckedBeforeLate,
+      };
+    });
+
+    if (result.skip) return;
+    if (result.caseA !== false)
+      throw new Error(`情境A（entriesCompleteAt準時，submittedAt若誤讀會判遲交）應為準時(false)，實際得到 ${result.caseA}——代表函式沒有優先讀 entriesCompleteAt`);
+    if (result.caseB !== true)
+      throw new Error(`情境B（entriesCompleteAt遲交，submittedAt若誤讀會判準時）應為遲交(true)，實際得到 ${result.caseB}——這正是2026-07-24修法要解決的核心情境，若此測試失敗代表修法可能已被還原`);
+    if (result.caseC !== false)
+      throw new Error(`情境C（entriesCompleteAt為null，退回submittedAt準時）應為準時(false)，實際得到 ${result.caseC}`);
+    if (result.caseD !== true)
+      throw new Error(`情境D（entriesCompleteAt欄位不存在，退回submittedAt遲交）應為遲交(true)，實際得到 ${result.caseD}`);
+    if (result.caseE !== '▲')
+      throw new Error(`情境E（端對端：篇數達標、entriesCompleteAt遲交）應顯示▲，實際得到 ${result.caseE}`);
+    if (result.caseF !== '△')
+      throw new Error(`情境F（篇數不足、entriesCompleteAt偽造成很早的日期）應顯示△不受影響，實際得到 ${result.caseF}——若不是△代表 isJournalComplete() 的擋關失效了`);
+    if (!result.isJournalCompleteUntouched)
+      throw new Error('isJournalComplete() 不應提到 entriesCompleteAt，這次修改理當只動 isJournalLate() 本身');
+    if (!result.completeCheckedBeforeLate)
+      throw new Error('statusSymbolForJournal() 應先呼叫 isJournalComplete() 才呼叫 isJournalLate()，順序被調換的話「篇數不夠時完全不看遲交判斷」這個既有行為會被破壞');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
