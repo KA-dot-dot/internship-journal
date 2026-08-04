@@ -832,6 +832,26 @@ tr:last-child td { border-bottom: none; }
             <div id="stat-list-names-submitted" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
         </div>
+        <!-- 2026-08-04 新增：已逾期未達標——跟上面「本月未繳」不同，這裡不看「今天在哪個月」，
+             只看「這個月的截止日是否已經過去」，不受換月份影響（見 loadTeacherDashboard() 對應
+             註解與 toggleOverduePanel()）。刻意獨立成單張全寬卡片（跟「跨月待複審」同款），
+             不塞進上面「學生繳交概況」那組4張卡片，避免手機版2欄格線變成5張時最後一張落單。 -->
+        <div style="font-size:15px;font-weight:700;margin:18px 0 12px">⏰ 已逾期未達標</div>
+        <div class="stats-grid" style="grid-template-columns:1fr">
+          <div class="stat-card" onclick="toggleOverduePanel()" style="cursor:pointer;user-select:none" title="點擊查看名單">
+            <div class="stat-label">已過截止日仍未達標 <span style="font-size:10px;color:var(--text2)">（點擊查看）</span></div>
+            <div class="stat-value" id="stat-overdue">-</div>
+          </div>
+        </div>
+        <div id="stat-list-panel-overdue" style="display:none;margin-bottom:4px">
+          <div class="card" style="border-left:3px solid var(--accent-yellow);padding:14px 18px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700;color:var(--accent-yellow)">⏰ 已逾期未達標名單</div>
+              <button class="btn btn-secondary btn-sm" onclick="copyOverdueList()" id="copy-overdue-btn">📋 複製名單</button>
+            </div>
+            <div id="stat-list-names-overdue"></div>
+          </div>
+        </div>
         <div style="font-size:15px;font-weight:700;margin:18px 0 12px">老師審閱進度</div>
         <div class="stats-grid">
           <div class="stat-card" onclick="toggleStatList('reviewed')" style="cursor:pointer;user-select:none" title="點擊查看名單">
@@ -2743,6 +2763,54 @@ async function loadTeacherDashboard() {
     const partial = thisEntriesCount > 0;
     return { label, labelNoName, sno, name, missCount, partial };
   });
+  // 2026-08-04 新增：「已逾期未達標」——跟上面「本月未繳」不同，這裡不看「今天在哪個月」，
+  // 只看「這個月的截止日是否已經過去」（跟 student.html getOverdueMonths() 完全同一套判斷），
+  // 逐一檢查本學期已設定的每個月截止日，只要 closeDate 已過（closeDt < now）且該生篇數未
+  // 達標，就會一直留在這裡直到補齊為止，不受「今天是幾號、對應到哪個月」影響，不會因為
+  // 換月份（例如 7/31 忘記催、8/1 之後才打開後台）而消失或跟本月的名單混在一起，也不會誤用
+  // 本月的截止日文字（原本 copyMissingList() 換月後只會顯示新月份的deadline，容易誤導）。
+  const nowForOverdue = new Date();
+  const overdueGroupsRaw = [];
+  Object.values(deadlineDataMap).forEach(dd => {
+    if (dd.semester !== sem || !dd.month || !dd.closeDate) return;
+    const closeDt = new Date(dd.closeDate + 'T23:59:59+08:00');
+    if (isNaN(closeDt.getTime()) || closeDt >= nowForOverdue) return;
+    const required = resolveMinEntries(dd);
+    const monthStudents = activeStuDocs.map(d => {
+      const sno = d.data().seatNo || d.id.slice(semPrefix.length);
+      const name = d.data().name || sno;
+      const cnt = (semJournalsBySeq[sno] && semJournalsBySeq[sno].get(dd.month)) || 0;
+      return { sno, name, entriesCount: cnt };
+    }).filter(s => s.entriesCount < required);
+    if (monthStudents.length > 0) {
+      overdueGroupsRaw.push({
+        month: dd.month,
+        closeDate: dd.closeDate,
+        required,
+        students: monthStudents.map(s => ({
+          sno: s.sno,
+          name: s.name,
+          annotation: s.entriesCount > 0
+            ? `（已交${s.entriesCount}篇，尚差${Math.max(required - s.entriesCount, 0)}篇）`
+            : ''
+        }))
+      });
+    }
+  });
+  window._overdueGroups = overdueGroupsRaw.sort((a, b) => a.month - b.month);
+  // 供點擊名單直接跳去審閱（跟跨月待複審 _crossMonthClickData 同一套用法）
+  window._overdueClickData = window._overdueGroups.flatMap(g =>
+    g.students.map(s => ({ seatNo: s.sno, name: s.name, semester: sem, month: g.month }))
+  );
+  // 卡片數字採「逾期人數」（不重複計算學生：同一位學生欠2個月只算1人），跟 missCount
+  // badge（累計缺繳月數，人次概念）刻意採不同計算方式，各自服務不同用途
+  const overdueUniqueSeats = new Set();
+  window._overdueGroups.forEach(g => g.students.forEach(s => overdueUniqueSeats.add(s.sno)));
+  const overdueEl = document.getElementById('stat-overdue');
+  if (overdueEl) {
+    overdueEl.textContent = overdueUniqueSeats.size;
+    overdueEl.style.color = overdueUniqueSeats.size > 0 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+  }
   window._statLists = {
     missing:    window._missingWithCount.map(s => s.label),
     // 2026-07-17 修正：原本用 activeJournals（本月有存檔就算，不論篇數）建立「已繳名單」，
@@ -2796,7 +2864,7 @@ async function loadTeacherDashboard() {
     crossMonthEl.style.color = crossMonthJournals.length > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
   }
   // 重設所有展開面板
-  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month','overdue'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2810,7 +2878,7 @@ async function loadTeacherDashboard() {
   } catch(e) {
     console.error('主頁資料載入失敗', e);
     toast('主頁資料載入失敗：' + (e.message || '請重新整理'), 'error');
-    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-student-reply','stat-cross-month'].forEach(id => {
+    ['stat-total-students','stat-submitted','stat-missing','stat-reviewed','stat-unreviewed','stat-commented','stat-student-reply','stat-cross-month','stat-overdue'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '-';
     });
     document.getElementById('stat-rate').textContent = '-';
@@ -2873,6 +2941,34 @@ async function copyMissingList() {
   });
 }
 
+// 2026-08-04 新增：複製「已逾期未達標」名單——跟 copyMissingList() 不同，不需要另外
+// getDoc() 讀截止日（window._overdueGroups 已經帶著每個月各自正確的 closeDate），一次
+// 複製全部已逾期月份，訊息內依月份分段，每段各自附上正確的截止日文字，不會像換月後的
+// 「本月未繳」那樣只剩一個籠統的deadline、混淆到底是哪個月過期。跟 copyMissingList()
+// 一致，複製版本只留座號＋篇數註記，不附姓名（手機排版考量，畫面上的名單仍完整顯示姓名）。
+function copyOverdueList() {
+  const groups = window._overdueGroups || [];
+  if (groups.length === 0) {
+    toast('目前沒有已逾期未達標的月份，無需提醒', 'info');
+    return;
+  }
+  const sections = groups.map(g => {
+    const parts = (g.closeDate || '').split('-');
+    const deadlineStr = parts.length === 3 ? `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}` : '';
+    const deadlineLine = deadlineStr ? `截止日 ${deadlineStr}（已逾期）` : '（已逾期）';
+    const lines = g.students.map(s => `${s.sno}${s.annotation}`);
+    return `【${g.month}月】${deadlineLine}\n${lines.join('\n')}`;
+  });
+  const text = `【月記逾期提醒】\n以下同學已過截止日仍未達標，請儘速補齊：\n\n${sections.join('\n\n')}`;
+  const btn = document.getElementById('copy-overdue-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製名單'; }, 2000); }
+    toast('已複製已逾期名單，可直接貼到 LINE 群組', 'success');
+  }).catch(() => {
+    prompt('請手動複製以下內容：', text);
+  });
+}
+
 function toggleStatList(key) {
   const cfg = {
     missing:        { color:'var(--accent-red)',    empty:'✅ 本月所有學生皆已繳交！' },
@@ -2886,7 +2982,7 @@ function toggleStatList(key) {
   const namesEl = document.getElementById(`stat-list-names-${key}`);
   if (!panel) return;
   // 關閉其他面板
-  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month','overdue'].forEach(k => {
     if (k !== key) { const p = document.getElementById(`stat-list-panel-${k}`); if (p) p.style.display = 'none'; }
   });
   const isHidden = panel.style.display === 'none';
@@ -2970,7 +3066,7 @@ function toggleCrossMonthPanel() {
   const namesEl = document.getElementById('stat-list-names-cross-month');
   if (!panel) return;
   // 關閉其他所有面板
-  ['missing','submitted','reviewed','unreviewed','commented'].forEach(k => {
+  ['missing','submitted','reviewed','unreviewed','commented','overdue'].forEach(k => {
     const p = document.getElementById(`stat-list-panel-${k}`);
     if (p) p.style.display = 'none';
   });
@@ -2997,6 +3093,51 @@ function toggleCrossMonthPanel() {
   } else {
     panel.style.display = 'none';
   }
+}
+
+// 2026-08-04 新增：已逾期未達標名單——依月份分組呈現（跟 toggleCrossMonthPanel() 同款
+// 排版），每個月份標題旁附上那個月正確的截止日，不受目前是本學期哪個月影響。
+function toggleOverduePanel() {
+  const panel = document.getElementById('stat-list-panel-overdue');
+  const namesEl = document.getElementById('stat-list-names-overdue');
+  if (!panel) return;
+  // 關閉其他所有面板
+  ['missing','submitted','reviewed','unreviewed','commented','student-reply','cross-month'].forEach(k => {
+    const p = document.getElementById(`stat-list-panel-${k}`);
+    if (p) p.style.display = 'none';
+  });
+  const isHidden = panel.style.display === 'none';
+  if (isHidden) {
+    const groups = window._overdueGroups || [];
+    if (groups.length === 0) {
+      namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 目前沒有已逾期未達標的月份</span>';
+    } else {
+      let flatIdx = 0;
+      namesEl.innerHTML = groups.map(g => {
+        const parts = (g.closeDate || '').split('-');
+        const closeLabel = parts.length === 3 ? `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}` : (g.closeDate || '');
+        const badges = g.students.map(s => {
+          const myIdx = flatIdx++;
+          const display = escapeHtml(`${s.sno} ${s.name}${s.annotation}`);
+          return `<span onclick="goFromOverdue(${myIdx})" style="background:rgba(245,158,11,0.12);color:var(--accent-yellow);border:1px solid var(--accent-yellow);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+        }).join('');
+        const monthLabel = escapeHtml(g.month + ' 月　截止日 ' + closeLabel);
+        return `<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px">📅 ${monthLabel}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${badges}</div></div>`;
+      }).join('');
+    }
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+// 從已逾期未達標名單進入審閱隊列
+function goFromOverdue(idx) {
+  const items = window._overdueClickData || [];
+  const i = Number(idx);
+  if (!items[i]) return;
+  window._reviewQueue = { items, currentIndex: i };
+  viewStudentJournals(items[i].seatNo, items[i].name, items[i].semester);
 }
 
 // 查詢按鈕包裝：審閱模式時顯示提示，仍執行查詢
