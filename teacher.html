@@ -4787,7 +4787,7 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     .sort((a,b)=>b.gap-a.gap);
 
   function peopleItems(items, type) {
-    return items.slice(0, 5).map(s => {
+    return items.map(s => {
       const pct = classAvg ? Math.round((s.avg - classAvg) / classAvg * 100) : 0;
       const note = type === 'low' ? `低於平均 ${Math.abs(pct)}%` : `高於平均 ${pct}%`;
       return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.seatNo)} ${escapeHtml(s.name || '-')}</div><div class="salary-alert-note">${escapeHtml(s.company || '-')}｜${note}</div></div><strong>${formatMoney(s.avg)}</strong></div>`;
@@ -4795,7 +4795,7 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   }
 
   function missingItems(items) {
-    return items.slice(0, 5).map(j => {
+    return items.map(j => {
       // 2026-07-22 修正：改用 getJournalCompany()（月記優先、名冊備援），跟其餘薪資
       // 統計欄位使用同一套判斷依據，不再自己另外維護一份「名冊優先」的邏輯。
       const company = getJournalCompany(j, stuCompanyMap) || '-';
@@ -4804,7 +4804,7 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   }
 
   function gapItems(items) {
-    return items.slice(0, 5).map(c =>
+    return items.map(c =>
       `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(c.name)}</div><div class="salary-alert-note">最高 ${formatMoney(c.max)}｜最低 ${formatMoney(c.min)}</div></div><strong>差 ${formatMoney(c.gap)}</strong></div>`
     ).join('');
   }
