@@ -2957,7 +2957,7 @@ function copyOverdueList() {
   const sections = groups.map(g => {
     const parts = (g.closeDate || '').split('-');
     const deadlineStr = parts.length === 3 ? `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}` : '';
-    const deadlineLine = deadlineStr ? `截止日 ${deadlineStr}（已逾期）` : '（已逾期）';
+    const deadlineLine = deadlineStr ? `截止日 ${deadlineStr}` : '';
     const lines = g.students.map(s => `${s.sno}${s.annotation}`);
     return `【${g.month}月】${deadlineLine}\n${lines.join('\n')}`;
   });
