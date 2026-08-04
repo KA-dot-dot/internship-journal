@@ -2690,6 +2690,19 @@ async function loadTeacherDashboard() {
   // 2026-07-16 新增：本月「已完成」改為篇數需達到 minEntries 才算，不再是「有存檔就算」——
   // 只交1篇但規定要2篇的學生，這裡不算完成，會落入下方的未繳名單（含篇數註記）。
   const requiredThisMonth = resolveMinEntries(deadlineDataMap[`${sem}-${thisMonth}`]);
+  // 2026-08-04 補修：把「本月未繳名單」複製文字需要的截止日字串，改在這裡（本函式本來就會
+  // 一次讀完整個 /deadlines 集合）順便算好、存進全域變數，讓 copyMissingList() 不需要再自己
+  // await getDoc() 額外查一次 Firestore——手機 Safari 對 navigator.clipboard.writeText()
+  // 有跟 Notification.requestPermission()（見 AI_推播系統說明.md #22）同一種限制：必須是
+  // 使用者這次點擊的直接延伸，中途只要夾了一次 await，就可能被視為「不是剛剛的使用者操作」
+  // 而靜默拒絕寫入，讓函式落入 catch 分支跳出「請手動複製」的 prompt()。桌面版瀏覽器普遍
+  // 對這條限制寬鬆很多，才會出現「電腦正常、手機要手動複製」的落差。跟 copyOverdueList() 用
+  // window._overdueGroups 預先快取 closeDate、整個函式維持同步呼叫是同一套思路。
+  const thisMonthCloseDate = (deadlineDataMap[`${sem}-${thisMonth}`] && deadlineDataMap[`${sem}-${thisMonth}`].closeDate) || '';
+  const closeDateParts = thisMonthCloseDate.split('-');
+  window._missingDeadlineStr = closeDateParts.length === 3
+    ? `${closeDateParts[0]}/${parseInt(closeDateParts[1])}/${parseInt(closeDateParts[2])}`
+    : '';
   const completeSeats = new Set(activeJournals.filter(j => (j.entries || []).length >= requiredThisMonth).map(j => j.seatNo));
   const submitted = completeSeats.size;
   const missing = total - submitted;
@@ -2889,29 +2902,24 @@ async function loadTeacherDashboard() {
   }
 }
 
-async function copyMissingList() {
+// 2026-08-04 補修：拿掉 async／await getDoc()，改為單純同步函式——截止日字串已由
+// loadTeacherDashboard() 讀取整個 /deadlines 集合時預先算好存進 window._missingDeadlineStr
+// （見該函式內對應註解），這裡直接讀取即可，不需要再自己額外查一次 Firestore。原本的
+// async/await 寫法會在 navigator.clipboard.writeText() 之前夾一次非同步等待，手機 Safari
+// 對這個 API 的限制跟 Notification.requestPermission()（AI_推播系統說明.md #22）同一種：
+// 必須是使用者這次點擊動作的直接延伸，中途有 await 就可能被判定「不是剛剛的使用者操作」而
+// 靜默拒絕，導致落入 catch 分支跳出「請手動複製」的 prompt()——這正是桌面版正常、手機版要
+// 手動複製的落差來源。改成同步函式後，跟本來就沒有這個問題的 copyOverdueList()（讀取
+// window._overdueGroups 預先快取的 closeDate，同樣全程同步）行為一致。
+function copyMissingList() {
   const list = (window._statLists || {}).missing || [];
   if (list.length === 0) {
     toast('本月所有學生皆已繳交，無需提醒', 'info');
     return;
   }
-  const { semester: sem, month: thisMonth } = getCurrentSemMonth();
+  const { month: thisMonth } = getCurrentSemMonth();
   const ceYear = new Date().getFullYear();  // 西元年，例如 2026
-  // 讀取截止日
-  let deadlineStr = '';
-  try {
-    const { doc, getDoc } = firebase_funcs;
-    const snap = await getDoc(doc(db, 'deadlines', `${sem}-${thisMonth}`));
-    if (snap.exists()) {
-      const raw = snap.data().closeDate || '';   // 格式 YYYY-MM-DD
-      if (raw) {
-        const parts = raw.split('-');             // ['2026','06','30']
-        deadlineStr = `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}`;  // '2026/6/30'
-      }
-    }
-  } catch(e) {
-    console.warn('複製名單：截止日讀取失敗', e);
-  }
+  const deadlineStr = window._missingDeadlineStr || '';
   const deadlineLine = deadlineStr
     ? `請於 ${deadlineStr} 前完成：`
     : '請盡快完成：';
