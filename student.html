@@ -3347,7 +3347,16 @@ function compressSalaryPhoto(file) {
       img.onerror = () => reject(new Error('圖片格式無法讀取'));
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxW = 800, maxH = 600;
+        // 2026-08-05 補修：薪資單截圖多為手機直式長圖（寬高比常接近 0.46，類似
+        // 1080x2340 螢幕截圖），若沿用一般工作照片的 maxH=600，寬度會被高度這條
+        // 限制壓到只剩約277px，數字/表格文字嚴重模糊。改成 maxH=1200 後，同一張
+        // 截圖輸出約 554x1200（寬度x2、總像素x4），文字清晰度明顯提升；儲存空間
+        // 仍遠低於 SALARY_PHOTO_TOTAL_LIMIT（單張約23KB提升至4倍仍遠低於總額度
+        // 650000字元，5張仍綽綽有餘）。刻意只調整這支薪資單專用的壓縮函式，不動
+        // handlePhotoUpload()（一般工作照片，走 Cloudinary，maxW=800/maxH=600
+        // 維持不變）——兩者用途與儲存方式不同，薪資單需要保留小字清晰度、工作照片
+        // 是一般拍照內容，不需要同步放寬。
+        const maxW = 800, maxH = 1200;
         let w = img.width, h = img.height;
         if (w > maxW) { h = h * maxW / w; w = maxW; }
         if (h > maxH) { w = w * maxH / h; h = maxH; }
