@@ -1,7 +1,11 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v26
+ * 老師端自動化測試 v27
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v27 新增（2026-08-05）：對應學生端薪資單由單張 salaryPhoto 改為 salaryPhotos 陣列：
+ *   T-SEC-48  新舊資料格式皆可讀取，localStorage 快取會移除兩種 Base64 欄位而保留照片
+ *             張數，老師按需載入、月記卡片與 PDF 匯出皆會顯示所有薪資單。
  *
  * v26 新增（2026-07-25）：對應 2026-07-24「遲交」判斷修正（isJournalLate() 改用
  * entriesCompleteAt || submittedAt，取代直接用 submittedAt）補上自動化測試——當時
@@ -2575,6 +2579,38 @@ async function runTeacherTests(page, log) {
       throw new Error('isJournalComplete() 不應提到 entriesCompleteAt，這次修改理當只動 isJournalLate() 本身');
     if (!result.completeCheckedBeforeLate)
       throw new Error('statusSymbolForJournal() 應先呼叫 isJournalComplete() 才呼叫 isJournalLate()，順序被調換的話「篇數不夠時完全不看遲交判斷」這個既有行為會被破壞');
+  });
+
+  await test('T-SEC-48 老師端完整支援多張薪資單：新舊資料相容、快取排除 Base64、按需載入/卡片/PDF 均遍歷 salaryPhotos', async () => {
+    const result = await page.evaluate(() => {
+      const onDemandFn = (typeof loadSalaryPhotoOnDemand === 'function') ? loadSalaryPhotoOnDemand.toString() : '';
+      const cacheFn = (typeof saveJournalsToCache === 'function') ? saveJournalsToCache.toString() : '';
+      const cardFn = (typeof renderJournalCard === 'function') ? renderJournalCard.toString() : '';
+      const pdfFn = (typeof preparePdfJournalImages === 'function') ? preparePdfJournalImages.toString() : '';
+      if (!onDemandFn || !cacheFn || !cardFn || !pdfFn || typeof getJournalSalaryPhotos !== 'function' || typeof renderSalaryPhotosHtml !== 'function') return { skip: true };
+
+      const newFormat = getJournalSalaryPhotos({ salaryPhotos: ['first', '', 42, 'second'] });
+      const legacyFormat = getJournalSalaryPhotos({ salaryPhoto: 'legacy' });
+      const html = renderSalaryPhotosHtml({ salaryPhotos: ['first', 'second'] });
+
+      return {
+        skip: false,
+        newFormat: JSON.stringify(newFormat) === JSON.stringify(['first', 'second']),
+        legacyFormat: JSON.stringify(legacyFormat) === JSON.stringify(['legacy']),
+        displayAll: html.includes('薪資單（2 張）') && (html.match(/class="entry-photo"/g) || []).length === 2,
+        cacheRemovesBoth: /const\s*\{\s*salaryPhoto\s*,\s*salaryPhotos\s*,\s*\.\.\.rest\s*\}\s*=\s*j/.test(cacheFn) && cacheFn.includes('salaryPhotoCount: photos.length'),
+        onDemandReadsArray: onDemandFn.includes('getJournalSalaryPhotos(snap.data())') && onDemandFn.includes('salaryPhotos.map') && onDemandFn.includes('escapeHtml'),
+        cardReadsArray: cardFn.includes('getJournalSalaryPhotos(j).length') && cardFn.includes('renderSalaryPhotosHtml(j)'),
+        pdfReadsArray: pdfFn.includes('getJournalSalaryPhotos(j).map(imageToDataUrl)') && pdfFn.includes('_pdfSalaryPhotos'),
+      };
+    });
+    if (result.skip) return;
+    if (!result.newFormat || !result.legacyFormat) throw new Error('老師端 getJournalSalaryPhotos() 未同時相容 salaryPhotos 新格式與 salaryPhoto 舊格式');
+    if (!result.displayAll) throw new Error('老師端月記卡片未顯示所有薪資單照片或未顯示正確張數');
+    if (!result.cacheRemovesBoth) throw new Error('老師端 localStorage 快取未同時排除 salaryPhoto 與 salaryPhotos Base64，可能造成 QuotaExceededError');
+    if (!result.onDemandReadsArray) throw new Error('老師端按需載入薪資單沒有讀取所有 salaryPhotos，或圖片 src 未經 escapeHtml');
+    if (!result.cardReadsArray) throw new Error('老師端月記卡片沒有改用多張薪資單渲染邏輯');
+    if (!result.pdfReadsArray) throw new Error('老師端 PDF 匯出沒有遍歷所有薪資單照片');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

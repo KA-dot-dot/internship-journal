@@ -1,13 +1,31 @@
 ══════════════════════════════════════════════════
 產學班實習月記系統 自動化測試
-執行時間：2026/7/26 下午2:10:31
+執行時間：2026/8/5 上午2:22:44
 對應 AI_CONTEXT.md 版本：2026-07-25
 ══════════════════════════════════════════════════
 
 🤖 偵測到老師帳號 .env 設定，自動產生老師 session...
 
 🔑 自動登入測試老師帳號：test-teacher@tcivs.tc.edu.tw
+  ❌ T-SEC-40 copyMissingList() 複製到剪貼簿的文字不含姓名，只留座號＋篇數註記
+     原因：等待 loadTeacherDashboard() 真正完成逾時（window._missingWithCount 15 秒內未變回陣列），可能是背景載入本身卡住或逾時，非本測試邏輯問題
+  ✅ T-SEC-41 「本月已繳名單」（_statLists.submitted）改用 completeSeats 篩選，避免跟「本月已繳」卡片矛盾
+  ✅ T-SEC-42 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門
    ✅ Firebase SDK 登入成功（uid: lJQpjeeehog177mCrW2IKwzvdE43）
+  ✅ T-SEC-43 getJournalCompany() 改為月記優先於名冊備援，loadSalaryStats()／renderSalaryAlerts() 皆已改呼叫共用函式（12號徐偉哲換公司後從薪資統計消失的根本修正）
+  ✅ T-SEC-44 公司篩選清單改由「目前日期範圍內的月記」自己的 company 欄位建立，不再讀取整個 /students 集合；loadWorkTypeStats() 補上一致的清單建立呼叫
+  ✅ T-SEC-45 loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer()／loadSalaryStats() 的名冊備援 studentMap／stuCompanyMap／stuInfoMap 皆改用「學期＋座號」當 key，不再用裸座號合併整個 /students 集合
+  ✅ T-SEC-46 exportAllStatsExcel() 五處公司欄位皆改為「月記優先、名冊備援」，跟「統計總覽」三頁籤統一邏輯
+  ✅ T-SEC-47 isJournalLate() 優先讀 entriesCompleteAt、缺欄位時退回用 submittedAt，且 isJournalComplete()／statusSymbolForJournal() 未被這次修改牽動
+  ✅ T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
+
+──────────────────────────────────────────────────
+老師端 測試結果：69/70 通過，1 失敗
+失敗項目：
+  ✗ T-SEC-40 copyMissingList() 複製到剪貼簿的文字不含姓名，只留座號＋篇數註記
+    等待 loadTeacherDashboard() 真正完成逾時（window._missingWithCount 15 秒內未變回陣列），可能是背景載入本身卡住或逾時，非本測試邏輯問題
+──────────────────────────────────────────────────
+耗時：43.9s
    🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"lJQpjeeehog177mCrW2IKwzvdE43","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n\n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n"}
    🔍 Console（最後 8 筆）：
       [console.log] ✅ Firebase 連線成功
@@ -20,6 +38,18 @@
 🤖 偵測到學生帳號 .env 設定，自動產生學生 session...
 
 🔑 自動登入測試學生帳號：test-student@tcivs.tc.edu.tw
+
+══════════════════════════════════════════════════
+整體測試結果
+══════════════════════════════════════════════════
+✅ 學生端：75/75 通過（25.5s）
+❌ 老師端：69/70 通過（43.9s）
+
+合計：144/145 通過，1 失敗
+總耗時：133.6s
+══════════════════════════════════════════════════
+
+報告已儲存至：test-report.txt
    ✅ Firebase SDK 登入成功（uid: YYltObOqHVZtmW5DhhMPjVT8vs93）
    🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"YYltObOqHVZtmW5DhhMPjVT8vs93","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n "}
    🔍 Console（最後 8 筆）：
@@ -116,7 +146,7 @@
 ──────────────────────────────────────────────────
 學生端 測試結果：75/75 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：21.4s
+耗時：21.3s
 
 ══════════════════════════════════════════════════
 老師端測試（teacher.html）
@@ -197,16 +227,16 @@
 ──────────────────────────────────────────────────
 老師端 測試結果：70/70 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：15.5s
+耗時：12.5s
 
 ══════════════════════════════════════════════════
 整體測試結果
 ══════════════════════════════════════════════════
-✅ 學生端：75/75 通過（21.4s）
-✅ 老師端：70/70 通過（15.5s）
+✅ 學生端：75/75 通過（21.3s）
+✅ 老師端：70/70 通過（12.5s）
 
 合計：145/145 通過，0 失敗
-總耗時：49.8s
+總耗時：48.4s
 ══════════════════════════════════════════════════
 
 報告已儲存至：test-report.txt

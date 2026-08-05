@@ -1,7 +1,12 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v26
+ * 學生端自動化測試 v27
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v27 新增（2026-08-05）：薪資單由單張 salaryPhoto 改為最多 5 張 salaryPhotos，驗證
+ *   S-SEC-42  表單 input 可選多檔、薪資單總大小與張數限制存在、新舊資料格式皆可轉成照片
+ *             陣列、儲存時寫入 salaryPhotos 並清空舊 salaryPhoto 以避免 Base64 重複佔用；
+ *             歷史卡片與 PDF 匯出也改遍歷所有薪資單。
  *
  * v26 新增（2026-07-25）：對應 2026-07-24「遲交」判斷修正（entriesCompleteAt 取代
  * submittedAt）補上自動化測試——當時 AI_CONTEXT.md 明確記載「本輪未新增自動化測試，
@@ -2623,6 +2628,52 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少 entriesCompleteAt');
     if (result.payloadMatchCount !== 1)
       throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
+  });
+
+  await test('S-SEC-42 薪資單可上傳多張，儲存/顯示/PDF 均改用 salaryPhotos，且保留舊 salaryPhoto 相容與 Firestore 大小防呆', async () => {
+    const result = await page.evaluate(() => {
+      const input = document.getElementById('salary-photo-file');
+      const preview = document.getElementById('salary-photo-preview');
+      const handleFn = (typeof handleSalaryPhoto === 'function') ? handleSalaryPhoto.toString() : '';
+      const saveFn = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      const checkFn = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const editFn = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      const pdfFn = (typeof preparePdfJournalImages === 'function') ? preparePdfJournalImages.toString() : '';
+      const cardFn = (typeof renderJournalCardSelectable === 'function') ? renderJournalCardSelectable.toString() : '';
+      if (!input || !preview || !handleFn || !saveFn || !checkFn || !editFn || !pdfFn || !cardFn || typeof getJournalSalaryPhotos !== 'function') return { skip: true };
+
+      const newFormat = getJournalSalaryPhotos({ salaryPhotos: ['first', '', 42, 'second'] });
+      const legacyFormat = getJournalSalaryPhotos({ salaryPhoto: 'legacy' });
+      const originalHtml = preview.innerHTML;
+      renderSalaryPhotoPreviews(['first', 'second']);
+      const previewValues = getSalaryPhotoValuesFromPreview();
+      preview.innerHTML = originalHtml;
+
+      return {
+        skip: false,
+        multipleInput: input.multiple === true,
+        maxCount: SALARY_PHOTO_MAX_COUNT === 5,
+        totalLimit: Number.isInteger(SALARY_PHOTO_TOTAL_LIMIT) && SALARY_PHOTO_TOTAL_LIMIT > 0 && SALARY_PHOTO_TOTAL_LIMIT < 1048576,
+        newFormat: JSON.stringify(newFormat) === JSON.stringify(['first', 'second']),
+        legacyFormat: JSON.stringify(legacyFormat) === JSON.stringify(['legacy']),
+        previewValues: JSON.stringify(previewValues) === JSON.stringify(['first', 'second']),
+        handlerHasBothLimits: handleFn.includes('SALARY_PHOTO_MAX_COUNT') && handleFn.includes('SALARY_PHOTO_TOTAL_LIMIT'),
+        saveWritesArray: /const salaryPhotos\s*=\s*getSalaryPhotoValuesFromPreview\(\)/.test(saveFn) && /salaryPhotos\s*,\s*salaryPhoto:\s*''/.test(saveFn),
+        restoresBothFormats: checkFn.includes('renderSalaryPhotoPreviews(getJournalSalaryPhotos(j))') && editFn.includes('renderSalaryPhotoPreviews(getJournalSalaryPhotos(j))'),
+        historyRendersArray: cardFn.includes('renderSalaryPhotosHtml(j)'),
+        pdfRendersArray: pdfFn.includes('getJournalSalaryPhotos(j).map(imageToDataUrl)') && pdfFn.includes('_pdfSalaryPhotos'),
+      };
+    });
+    if (result.skip) return;
+    if (!result.multipleInput) throw new Error('薪資單檔案 input 缺少 multiple，學生仍只能一次選擇一張');
+    if (!result.maxCount || !result.totalLimit) throw new Error('薪資單多張上傳的張數/總大小防呆缺失，可能超過 Firestore 單一文件上限');
+    if (!result.newFormat || !result.legacyFormat) throw new Error('getJournalSalaryPhotos() 未同時正確支援 salaryPhotos 新格式與 salaryPhoto 舊格式');
+    if (!result.previewValues) throw new Error('薪資單多張預覽未能正確保留每一張要儲存的 Base64 值');
+    if (!result.handlerHasBothLimits) throw new Error('handleSalaryPhoto() 未同時套用最多張數與總大小限制');
+    if (!result.saveWritesArray) throw new Error('saveJournal() 未寫入 salaryPhotos 或未清空舊 salaryPhoto，可能造成多張資料無法儲存或 Base64 重複佔用');
+    if (!result.restoresBothFormats) throw new Error('載入既有月記時沒有將新舊薪資單格式統一還原為多張預覽');
+    if (!result.historyRendersArray) throw new Error('學生歷史月記卡片沒有改用多張薪資單渲染函式');
+    if (!result.pdfRendersArray) throw new Error('學生 PDF 匯出沒有遍歷所有薪資單照片');
   });
 
 

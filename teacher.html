@@ -5505,14 +5505,28 @@ function initStatsDateSelects() {
 const JOURNAL_CACHE_KEY  = 'tcivs_teacher_journals_cache';
 const JOURNAL_CACHE_TTL  = 5 * 60 * 1000; // 5 分鐘
 
-// ★ 2026-05-23 修正：存快取前剔除 salaryPhoto base64
-//    30人×10月×200KB ≈ 60MB > localStorage 5MB 上限，會導致 QuotaExceededError
-//    改存 hasSalaryPhoto 布林旗標，老師點擊「載入照片」時才按需從 Firestore 拉取
+// 薪資單新資料使用 salaryPhotos 陣列；舊資料 salaryPhoto 仍需完整相容。
+function getJournalSalaryPhotos(journal) {
+  if (Array.isArray(journal?.salaryPhotos)) {
+    return journal.salaryPhotos.filter(photo => typeof photo === 'string' && photo);
+  }
+  return journal?.salaryPhoto ? [journal.salaryPhoto] : [];
+}
+
+function renderSalaryPhotosHtml(journal) {
+  const photos = getJournalSalaryPhotos(journal);
+  if (!photos.length) return '';
+  return `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單${photos.length > 1 ? `（${photos.length} 張）` : ''}</div><div class="entry-photos">${photos.map((photo, index) => `<img src="${escapeHtml(resolveImgSrc(photo))}" class="entry-photo" onclick="openPhotoModal(this.src)" title="薪資單第 ${index + 1} 張">`).join('')}</div></div>`;
+}
+
+// ★ 2026-05-23 修正：存快取前剔除薪資單 Base64（多張薪資單同樣不可寫入 localStorage）
+//    改存 hasSalaryPhoto／salaryPhotoCount，老師點擊「載入照片」時才按需從 Firestore 拉取。
 function saveJournalsToCache(journals) {
   try {
     const slim = journals.map(j => {
-      const { salaryPhoto, ...rest } = j;
-      return { ...rest, hasSalaryPhoto: !!salaryPhoto };
+      const photos = getJournalSalaryPhotos(j);
+      const { salaryPhoto, salaryPhotos, ...rest } = j;
+      return { ...rest, hasSalaryPhoto: photos.length > 0, salaryPhotoCount: photos.length };
     });
     localStorage.setItem(JOURNAL_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: slim }));
   } catch(e) { /* localStorage 已滿則跳過 */ }
@@ -5536,9 +5550,13 @@ window.loadSalaryPhotoOnDemand = async function(seatNo, semester, month, ownerUi
     if (!ownerUid) throw new Error('找不到學生 UID');
     const docId = `${seatNo}-${semester}-${month}`;
     const snap = await getDoc(doc(db, 'users', ownerUid, 'journals', docId));
-    if (snap.exists() && snap.data().salaryPhoto) {
-      const src = escapeHtml(resolveImgSrc(snap.data().salaryPhoto));
-      btn.parentElement.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${src}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單">`;
+    const salaryPhotos = snap.exists() ? getJournalSalaryPhotos(snap.data()) : [];
+    if (salaryPhotos.length) {
+      const photoHtml = salaryPhotos.map((photo, index) => {
+        const src = escapeHtml(resolveImgSrc(photo));
+        return `<img src="${src}" class="entry-photo" onclick="openPhotoModal(this.src)" title="薪資單第 ${index + 1} 張">`;
+      }).join('');
+      btn.parentElement.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單${salaryPhotos.length > 1 ? `（${salaryPhotos.length} 張）` : ''}</div><div class="entry-photos">${photoHtml}</div>`;
     } else {
       toast('查無薪資單照片', 'error');
       btn.disabled = false;
@@ -5628,14 +5646,14 @@ function renderJournalCard(j, isTeacher) {
   const semLabel = (j.semester || '').replace('-1','第1學期').replace('-2','第2學期');
   const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${Number(j.salary).toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
-  // ★ 2026-05-23 修正：salaryPhoto 從快取移除後，以按需載入按鈕取代直接顯示
+  // ★ 薪資單 Base64 從快取移除後，以按需載入按鈕取代直接顯示（支援多張）。
   let salaryPhotoHtml = '';
-  if (j.salaryPhoto) {
-    const _sp = escapeHtml(resolveImgSrc(j.salaryPhoto));
-    salaryPhotoHtml = `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><img src="${_sp}" style="max-width:100%;max-height:265px;width:100%;height:auto;object-fit:contain;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block" onclick="openPhotoModal(this.src)" title="薪資單"></div>`;
+  if (getJournalSalaryPhotos(j).length) {
+    salaryPhotoHtml = renderSalaryPhotosHtml(j);
   } else if (j.hasSalaryPhoto) {
     const btnId = `sp-btn-${safeDomIdPart(j.seatNo)}-${safeDomIdPart(j.semester)}-${safeDomIdPart(j.month)}`;
-    salaryPhotoHtml = `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
+    const countLabel = j.salaryPhotoCount > 1 ? `（${safeNumber(j.salaryPhotoCount)} 張）` : '';
+    salaryPhotoHtml = `<div style="margin-top:8px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">💴 薪資單${countLabel}</div><button id="${escapeHtml(btnId)}" class="btn btn-sm" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:12px;padding:5px 10px;" onclick="loadSalaryPhotoOnDemand(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.ownerUid||'')},${jsArg(btnId)})">🔒 點擊安全載入</button></div>`;
   }
   // ── 評語 / 已審閱 ──
   const hasComment = !!(j.teacherComment);
@@ -5834,7 +5852,7 @@ function imageToDataUrl(src) {
 async function preparePdfJournalImages(journals) {
   return Promise.all(journals.map(async j => {
     const copy = { ...j };
-    copy._pdfSalaryPhoto = await imageToDataUrl(j.salaryPhoto);
+    copy._pdfSalaryPhotos = (await Promise.all(getJournalSalaryPhotos(j).map(imageToDataUrl))).filter(Boolean);
     copy._pdfEntries = await Promise.all((j.entries || []).map(async e => ({
       ...e,
       _pdfPhotos: (await Promise.all((e.photos || []).map(p => imageToDataUrl(p)))).filter(Boolean)
@@ -5954,9 +5972,10 @@ function pdfJournalBlock(j, idx) {
     { text: `主要師傅/學長姐：${pdfText(j.mentor || '')}`, margin: [0, 0, 0, 4] },
     { text: `本月薪資：${pdfText(salaryText)}`, margin: [0, 0, 0, 6] }
   ];
-  if (j._pdfSalaryPhoto) {
-    content.push({ text: '薪資單', bold: true, margin: [0, 0, 0, 4] });
-    content.push({ image: j._pdfSalaryPhoto, fit: [170, 120], margin: [0, 0, 0, 8] });
+  const pdfSalaryPhotos = j._pdfSalaryPhotos || (j._pdfSalaryPhoto ? [j._pdfSalaryPhoto] : []);
+  if (pdfSalaryPhotos.length) {
+    content.push({ text: `薪資單（${pdfSalaryPhotos.length} 張）`, bold: true, margin: [0, 0, 0, 4] });
+    pdfSalaryPhotos.forEach(photo => content.push({ image: photo, fit: [170, 120], margin: [0, 0, 0, 8] }));
   }
   content.push({ text: '工作摘要', bold: true, margin: [0, 0, 0, 5] });
   const entries = j._pdfEntries || [];
