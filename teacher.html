@@ -3024,8 +3024,8 @@ function renderProgressPillHtml(sno, name, entriesCount, required, missCount, on
   const fullText = sno + ' ' + name;
   const nameFontSize = fullText.length >= 8 ? 10 : (fullText.length >= 7 ? 11.5 : 13);
   return `<div style="width:84px;text-align:center"${clickAttr} title="${onclickAttr ? '點擊查看月記' : escapeHtml(fullText)}">
-    <div style="position:relative;background:rgba(0,0,0,0.08);border-radius:10px;padding:8px 6px">
-      <span style="font-size:${nameFontSize}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${escapeHtml(fullText)}</span>
+    <div style="position:relative;background:rgba(0,0,0,0.08);border-radius:10px;padding:0 6px;height:34px;display:flex;align-items:center;justify-content:center">
+      <span style="font-size:${nameFontSize}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${escapeHtml(fullText)}</span>
       ${badge}
     </div>
     <div style="font-size:11px;margin-top:3px">${subText}</div>
