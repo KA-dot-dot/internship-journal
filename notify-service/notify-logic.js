@@ -152,6 +152,29 @@ function isStudentOverdueForMonth(entriesCount, minEntries) {
   return (entriesCount || 0) < required;
 }
 
+/**
+ * 組出「逾期未繳月記」推播的通知內文。純字串/數字組裝，不碰 Firestore/網路，抽成獨立
+ * 函式的理由跟這支檔案其餘函式一致——讓 Layer 1（test-notify-logic.js）能直接測文案
+ * 本身組得對不對，不用只靠 Layer 2/3 肉眼核對。
+ *
+ * 2026-08 補強：原本的文案（見 AI_推播系統說明.md 3.7 節）固定只講「需要幾篇」，
+ * 刻意不算「已交幾篇、還差幾篇」，文件當時明白記載這是先做的最小版本、非遺漏，
+ * 這裡補上這個原本列為候補的細節，用詞比照 teacher.html labelNoName 既有的
+ * 「已交X篇，尚差Y篇」風格，不另外發明一套新的措辭。
+ *
+ * entriesCount／minEntries 皆做防禦性正規化（沿用 isStudentOverdueForMonth() 對
+ * minEntries 的 fallback 規則，entriesCount 非合法非負整數時視為 0），避免呼叫端萬一
+ * 傳入不乾淨的值時算出負的「尚差」篇數或印出 NaN——正常呼叫路徑（overdue-logic.js）
+ * 傳入的 entriesCount 一定 < minEntries（呼叫前已經過 isStudentOverdueForMonth() 篩選），
+ * 這裡的防禦純粹是額外一層保險，不是預期會被觸發的分支。
+ */
+function buildOverdueNotificationBody(month, entriesCount, minEntries) {
+  const required = Number.isInteger(minEntries) && minEntries >= 1 ? minEntries : 1;
+  const current = Number.isInteger(entriesCount) && entriesCount >= 0 ? entriesCount : 0;
+  const missing = Math.max(required - current, 0);
+  return `${month}月的實習月記目前還沒達到最低篇數（需 ${required} 篇，已交 ${current} 篇，尚差 ${missing} 篇），記得儘快補上，避免影響審閱進度。`;
+}
+
 module.exports = {
   parseAsInstant,
   alreadyNotified,
@@ -161,4 +184,5 @@ module.exports = {
   resolveMinEntries,
   computeOverdueMonths,
   isStudentOverdueForMonth,
+  buildOverdueNotificationBody,
 };

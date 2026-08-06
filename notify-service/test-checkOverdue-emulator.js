@@ -157,6 +157,13 @@ async function main() {
     assert.strictEqual(sender.calls.length, 1, '應該呼叫一次 sendToTokenDocs');
     assert.deepStrictEqual(sender.calls[0].tokenIds, ['fake-token-01']);
     assert.ok(result.notified.some((n) => n.seatNo === '01' && n.month === 9));
+    // 2026-08 新增：驗證 checkOverdueCore() 真的把 entriesCount／minEntries 傳給
+    // buildOverdueNotificationBody()（見 notify-logic.js）、文案含「已交幾篇、尚差幾篇」——
+    // Layer 1（test-notify-logic.js）測的是這個函式本身算得對不對，這裡驗證的是
+    // checkOverdueCore() 有沒有正確把查到的 entriesCount 傳進去（這一筆是「規定2篇、
+    // 只交1篇」，尚差應為 1）。
+    assert.ok(sender.calls[0].data.body.includes('已交 1 篇'), '通知內文應含已交篇數');
+    assert.ok(sender.calls[0].data.body.includes('尚差 1 篇'), '通知內文應含尚差篇數');
 
     const rosterSnap = await db.doc(`students/${SEM}_01`).get();
     assert.strictEqual(rosterSnap.data().overdueNotifiedMonths?.[`${SEM}-9`], true, '旗標應已寫回名冊文件');

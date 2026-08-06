@@ -25,6 +25,7 @@ const {
   getSemesterMonths,
   computeOverdueMonths,
   isStudentOverdueForMonth,
+  buildOverdueNotificationBody,
 } = require('./notify-logic');
 
 /**
@@ -142,11 +143,10 @@ async function checkOverdueCore({ db, sendToTokenDocs, now, seatWhitelist, siteB
           continue;
         }
 
-        const monthLabel = `${month}月`;
         const tag = `overdue:${binding.uid}:${flagKey}`;
         await sendToTokenDocs(tokensSnap.docs, {
           title: '⏰ 月記逾期未達標',
-          body: `${monthLabel}的實習月記目前還沒達到最低篇數（需 ${minEntries} 篇），記得儘快補上，避免影響審閱進度。`,
+          body: buildOverdueNotificationBody(month, entriesCount, minEntries),
           tag,
           link: `${siteBaseUrl}/student.html`,
         });

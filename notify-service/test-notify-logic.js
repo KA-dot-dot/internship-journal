@@ -34,6 +34,7 @@ const {
   resolveMinEntries,
   computeOverdueMonths,
   isStudentOverdueForMonth,
+  buildOverdueNotificationBody,
 } = require('./notify-logic');
 
 let pass = 0;
@@ -332,6 +333,42 @@ async function main() {
   await test('isStudentOverdueForMonth()：minEntries 不合法（0／負數／非整數）→ fallback 為 1 再比較', () => {
     assert.strictEqual(isStudentOverdueForMonth(1, 0), false); // fallback=1，1篇已達標
     assert.strictEqual(isStudentOverdueForMonth(0, 0), true); // fallback=1，0篇未達標
+  });
+
+  // ════════════════════════════════════════════════════════════
+  // buildOverdueNotificationBody()（2026-08 新增：補上「已交幾篇、尚差幾篇」文案）
+  // ════════════════════════════════════════════════════════════
+
+  await test('buildOverdueNotificationBody()：目標情境——7月規定2篇，只交1篇 → 文字含月份/需求篇數/已交篇數/尚差篇數', () => {
+    const body = buildOverdueNotificationBody(7, 1, 2);
+    assert.strictEqual(
+      body,
+      '7月的實習月記目前還沒達到最低篇數（需 2 篇，已交 1 篇，尚差 1 篇），記得儘快補上，避免影響審閱進度。'
+    );
+  });
+
+  await test('buildOverdueNotificationBody()：完全沒交（0篇）→ 尚差等於需求篇數本身', () => {
+    const body = buildOverdueNotificationBody(9, 0, 3);
+    assert.ok(body.includes('已交 0 篇'));
+    assert.ok(body.includes('尚差 3 篇'));
+  });
+
+  await test('buildOverdueNotificationBody()：minEntries 不合法（0／負數／非整數）→ fallback 為 1 再計算尚差，與 isStudentOverdueForMonth() 的 fallback 規則一致', () => {
+    assert.ok(buildOverdueNotificationBody(5, 0, 0).includes('需 1 篇'));
+    assert.ok(buildOverdueNotificationBody(5, 0, -2).includes('需 1 篇'));
+    assert.ok(buildOverdueNotificationBody(5, 0, 2.5).includes('需 1 篇'));
+  });
+
+  await test('buildOverdueNotificationBody()：entriesCount 不合法（null/undefined/負數/非整數）→ 視為 0 篇計算，不印出 NaN 或負的尚差篇數', () => {
+    assert.ok(buildOverdueNotificationBody(5, null, 2).includes('已交 0 篇'));
+    assert.ok(buildOverdueNotificationBody(5, undefined, 2).includes('已交 0 篇'));
+    assert.ok(buildOverdueNotificationBody(5, -1, 2).includes('已交 0 篇'));
+    assert.ok(buildOverdueNotificationBody(5, 1.5, 2).includes('已交 0 篇'));
+  });
+
+  await test('buildOverdueNotificationBody()：防禦性情境——entriesCount 意外 >= minEntries（正常呼叫路徑不會發生，因為呼叫前已經過 isStudentOverdueForMonth() 篩選）→ 尚差篇數不會變成負數', () => {
+    const body = buildOverdueNotificationBody(5, 5, 2);
+    assert.ok(body.includes('尚差 0 篇'), '尚差篇數應以 0 為下限，不應出現負數');
   });
 
   // ════════════════════════════════════════════════════════════
