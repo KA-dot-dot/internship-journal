@@ -825,7 +825,7 @@ tr:last-child td { border-bottom: none; }
               <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
             </div>
             <div id="stat-missing-warn-bars" style="margin-bottom:8px"></div>
-            <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:8px 10px"></div>
           </div>
         </div>
         <div id="stat-list-panel-submitted" style="display:none;margin-bottom:4px">
@@ -849,7 +849,10 @@ tr:last-child td { border-bottom: none; }
           <div class="card" style="border-left:3px solid var(--accent-yellow);padding:14px 18px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
               <div style="font-size:13px;font-weight:700;color:var(--accent-yellow)">⏰ 已逾期未達標名單</div>
-              <button class="btn btn-secondary btn-sm" onclick="copyOverdueList()" id="copy-overdue-btn">📋 複製名單</button>
+              <div style="display:flex;align-items:center;gap:6px">
+                <select id="overdue-copy-scope" style="font-size:12px;height:28px;padding:0 6px;border-radius:6px"><option value="all">複製範圍：全部</option></select>
+                <button class="btn btn-secondary btn-sm" onclick="copyOverdueList()" id="copy-overdue-btn">📋 複製</button>
+              </div>
             </div>
             <div id="stat-list-names-overdue"></div>
           </div>
@@ -2776,7 +2779,10 @@ async function loadTeacherDashboard() {
     // 2026-07-17 新增：partial 標記「本月並非完全沒交，只是篇數不足」，供 toggleStatList()
     // 把這類項目的徽章改用「未完成」強調色顯示，跟真正完全沒交的項目（紅色）視覺區隔
     const partial = thisEntriesCount > 0;
-    return { label, labelNoName, sno, name, missCount, partial };
+    // 2026-08-05 新增：entriesCount／required 供固定寬度按鈕的角落篇數分數徽章使用
+    // （見 renderProgressPillHtml()），數值僅限本月，跟 missCount（跨月累計缺繳月數）
+    // 是不同維度，各自服務不同的顯示位置（角落徽章 vs 藥丸下方小字）。
+    return { label, labelNoName, sno, name, missCount, partial, entriesCount: thisEntriesCount, required: requiredThisMonth };
   });
   // 2026-08-04 新增：「已逾期未達標」——跟上面「本月未繳」不同，這裡不看「今天在哪個月」，
   // 只看「這個月的截止日是否已經過去」（跟 student.html getOverdueMonths() 完全同一套判斷），
@@ -2805,6 +2811,9 @@ async function loadTeacherDashboard() {
         students: monthStudents.map(s => ({
           sno: s.sno,
           name: s.name,
+          // 2026-08-05 新增：entriesCount 供固定寬度按鈕的角落篇數分數徽章使用
+          // （required 已在 group 層級，見上方 overdueGroupsRaw.push 的 required 欄位）
+          entriesCount: s.entriesCount,
           annotation: s.entriesCount > 0
             ? `（已交${s.entriesCount}篇，尚差${Math.max(required - s.entriesCount, 0)}篇）`
             : ''
@@ -2957,9 +2966,19 @@ function copyMissingList() {
 // 「本月未繳」那樣只剩一個籠統的deadline、混淆到底是哪個月過期。跟 copyMissingList()
 // 一致，複製版本只留座號＋篇數註記，不附姓名（手機排版考量，畫面上的名單仍完整顯示姓名）。
 function copyOverdueList() {
-  const groups = window._overdueGroups || [];
-  if (groups.length === 0) {
+  const allGroups = window._overdueGroups || [];
+  if (allGroups.length === 0) {
     toast('目前沒有已逾期未達標的月份，無需提醒', 'info');
+    return;
+  }
+  // 2026-08-05 新增：複製範圍下拉選單——預設「all」複製全部月份（維持原本行為），
+  // 選特定月份時只複製該月份那一段，其餘完全不變（分段文字格式、每段附正確截止日、
+  // 不含姓名的複製格式皆維持既有寫法）。
+  const scopeSel = document.getElementById('overdue-copy-scope');
+  const scope = scopeSel ? scopeSel.value : 'all';
+  const groups = scope === 'all' ? allGroups : allGroups.filter(g => String(g.month) === scope);
+  if (groups.length === 0) {
+    toast('選擇的月份目前沒有已逾期未達標名單', 'info');
     return;
   }
   const sections = groups.map(g => {
@@ -2977,6 +2996,32 @@ function copyOverdueList() {
   }).catch(() => {
     prompt('請手動複製以下內容：', text);
   });
+}
+
+// 2026-08-05 新增：固定寬度按鈕＋角落篇數分數徽章＋下方缺月數小字，供「本月未繳名單」
+// （toggleStatList('missing')）與「已逾期未達標」（toggleOverduePanel()）共用同一套視覺
+// 呈現，避免兩處各自維護一份樣式又逐漸不一致。徽章顯示「已交/應繳」篇數（entriesCount/
+// required）：entriesCount 為 0 時用紅色（完全未繳），大於0時用橘色（已交部分但未達標）
+// ——這兩個面板列出的學生依篩選條件必然是 entriesCount < required，不會出現達標的綠色
+// 狀態。missCount（跨月累計缺繳月數）維持顯示，但改成藥丸下方一行小字（缺2個月用橘字、
+// 缺3個月以上用紅字），跟角落的「本月篇數」徽號是兩個不同維度、不搶同一個位置。
+// onclickAttr 可選（已逾期未達標的項目需要點擊直接跳轉審閱，本月未繳名單則不需要）。
+function renderProgressPillHtml(sno, name, entriesCount, required, missCount, onclickAttr) {
+  const isZero = entriesCount <= 0;
+  const badgeColor = isZero ? 'var(--accent-red)' : 'var(--accent-yellow)';
+  const badgeText = isZero ? '#fff' : '#78350f';
+  const badge = `<span style="position:absolute;top:-6px;right:-6px;background:${badgeColor};color:${badgeText};font-size:10px;font-weight:700;border-radius:8px;padding:1px 5px;line-height:1.4">${entriesCount}/${required}</span>`;
+  let subText = '&nbsp;';
+  if (missCount >= 3) subText = `<span style="color:var(--accent-red)">缺${missCount}個月</span>`;
+  else if (missCount === 2) subText = `<span style="color:var(--accent-yellow)">缺2個月</span>`;
+  const clickAttr = onclickAttr ? ` onclick="${onclickAttr}" style="cursor:pointer"` : '';
+  return `<div style="width:84px;text-align:center"${clickAttr} title="${onclickAttr ? '點擊查看月記' : ''}">
+    <div style="position:relative;background:rgba(0,0,0,0.08);border-radius:10px;padding:8px 6px">
+      <span style="font-size:13px">${escapeHtml(sno + ' ' + name)}</span>
+      ${badge}
+    </div>
+    <div style="font-size:11px;margin-top:3px">${subText}</div>
+  </div>`;
 }
 
 function toggleStatList(key) {
@@ -3038,21 +3083,9 @@ function toggleStatList(key) {
           if (mid  > 0) bars += `<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--accent-yellow);margin-bottom:4px">🟠 ${mid} 位學生本學期已缺繳 2 個月</div>`;
           warnEl.innerHTML = bars;
         }
-        namesEl.innerHTML = data.map(s => {
-          let badge = '';
-          if (s.missCount >= 3) {
-            badge = `<span style="background:rgba(239,68,68,0.15);color:var(--accent-red);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺${s.missCount}個月</span>`;
-          } else if (s.missCount === 2) {
-            badge = `<span style="background:rgba(245,158,11,0.18);color:var(--accent-yellow);border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">缺2個月</span>`;
-          }
-          // 2026-07-17（第二次調整）：本月「有交但篇數不足」（s.partial）的項目改跟「有評語」
-          // 同一套紫色（--accent2，較深的紫）顯示，方便老師一眼認出跟「本月完全沒交」的紅色不同；
-          // 原本用的 --accent-incomplete（浪漫淺紫 #c084fc）維持只用在「統計總覽→繳交狀況」
-          // 那張表格（.submit-cell-incomplete），兩處刻意改成不同用途、不再共用同一個顏色。
-          // 缺月數徽章（上面的 badge，紅/黃）維持不變——那是本學期累計缺繳月數，是另一個維度
-          const itemColor = s.partial ? 'var(--accent2)' : c.color;
-          return `<span style="background:rgba(0,0,0,0.08);color:${itemColor};border:1px solid ${itemColor};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.label)}${badge}</span>`;
-        }).join('');
+        // 2026-08-05 起：改用固定寬度按鈕＋角落篇數分數徽章樣式（renderProgressPillHtml()），
+        // 跟「已逾期未達標」統一視覺呈現；缺月數改成藥丸下方小字，不再是名字後面的內文徽章。
+        namesEl.innerHTML = data.map(s => renderProgressPillHtml(s.sno, s.name, s.entriesCount, s.required, s.missCount)).join('');
       } else {
         namesEl.innerHTML = list.map(n => `<span style="background:rgba(0,0,0,0.08);color:${c.color};border:1px solid ${c.color};border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(n)}</span>`).join('');
       }
@@ -3119,20 +3152,30 @@ function toggleOverduePanel() {
   const isHidden = panel.style.display === 'none';
   if (isHidden) {
     const groups = window._overdueGroups || [];
+    // 2026-08-05 新增：複製範圍下拉選單，每次展開面板時依目前的 window._overdueGroups
+    // 重新產生選項（「全部」固定第一個、預設選中；其餘依月份列出），確保月份數量變動時
+    // 選項自動同步，不需要另外維護。
+    const scopeSel = document.getElementById('overdue-copy-scope');
+    if (scopeSel) {
+      scopeSel.innerHTML = '<option value="all">複製範圍：全部</option>' +
+        groups.map(g => `<option value="${g.month}">只複製 ${g.month}月</option>`).join('');
+      scopeSel.value = 'all';
+    }
     if (groups.length === 0) {
       namesEl.innerHTML = '<span style="color:var(--accent-green)">✅ 目前沒有已逾期未達標的月份</span>';
     } else {
       let flatIdx = 0;
+      // 2026-08-05 起：改用固定寬度按鈕＋角落篇數分數徽章樣式（renderProgressPillHtml()），
+      // 跟「本月未繳名單」統一視覺呈現；點擊行為（goFromOverdue）維持不變。
       namesEl.innerHTML = groups.map(g => {
         const parts = (g.closeDate || '').split('-');
         const closeLabel = parts.length === 3 ? `${parts[0]}/${parseInt(parts[1])}/${parseInt(parts[2])}` : (g.closeDate || '');
-        const badges = g.students.map(s => {
+        const pills = g.students.map(s => {
           const myIdx = flatIdx++;
-          const display = escapeHtml(`${s.sno} ${s.name}${s.annotation}`);
-          return `<span onclick="goFromOverdue(${myIdx})" style="background:rgba(245,158,11,0.12);color:var(--accent-yellow);border:1px solid var(--accent-yellow);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-block" title="點擊查看月記">${display}</span>`;
+          return renderProgressPillHtml(s.sno, s.name, s.entriesCount, g.required, 0, `goFromOverdue(${myIdx})`);
         }).join('');
         const monthLabel = escapeHtml(g.month + ' 月　截止日 ' + closeLabel);
-        return `<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px">📅 ${monthLabel}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${badges}</div></div>`;
+        return `<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px">📅 ${monthLabel}</div><div style="display:flex;flex-wrap:wrap;gap:8px 10px">${pills}</div></div>`;
       }).join('');
     }
     panel.style.display = 'block';
