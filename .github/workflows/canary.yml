@@ -15,31 +15,25 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-07-25：student.test.js 75 項〔71個具名呼叫點 + 4次頁籤切換迴圈，
-    #     新增 S-SEC-40／S-SEC-41〕、teacher.test.js 70 項〔62個具名呼叫點 + 8次頁籤切換
-    #     迴圈，新增 T-SEC-47〕，對應「7月截止日前只先寫1篇（規定2篇），8/1才補齊第2篇，
-    #     算不算遲繳？」這個情境提問後發現並修正的「遲交」判斷邏輯缺口——原本
-    #     teacher.html isJournalLate() 直接用 submittedAt（月記第一次存檔時間）比對截止
-    #     日，但 submittedAt 只在第一次存檔時寫死、之後編輯永遠不變，會把「先隨便存一篇
-    #     佔位」誤判成比「到期限後才第一次動手寫」更早繳交完成。修法新增
-    #     entriesCompleteAt（篇數真正達到 minEntries 那一刻的時間），isJournalLate()
-    #     改用 entriesCompleteAt || submittedAt 判斷；student.html 這部分的計算邏輯先
-    #     從 saveJournal() 內部抽成獨立純函式 computeEntriesCompleteAt()（跟
-    #     resolveMinEntries() 放在一起，行為完全不變，已用144組窮舉組合驗證新舊邏輯輸出
-    #     一致）才能被 S-SEC-40 直接呼叫帶合成資料測試；S-SEC-41 驗證三處快取 fallback
-    #     （checkMonthDeadline()／editJournal()／saveJournal() 自己的現查 fallback）皆
-    #     補上 entriesCount／entriesCompleteAt，且 saveJournal() 送出的 payload 確實含
-    #     這個欄位；T-SEC-47 直接呼叫 isJournalLate()／statusSymbolForJournal() 驗證
-    #     entriesCompleteAt 優先於 submittedAt、缺欄位時正確退回 submittedAt，並確認
-    #     isJournalComplete()／statusSymbolForJournal() 的既有判斷順序未被牽動。這輪
-    #     另外同步新增 rule.txt 對 entriesCompleteAt 的格式驗證（獨立函式
-    #     validEntriesCompleteAt()，比照 validFcmTokenWrite() 的既有模式）與
-    #     test-rules.js 對應的 9 條規則層回歸測試（111→120），完整技術細節見
-    #     AI_CONTEXT.md／AI_測試架構說明.md 對應更新。
-    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18／2026-07-23
-    #     過期五次，這是第六次，見 AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md
-    #     第四節陷阱17，之後新增/刪除測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 75 項 + 老師端 70 項）
+    #    （目前對應 2026-08-05：student.test.js v26→v27（75→76 項，72個具名呼叫點 + 4次
+    #     頁籤切換迴圈，新增 S-SEC-42）、teacher.test.js v26→v27（70→71 項，63個具名
+    #     呼叫點 + 8次頁籤切換迴圈，新增 T-SEC-48），對應「薪資單照片可上傳多張」功能——
+    #     原本月記只用單一 salaryPhoto Base64 字串，選新照片會直接覆蓋舊圖，改為
+    #     salaryPhotos 陣列，最多5張、每張壓縮至800×600/JPEG quality 0.75、全部合計
+    #     650,000字元硬上限（為 Firestore 單文件 1MiB 留安全餘裕）。薪資單仍留在受
+    #     Firestore Rules 保護的月記文件內，不像工作照片改走公開 Cloudinary 路徑；
+    #     getJournalSalaryPhotos() 學生端／老師端皆同時讀取新 salaryPhotos 與舊單張
+    #     salaryPhoto 確保相容，學生重新儲存舊月記時會寫入新陣列並清空 salaryPhoto。
+    #     S-SEC-42 驗證檔案 input 的 multiple、5張與650,000字元防呆、新舊格式相容、
+    #     表單預覽、儲存 payload、歷史卡與 PDF；T-SEC-48 驗證老師端新舊格式相容、
+    #     localStorage 同時剔除兩種 Base64、按需載入的多張渲染、月記卡與 PDF。
+    #     rule.txt 不需變動——規則本身未以欄位白名單限制月記一般編輯，新欄位仍完全受
+    #     既有「只能本人寫自己的 /users/{uid}/journals/」限制。完整技術細節見
+    #     AI_CONTEXT.md 對應更新。
+    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18／2026-07-23／
+    #     2026-07-25 過期六次，這是第七次，見 AI_推播系統說明.md 第六節 #9、
+    #     AI_測試架構說明.md 第四節陷阱17，之後新增/刪除測試時務必記得回來改這一行）。
+    name: 完整自動化測試（學生端 76 項 + 老師端 71 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
