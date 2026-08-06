@@ -820,9 +820,9 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div id="stat-list-panel-missing" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-red);padding:14px 18px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="font-size:13px;font-weight:700;color:var(--accent-red)">📋 本月未繳名單</div>
-              <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn">📋 複製名單</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700;color:var(--accent-red);flex-shrink:0">📋 本月未繳名單</div>
+              <button class="btn btn-secondary btn-sm" onclick="copyMissingList()" id="copy-missing-btn" style="white-space:nowrap;flex-shrink:0">📋 複製名單</button>
             </div>
             <div id="stat-missing-warn-bars" style="margin-bottom:8px"></div>
             <div id="stat-list-names-missing" style="display:flex;flex-wrap:wrap;gap:8px 10px"></div>
@@ -847,11 +847,14 @@ tr:last-child td { border-bottom: none; }
         </div>
         <div id="stat-list-panel-overdue" style="display:none;margin-bottom:4px">
           <div class="card" style="border-left:3px solid var(--accent-yellow);padding:14px 18px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="font-size:13px;font-weight:700;color:var(--accent-yellow)">⏰ 已逾期未達標名單</div>
-              <div style="display:flex;align-items:center;gap:6px">
-                <select id="overdue-copy-scope" style="font-size:12px;height:28px;padding:0 6px;border-radius:6px"><option value="all">複製範圍：全部</option></select>
-                <button class="btn btn-secondary btn-sm" onclick="copyOverdueList()" id="copy-overdue-btn">📋 複製</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700;color:var(--accent-yellow);flex-shrink:0">⏰ 已逾期未達標名單</div>
+              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                <span style="position:relative;display:inline-block">
+                  <select id="overdue-copy-scope" style="-webkit-appearance:none;-moz-appearance:none;appearance:none;font-size:12px;height:28px;padding:0 18px 0 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text)"><option value="all">複製範圍：全部</option></select>
+                  <span style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--text2);pointer-events:none">▾</span>
+                </span>
+                <button class="btn btn-secondary btn-sm" onclick="copyOverdueList()" id="copy-overdue-btn" style="white-space:nowrap;flex-shrink:0">📋 複製</button>
               </div>
             </div>
             <div id="stat-list-names-overdue"></div>
@@ -3015,9 +3018,14 @@ function renderProgressPillHtml(sno, name, entriesCount, required, missCount, on
   if (missCount >= 3) subText = `<span style="color:var(--accent-red)">缺${missCount}個月</span>`;
   else if (missCount === 2) subText = `<span style="color:var(--accent-yellow)">缺2個月</span>`;
   const clickAttr = onclickAttr ? ` onclick="${onclickAttr}" style="cursor:pointer"` : '';
-  return `<div style="width:84px;text-align:center"${clickAttr} title="${onclickAttr ? '點擊查看月記' : ''}">
+  // 2026-08-06 新增：座號＋姓名字數愈多，字級自動縮小，避免長姓名（例如4~5字）在固定84px
+  // 寬度下被擠壓換行、破壞整排按鈕的一致高度；超過縮到最小仍放不下的極端情況，靠
+  // white-space:nowrap + text-overflow:ellipsis 保底截斷，不讓單一按鈕撐高整排。
+  const fullText = sno + ' ' + name;
+  const nameFontSize = fullText.length >= 8 ? 10 : (fullText.length >= 7 ? 11.5 : 13);
+  return `<div style="width:84px;text-align:center"${clickAttr} title="${onclickAttr ? '點擊查看月記' : escapeHtml(fullText)}">
     <div style="position:relative;background:rgba(0,0,0,0.08);border-radius:10px;padding:8px 6px">
-      <span style="font-size:13px">${escapeHtml(sno + ' ' + name)}</span>
+      <span style="font-size:${nameFontSize}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${escapeHtml(fullText)}</span>
       ${badge}
     </div>
     <div style="font-size:11px;margin-top:3px">${subText}</div>
