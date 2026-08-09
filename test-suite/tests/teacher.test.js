@@ -1,7 +1,22 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v27
+ * 老師端自動化測試 v28
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v28 新增（2026-08-08）：對應「刪除操作二次確認」——deleteStudent()／單筆刪月記／批次刪
+ * 月記共 5 處「無法復原」的刪除流程，新增輸入姓名或固定格式字串才能刪除的第二層確認，
+ * 源自使用者指出這批操作完全沒有任何復原機制（真刪除，無回收站）。student.html 兩處
+ * （單筆刪月記、批次刪歷史月記）由本文件姊妹檔 student_test.js 的 S-SEC-43 涵蓋；本檔
+ * 新增：
+ *   T-SEC-49  deleteStudent() 從 confirm() 改成單一 prompt()（警告文字＋姓名輸入要求
+ *             合併在同一段），驗證確實要求輸入完全等於該生姓名才會繼續、且舊版 confirm()
+ *             寫法真的不在了（regression check）；confirmDeleteJournal()（單筆刪月記）
+ *             改用 requiredText = studentName（呼叫端本來就有帶目標學生姓名，直接用
+ *             參數即可，跟 student.html 那份改用 currentUser?.name 的理由不同——見
+ *             S-SEC-43 header 說明）；confirmTeacherBatchDelete()（批次刪月記，可能
+ *             橫跨多位學生）改用 requiredText = `DELETE ${journals.length}`（不用姓名，
+ *             因為批次可能沒有單一對象）。三者皆驗證「按下確認鍵時才檢查、不符合就不
+ *             執行刪除」的順序關係，並確認對應 Modal 的輸入框／提示文字 DOM 元素存在。
  *
  * v27 新增（2026-08-05）：對應學生端薪資單由單張 salaryPhoto 改為 salaryPhotos 陣列：
  *   T-SEC-48  新舊資料格式皆可讀取，localStorage 快取會移除兩種 Base64 欄位而保留照片
@@ -2611,6 +2626,61 @@ async function runTeacherTests(page, log) {
     if (!result.onDemandReadsArray) throw new Error('老師端按需載入薪資單沒有讀取所有 salaryPhotos，或圖片 src 未經 escapeHtml');
     if (!result.cardReadsArray) throw new Error('老師端月記卡片沒有改用多張薪資單渲染邏輯');
     if (!result.pdfReadsArray) throw new Error('老師端 PDF 匯出沒有遍歷所有薪資單照片');
+  });
+
+  await test('T-SEC-49 deleteStudent()／單筆刪月記／批次刪月記皆改為需輸入姓名或 DELETE {筆數} 才能刪除，不符合時不執行刪除', async () => {
+    const result = await page.evaluate(() => {
+      const delStuFn = (typeof deleteStudent === 'function') ? deleteStudent.toString() : '';
+      const singleFn = (typeof confirmDeleteJournal === 'function') ? confirmDeleteJournal.toString() : '';
+      const batchFn = (typeof confirmTeacherBatchDelete === 'function') ? confirmTeacherBatchDelete.toString() : '';
+      if (!delStuFn || !singleFn || !batchFn) return { skip: true };
+
+      // deleteStudent()：原本是 confirm()，現在改成單一 prompt()，把警告文字與姓名輸入
+      // 要求合併在同一段；確認舊的 confirm() 寫法真的不在了（regression check），且
+      // 「truthy 才繼續」的判斷改成「打的字必須完全等於姓名」
+      const delStuHasPrompt = /const typed = prompt\(`/.test(delStuFn);
+      const delStuAsksName = delStuFn.includes('請輸入該生姓名');
+      const delStuHasCheck = /if \(typed !== name\) return toast\('已取消刪除', 'info'\);/.test(delStuFn);
+      const delStuNoOldConfirm = !delStuFn.includes('if (!confirm(');
+
+      // 單筆刪月記（老師端呼叫端本來就有帶 studentName 參數，這裡跟 student.html 不同，
+      // 直接使用參數即可，不需要像 student.html 那樣改用 currentUser?.name）
+      const singleHasRequiredText = /const requiredText = studentName \|\| '';/.test(singleFn);
+      const singleHasCheck = /if \(\(inputEl\?\.value \|\| ''\) !== requiredText\)/.test(singleFn);
+      const singleCheckIdx = singleFn.indexOf("if ((inputEl?.value || '') !== requiredText)");
+      const singleExecuteIdx = singleFn.indexOf('executeDeleteJournal(seatNo, semester, month, isTeacher)');
+      const singleOrderOK = singleCheckIdx !== -1 && singleExecuteIdx !== -1 && singleExecuteIdx > singleCheckIdx;
+
+      const batchHasRequiredText = /const requiredText = `DELETE \$\{journals\.length\}`;/.test(batchFn);
+      const batchHasCheck = /if \(\(inputEl\?\.value \|\| ''\) !== requiredText\)/.test(batchFn);
+      const batchCheckIdx = batchFn.indexOf("if ((inputEl?.value || '') !== requiredText)");
+      const batchExecuteIdx = batchFn.indexOf('executeTeacherBatchDelete(journals)');
+      const batchOrderOK = batchCheckIdx !== -1 && batchExecuteIdx !== -1 && batchExecuteIdx > batchCheckIdx;
+
+      const domElementsExist = !!document.getElementById('delete-journal-confirm-input')
+        && !!document.getElementById('delete-journal-confirm-hint')
+        && !!document.getElementById('t-batch-delete-confirm-input')
+        && !!document.getElementById('t-batch-delete-confirm-hint');
+
+      return {
+        skip: false,
+        delStuHasPrompt, delStuAsksName, delStuHasCheck, delStuNoOldConfirm,
+        singleHasRequiredText, singleHasCheck, singleOrderOK,
+        batchHasRequiredText, batchHasCheck, batchOrderOK,
+        domElementsExist,
+      };
+    });
+    if (result.skip) return;
+    if (!result.delStuHasPrompt || !result.delStuNoOldConfirm) throw new Error('deleteStudent() 沒有改成單一 prompt()，可能還停在舊版 confirm() 或寫法退化');
+    if (!result.delStuAsksName) throw new Error('deleteStudent() 的 prompt 文字沒有要求輸入該生姓名');
+    if (!result.delStuHasCheck) throw new Error('deleteStudent() 缺少「輸入需完全等於姓名」的檢查，可能退化成只要有輸入就放行');
+    if (!result.singleHasRequiredText) throw new Error('confirmDeleteJournal() 缺少 requiredText = studentName 的姓名輸入要求');
+    if (!result.singleHasCheck) throw new Error('confirmDeleteJournal() 缺少輸入不符時的檢查');
+    if (!result.singleOrderOK) throw new Error('confirmDeleteJournal() 的刪除呼叫沒有被輸入驗證正確保護，可能不驗證就直接執行刪除');
+    if (!result.batchHasRequiredText) throw new Error('confirmTeacherBatchDelete() 缺少 requiredText = `DELETE {筆數}` 的輸入要求');
+    if (!result.batchHasCheck) throw new Error('confirmTeacherBatchDelete() 缺少輸入不符時的檢查');
+    if (!result.batchOrderOK) throw new Error('confirmTeacherBatchDelete() 的刪除呼叫沒有被輸入驗證正確保護，可能不驗證就直接執行刪除');
+    if (!result.domElementsExist) throw new Error('刪除確認 Modal 缺少對應的輸入框或提示文字 DOM 元素');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

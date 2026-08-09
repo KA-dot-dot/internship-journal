@@ -1,7 +1,20 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v27
+ * 學生端自動化測試 v28
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v28 新增（2026-08-08）：對應「刪除操作二次確認」——deleteStudent()／單筆刪月記／批次刪
+ * 月記共 5 處「無法復原」的刪除流程，新增輸入姓名或固定格式字串才能刪除的第二層確認，
+ * 源自使用者指出這批操作完全沒有任何復原機制（真刪除，無回收站）。teacher.html 三處
+ * （deleteStudent()、單筆刪月記、批次刪月記）由本文件姊妹檔 teacher_test.js 的 T-SEC-49
+ * 涵蓋；本檔新增：
+ *   S-SEC-43  confirmDeleteJournal()（單筆刪月記）改用 requiredText = currentUser?.name
+ *             （刻意不用傳入的 studentName 參數，避免月記存檔當下的舊姓名跟名冊事後更正
+ *             後的姓名不同步、學生打自己現在的名字卻被判定不符的死結）；
+ *             confirmBatchDeleteHistory()（批次刪歷史月記）改用 requiredText =
+ *             `DELETE ${journals.length}`；兩者皆驗證「按下確認鍵時才檢查輸入框內容，
+ *             不符合就 toast 錯誤且不執行刪除」的順序關係，並確認對應 Modal 的輸入框／
+ *             提示文字 DOM 元素存在。
  *
  * v27 新增（2026-08-05）：薪資單由單張 salaryPhoto 改為最多 5 張 salaryPhotos，驗證
  *   S-SEC-42  表單 input 可選多檔、薪資單總大小與張數限制存在、新舊資料格式皆可轉成照片
@@ -2674,6 +2687,50 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.restoresBothFormats) throw new Error('載入既有月記時沒有將新舊薪資單格式統一還原為多張預覽');
     if (!result.historyRendersArray) throw new Error('學生歷史月記卡片沒有改用多張薪資單渲染函式');
     if (!result.pdfRendersArray) throw new Error('學生 PDF 匯出沒有遍歷所有薪資單照片');
+  });
+
+  await test('S-SEC-43 單筆刪月記／批次刪歷史月記皆改為需輸入姓名或 DELETE {筆數} 才能刪除，不符合時 toast 錯誤且不執行刪除', async () => {
+    const result = await page.evaluate(() => {
+      const singleFn = (typeof confirmDeleteJournal === 'function') ? confirmDeleteJournal.toString() : '';
+      const batchFn = (typeof confirmBatchDeleteHistory === 'function') ? confirmBatchDeleteHistory.toString() : '';
+      if (!singleFn || !batchFn) return { skip: true };
+
+      // 單筆刪月記：刻意用 currentUser?.name（登入者當下姓名），不是傳進來的 studentName
+      // 參數（等於 j.studentName，月記存檔當下記錄的舊值，若名冊姓名事後被更正過可能不同步）
+      const singleHasRequiredText = /const requiredText = currentUser\?\.name \|\| '';/.test(singleFn);
+      const singleHasCheck = /if \(\(inputEl\?\.value \|\| ''\) !== requiredText\)/.test(singleFn);
+      const singleHasErrorToast = /toast\('輸入內容不符，請重新輸入姓名以確認刪除', 'error'\)/.test(singleFn);
+      const singleCheckIdx = singleFn.indexOf("if ((inputEl?.value || '') !== requiredText)");
+      const singleExecuteIdx = singleFn.indexOf('executeDeleteJournal(seatNo, semester, month, isTeacher)');
+      const singleOrderOK = singleCheckIdx !== -1 && singleExecuteIdx !== -1 && singleExecuteIdx > singleCheckIdx;
+
+      const batchHasRequiredText = /const requiredText = `DELETE \$\{journals\.length\}`;/.test(batchFn);
+      const batchHasCheck = /if \(\(inputEl\?\.value \|\| ''\) !== requiredText\)/.test(batchFn);
+      const batchHasErrorToast = /toast\('輸入內容不符，請重新輸入以確認刪除', 'error'\)/.test(batchFn);
+      const batchCheckIdx = batchFn.indexOf("if ((inputEl?.value || '') !== requiredText)");
+      const batchExecuteIdx = batchFn.indexOf('executeBatchDeleteHistory(journals)');
+      const batchOrderOK = batchCheckIdx !== -1 && batchExecuteIdx !== -1 && batchExecuteIdx > batchCheckIdx;
+
+      const domElementsExist = !!document.getElementById('delete-journal-confirm-input')
+        && !!document.getElementById('delete-journal-confirm-hint')
+        && !!document.getElementById('batch-delete-history-confirm-input')
+        && !!document.getElementById('batch-delete-history-confirm-hint');
+
+      return {
+        skip: false,
+        singleHasRequiredText, singleHasCheck, singleHasErrorToast, singleOrderOK,
+        batchHasRequiredText, batchHasCheck, batchHasErrorToast, batchOrderOK,
+        domElementsExist,
+      };
+    });
+    if (result.skip) return;
+    if (!result.singleHasRequiredText) throw new Error('confirmDeleteJournal() 缺少 requiredText = currentUser?.name 的姓名輸入要求');
+    if (!result.singleHasCheck || !result.singleHasErrorToast) throw new Error('confirmDeleteJournal() 缺少輸入不符時的檢查或錯誤提示');
+    if (!result.singleOrderOK) throw new Error('confirmDeleteJournal() 的刪除呼叫沒有被輸入驗證正確保護，可能不驗證就直接執行刪除');
+    if (!result.batchHasRequiredText) throw new Error('confirmBatchDeleteHistory() 缺少 requiredText = `DELETE {筆數}` 的輸入要求');
+    if (!result.batchHasCheck || !result.batchHasErrorToast) throw new Error('confirmBatchDeleteHistory() 缺少輸入不符時的檢查或錯誤提示');
+    if (!result.batchOrderOK) throw new Error('confirmBatchDeleteHistory() 的刪除呼叫沒有被輸入驗證正確保護，可能不驗證就直接執行刪除');
+    if (!result.domElementsExist) throw new Error('刪除確認 Modal 缺少對應的輸入框或提示文字 DOM 元素');
   });
 
 

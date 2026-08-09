@@ -1501,6 +1501,8 @@ tr:last-child td { border-bottom: none; }
     <div class="modal-body">
       <div id="delete-journal-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.8"></div>
       <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+      <p id="delete-journal-confirm-hint" style="font-size:13px;color:var(--text2);margin:12px 0 6px"></p>
+      <input type="text" id="delete-journal-confirm-input" placeholder="請輸入以確認刪除" style="width:100%;box-sizing:border-box">
     </div>
     <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeModal('delete-journal-modal')">取消</button>
@@ -1544,6 +1546,8 @@ tr:last-child td { border-bottom: none; }
     <div class="modal-body">
       <div id="t-batch-delete-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.9"></div>
       <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+      <p id="t-batch-delete-confirm-hint" style="font-size:13px;color:var(--text2);margin:12px 0 6px"></p>
+      <input type="text" id="t-batch-delete-confirm-input" placeholder="請輸入以確認刪除" style="width:100%;box-sizing:border-box">
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeModal('t-batch-delete-modal')">取消</button>
@@ -3506,7 +3510,8 @@ async function saveStudent() {
 }
 async function deleteStudent(seatNo, name) {
   const semester = getSelectedStudentSemester();
-  if (!confirm(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將刪除該學生在本學期綁定信箱下的月記資料（其他學期若已重新分配座號則不受影響），此操作無法復原。`)) return;
+  const typed = prompt(`確定要從 ${semesterLabel(semester)} 刪除學生「${name}」嗎？\n將刪除該學生在本學期綁定信箱下的月記資料（其他學期若已重新分配座號則不受影響），此操作無法復原。\n\n請輸入該生姓名「${name}」以確認刪除：`);
+  if (typed !== name) return toast('已取消刪除', 'info');
   const { collectionGroup, getDocs, deleteDoc, doc } = firebase_funcs;
   showLoading();
   try {
@@ -5282,8 +5287,19 @@ function confirmTeacherBatchDelete() {
   const extraCount = Object.keys(studentSet).length > 5 ? `...等 ${Object.keys(studentSet).length} 位學生` : '';
   document.getElementById('t-batch-delete-info').innerHTML =
     `📆 範圍：<strong>${escapeHtml(label)}</strong><br>👥 學生：<strong>${escapeHtml(studentSummary)}${escapeHtml(extraCount)}</strong><br>🗑️ 共 <strong>${journals.length} 筆</strong>月記`;
+  const requiredText = `DELETE ${journals.length}`;
+  const hintEl = document.getElementById('t-batch-delete-confirm-hint');
+  if (hintEl) hintEl.textContent = `請輸入「${requiredText}」以確認刪除：`;
+  const inputEl = document.getElementById('t-batch-delete-confirm-input');
+  if (inputEl) inputEl.value = '';
   const btn = document.getElementById('t-batch-delete-confirm-btn');
-  btn.onclick = () => executeTeacherBatchDelete(journals);
+  btn.onclick = () => {
+    if ((inputEl?.value || '') !== requiredText) {
+      toast('輸入內容不符，請重新輸入以確認刪除', 'error');
+      return;
+    }
+    executeTeacherBatchDelete(journals);
+  };
   openModal('t-batch-delete-modal');
 }
 
@@ -5768,8 +5784,19 @@ function renderJournalCard(j, isTeacher) {
 function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
   document.getElementById('delete-journal-info').innerHTML = `👤 學生：<strong>${escapeHtml(seatNo)} ${escapeHtml(studentName)}</strong><br>📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
+  const requiredText = studentName || '';
+  const hintEl = document.getElementById('delete-journal-confirm-hint');
+  if (hintEl) hintEl.textContent = `請輸入姓名「${requiredText}」以確認刪除：`;
+  const inputEl = document.getElementById('delete-journal-confirm-input');
+  if (inputEl) inputEl.value = '';
   const btn = document.getElementById('delete-journal-confirm-btn');
-  btn.onclick = () => executeDeleteJournal(seatNo, semester, month, isTeacher);
+  btn.onclick = () => {
+    if ((inputEl?.value || '') !== requiredText) {
+      toast('輸入內容不符，請重新輸入姓名以確認刪除', 'error');
+      return;
+    }
+    executeDeleteJournal(seatNo, semester, month, isTeacher);
+  };
   openModal('delete-journal-modal');
 }
 

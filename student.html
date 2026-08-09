@@ -826,6 +826,8 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
     <div class="modal-body">
       <div id="batch-delete-history-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.9"></div>
       <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+      <p id="batch-delete-history-confirm-hint" style="font-size:13px;color:var(--text2);margin:12px 0 6px"></p>
+      <input type="text" id="batch-delete-history-confirm-input" placeholder="請輸入以確認刪除" style="width:100%;box-sizing:border-box">
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeModal('batch-delete-history-modal')">取消</button>
@@ -843,6 +845,8 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
     <div class="modal-body">
       <div id="delete-journal-info" style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.8"></div>
       <p style="color:var(--accent-red);font-size:13px;font-weight:600">⚠️ 刪除後無法復原，確定要刪除嗎？</p>
+      <p id="delete-journal-confirm-hint" style="font-size:13px;color:var(--text2);margin:12px 0 6px"></p>
+      <input type="text" id="delete-journal-confirm-input" placeholder="請輸入以確認刪除" style="width:100%;box-sizing:border-box">
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary" onclick="closeModal('delete-journal-modal')">取消</button>
@@ -3932,8 +3936,19 @@ function confirmBatchDeleteHistory() {
   const label = getJournalMonthRangeLabel(journals);
   document.getElementById('batch-delete-history-info').innerHTML =
     `📆 範圍：<strong>${label}</strong><br>🗑️ 將刪除 <strong>${journals.length} 筆</strong>月記`;
+  const requiredText = `DELETE ${journals.length}`;
+  const hintEl = document.getElementById('batch-delete-history-confirm-hint');
+  if (hintEl) hintEl.textContent = `請輸入「${requiredText}」以確認刪除：`;
+  const inputEl = document.getElementById('batch-delete-history-confirm-input');
+  if (inputEl) inputEl.value = '';
   const btn = document.getElementById('batch-delete-history-confirm-btn');
-  btn.onclick = () => executeBatchDeleteHistory(journals);
+  btn.onclick = () => {
+    if ((inputEl?.value || '') !== requiredText) {
+      toast('輸入內容不符，請重新輸入以確認刪除', 'error');
+      return;
+    }
+    executeBatchDeleteHistory(journals);
+  };
   openModal('batch-delete-history-modal');
 }
 
@@ -4400,8 +4415,25 @@ async function saveStudentReply(seatNo, sem, month) {
 function confirmDeleteJournal(seatNo, semester, month, studentName, isTeacher) {
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
   document.getElementById('delete-journal-info').innerHTML = `📅 學期：<strong>${escapeHtml(semLabel)}</strong><br>📆 月份：<strong>${escapeHtml(month)} 月</strong>`;
+  // 這裡刻意不用傳進來的 studentName 參數（值等於 j.studentName，是這份月記存檔當下
+  // 記錄的姓名），改用 currentUser?.name（目前登入者的即時姓名）。學生只能刪自己的
+  // 月記，兩者正常情況下相等；但若老師事後在名冊更正過這位學生的姓名，j.studentName
+  // 可能還停在舊值，此時若要求輸入舊姓名，學生會打自己「現在」的姓名卻被判定不符，
+  // 卡在一個自己也搞不懂為什麼打不過的死結。用 currentUser?.name 保證要求輸入的字串
+  // 永遠等於學生目前認知的自己名字，不會有這個邊界案例。
+  const requiredText = currentUser?.name || '';
+  const hintEl = document.getElementById('delete-journal-confirm-hint');
+  if (hintEl) hintEl.textContent = `請輸入姓名「${requiredText}」以確認刪除：`;
+  const inputEl = document.getElementById('delete-journal-confirm-input');
+  if (inputEl) inputEl.value = '';
   const btn = document.getElementById('delete-journal-confirm-btn');
-  btn.onclick = () => executeDeleteJournal(seatNo, semester, month, isTeacher);
+  btn.onclick = () => {
+    if ((inputEl?.value || '') !== requiredText) {
+      toast('輸入內容不符，請重新輸入姓名以確認刪除', 'error');
+      return;
+    }
+    executeDeleteJournal(seatNo, semester, month, isTeacher);
+  };
   openModal('delete-journal-modal');
 }
 

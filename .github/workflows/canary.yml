@@ -15,25 +15,27 @@ jobs:
   canary:
     # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
     #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-08-05：student.test.js v26→v27（75→76 項，72個具名呼叫點 + 4次
-    #     頁籤切換迴圈，新增 S-SEC-42）、teacher.test.js v26→v27（70→71 項，63個具名
-    #     呼叫點 + 8次頁籤切換迴圈，新增 T-SEC-48），對應「薪資單照片可上傳多張」功能——
-    #     原本月記只用單一 salaryPhoto Base64 字串，選新照片會直接覆蓋舊圖，改為
-    #     salaryPhotos 陣列，最多5張、每張壓縮至800×600/JPEG quality 0.75、全部合計
-    #     650,000字元硬上限（為 Firestore 單文件 1MiB 留安全餘裕）。薪資單仍留在受
-    #     Firestore Rules 保護的月記文件內，不像工作照片改走公開 Cloudinary 路徑；
-    #     getJournalSalaryPhotos() 學生端／老師端皆同時讀取新 salaryPhotos 與舊單張
-    #     salaryPhoto 確保相容，學生重新儲存舊月記時會寫入新陣列並清空 salaryPhoto。
-    #     S-SEC-42 驗證檔案 input 的 multiple、5張與650,000字元防呆、新舊格式相容、
-    #     表單預覽、儲存 payload、歷史卡與 PDF；T-SEC-48 驗證老師端新舊格式相容、
-    #     localStorage 同時剔除兩種 Base64、按需載入的多張渲染、月記卡與 PDF。
-    #     rule.txt 不需變動——規則本身未以欄位白名單限制月記一般編輯，新欄位仍完全受
-    #     既有「只能本人寫自己的 /users/{uid}/journals/」限制。完整技術細節見
-    #     AI_CONTEXT.md 對應更新。
+    #    （目前對應 2026-08-08：student.test.js v27→v28（76→77 項，73個具名呼叫點 + 4次
+    #     頁籤切換迴圈，新增 S-SEC-43）、teacher.test.js v27→v28（71→72 項，64個具名
+    #     呼叫點 + 8次頁籤切換迴圈，新增 T-SEC-49），對應「刪除操作二次確認」功能——
+    #     deleteStudent()／單筆刪月記／批次刪月記共5處「無法復原」的刪除流程，新增輸入
+    #     姓名或 DELETE {筆數} 才能執行刪除的第二層確認，源自使用者指出這批操作完全沒有
+    #     任何復原機制（真刪除，無回收站）。deleteStudent() 從 confirm() 改成單一
+    #     prompt()（警告文字＋姓名輸入合併同一段）；4個既有 Modal（老師/學生 × 單筆/
+    #     批次）皆補上輸入框，按下確認鍵才檢查，不符合就 toast 錯誤且不關閉 Modal，跟
+    #     deleteSelectedSemesterData() 既有的 prompt()+info toast 機制刻意不同（4個
+    #     Modal 本來就是既有介面，只是延續各自原有的互動模式各自加一道輸入關卡）。
+    #     單筆刪月記要求輸入該生姓名（teacher.html 用呼叫端傳入的 studentName 參數；
+    #     student.html 刻意改用 currentUser?.name，避免月記存的舊姓名跟名冊事後更正
+    #     不同步造成學生打自己現在的名字卻被判定不符）；批次刪月記／批次刪歷史月記因
+    #     可能橫跨多位學生（尤其老師端），改要求輸入 DELETE {筆數}。rule.txt 不需變動
+    #     ——全部是前端確認流程，Firestore 讀寫本身沒有變化。完整技術細節見 AI_CONTEXT.md
+    #     對應更新。
     #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18／2026-07-23／
-    #     2026-07-25 過期六次，這是第七次，見 AI_推播系統說明.md 第六節 #9、
-    #     AI_測試架構說明.md 第四節陷阱17，之後新增/刪除測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 76 項 + 老師端 71 項）
+    #     2026-07-25 過期六次，2026-08-05 第七次，這是第八次，見 AI_推播系統說明.md
+    #     第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後新增/刪除測試時務必記得回來
+    #     改這一行）。
+    name: 完整自動化測試（學生端 77 項 + 老師端 72 項）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
