@@ -585,7 +585,10 @@ tr:last-child td { border-bottom: none; }
 .salary-alert-box.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
 .salary-alert-box.danger { border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.08); }
 .salary-alert-box.good { border-color:rgba(34,197,94,0.30); background:rgba(34,197,94,0.07); }
-.salary-alert-title { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:700; font-size:13px; margin-bottom:8px; }
+/* 2026-08-11 新增：「薪資缺漏」改為獨立整行卡片（比照已逾期未達標），不再跟另外3個
+   清單擠在同一欄寬的網格格子裡，好容納複製按鈕＋月份範圍下拉選單。 */
+.salary-alert-box.full-width { grid-column: 1 / -1; }
+.salary-alert-title { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; font-weight:700; font-size:13px; margin-bottom:8px; }
 .salary-alert-count { font-size:11px; color:var(--text2); font-weight:600; }
 .salary-alert-list { display:flex; flex-direction:column; gap:7px; font-size:12px; color:var(--text2); max-height:280px; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-right:6px; }
 .salary-alert-item { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:7px; }
@@ -593,6 +596,13 @@ tr:last-child td { border-bottom: none; }
 .salary-alert-item > strong { white-space:nowrap; flex-shrink:0; }
 .salary-alert-main { color:var(--text); font-weight:600; }
 .salary-alert-note { color:var(--text3); font-size:11px; margin-top:2px; }
+/* 2026-08-11 新增：「薪資缺漏」依月份分組時，組跟組之間用加粗分隔線＋較大留白區隔
+   （比同一組內項目之間那條很淡的 1px 分隔線明顯），跟「已逾期未達標」的月份標題列
+   同一種視覺語言（📅 emoji + 月份文字）。 */
+.salary-missing-group { margin-top:14px; padding-top:10px; border-top:2px solid var(--border); }
+.salary-missing-group:first-child { margin-top:0; padding-top:0; border-top:none; }
+.salary-missing-group .salary-alert-item:first-child { border-top:none; padding-top:0; }
+.salary-missing-month-header { font-size:12px; font-weight:700; color:var(--accent-yellow); margin-bottom:6px; }
 .salary-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
 .salary-section-title { font-size:15px; font-weight:700; }
 .salary-sub-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -3005,6 +3015,39 @@ function copyOverdueList() {
   });
 }
 
+// 2026-08-11 新增：「薪資缺漏」複製名單，比照 copyOverdueList() 同一套邏輯（複製範圍
+// 下拉選單、只複製座號不含姓名），差異只在：①資料來源是 window._salaryMissingGroups
+// （依西元年月分組，見 computeSalaryMissingGroups()），不是 window._overdueGroups；
+// ②複製內容不附「已交X篇，尚差Y篇」這類篇數註記——薪資缺漏只有「未填」單一狀態，沒有
+// 進度可言，附加註記反而是多餘資訊；③每個月份區塊的識別鍵用 g.key（西元年月字串，例如
+// "2026-07"），不是裸月份數字，避免橫跨學年查詢時不同年份的同一個月份混在一起複製。
+function copySalaryMissingList() {
+  const allGroups = window._salaryMissingGroups || [];
+  if (allGroups.length === 0) {
+    toast('目前沒有薪資缺漏的月記，無需提醒', 'info');
+    return;
+  }
+  const scopeSel = document.getElementById('salary-missing-copy-scope');
+  const scope = scopeSel ? scopeSel.value : 'all';
+  const groups = scope === 'all' ? allGroups : allGroups.filter(g => g.key === scope);
+  if (groups.length === 0) {
+    toast('選擇的月份目前沒有薪資缺漏名單', 'info');
+    return;
+  }
+  const sections = groups.map(g => {
+    const lines = g.students.map(s => s.sno);
+    return `【${g.semester}　${g.month}月】\n${lines.join('\n')}`;
+  });
+  const text = `【薪資缺漏提醒】\n以下同學的月記尚未填寫薪資，請儘速補齊：\n\n${sections.join('\n\n')}`;
+  const btn = document.getElementById('copy-salary-missing-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製'; }, 2000); }
+    toast('已複製薪資缺漏名單，可直接貼到 LINE 群組', 'success');
+  }).catch(() => {
+    prompt('請手動複製以下內容：', text);
+  });
+}
+
 // 2026-08-05 新增：固定寬度按鈕＋角落篇數分數徽章＋下方缺月數小字，供「本月未繳名單」
 // （toggleStatList('missing')）與「已逾期未達標」（toggleOverduePanel()）共用同一套視覺
 // 呈現，避免兩處各自維護一份樣式又逐漸不一致。徽章顯示「已交/應繳」篇數（entriesCount/
@@ -4823,11 +4866,53 @@ function renderSalaryFocus(studentList, companyList) {
   setSalaryFocusCard('salary-low-company', lowCompany ? lowCompany.name : '-', lowCompany ? `${formatMoney(lowCompany.avg)}｜${lowCompany.studentCount} 人` : '尚無薪資資料');
 }
 
+// 2026-08-11 新增：把「薪資缺漏」清單依真正的西元年月分組——不能只比對月份數字（1~12），
+// 因為薪資統計的查詢區間常常橫跨不同學年（例如查一整學年），不同學年的同一個月份數字
+// （例如114-1的7月跟115-1的7月）混在一起會讓月份分組失去意義。換算公式沿用
+// getTeacherJournalMonthRangeLabel() 既有的「學期+月份→西元年月」邏輯（第1學期7~12月
+// 為當年、1月為隔年；第2學期2~6月皆隔年），不重新發明一套。回傳依時間先後（由舊到新，
+// 跟「已逾期未達標」同一種順序）排序好的陣列，每組含 key（西元年月字串，供複製範圍下拉
+// 選單比對用）、西元年、月、學期、與座號已排序好的學生清單。
+function computeSalaryMissingGroups(missingSalary, stuCompanyMap) {
+  const groupMap = {};
+  missingSalary.forEach(j => {
+    const [roc, half] = String(j.semester || '').split('-').map(Number);
+    const month = j.month || 0;
+    let year = (roc || 0) + 1911;
+    if (half === 1 && month === 1) year += 1;
+    if (half === 2) year += 1;
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    if (!groupMap[key]) groupMap[key] = { key, year, month, semester: j.semester || '', students: [] };
+    // 2026-07-22 修正：改用 getJournalCompany()（月記優先、名冊備援），跟其餘薪資
+    // 統計欄位使用同一套判斷依據，不再自己另外維護一份「名冊優先」的邏輯。
+    const company = getJournalCompany(j, stuCompanyMap) || '-';
+    groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company });
+  });
+  const groups = Object.values(groupMap).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  groups.forEach(g => g.students.sort((a, b) => String(a.sno).localeCompare(String(b.sno), 'zh-Hant', { numeric: true })));
+  return groups;
+}
+
+// 2026-08-11 新增：把 computeSalaryMissingGroups() 算好的分組資料畫成畫面清單 HTML，每組
+// 前面加一行「📅 學期　月份（N筆）」標題，組跟組之間靠 CSS 的 .salary-missing-group（見
+// 樣式表）加粗分隔線區隔；組內單筆項目不再重複顯示「學期 月份」（已經在標題列），只保留
+// 公司名稱，避免同一份資訊在畫面上出現兩次。
+function renderSalaryMissingGroupedHtml(groups) {
+  if (!groups.length) return '<div class="salary-alert-note">沒有已交但薪資空白的月記</div>';
+  return groups.map(g => {
+    const items = g.students.map(s =>
+      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong>未填</strong></div>`
+    ).join('');
+    return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
+  }).join('');
+}
+
 function renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap }) {
   const el = document.getElementById('salary-alerts-container');
   if (!el) return;
   if (!classAvg) {
     el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>尚無薪資資料可判斷</p></div>';
+    window._salaryMissingGroups = [];
     return;
   }
 
@@ -4836,8 +4921,11 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   const lowStudents = studentList.filter(s => s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg);
   const highStudents = studentList.filter(s => s.avg > highThreshold).sort((a,b)=>b.avg-a.avg);
   const missingSalary = allActiveJournals
-    .filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)))
-    .sort((a,b)=>`${a.seatNo}${a.month}`.localeCompare(`${b.seatNo}${b.month}`));
+    .filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)));
+  // 2026-08-11 新增：依西元年月分組，供畫面分組顯示與 copySalaryMissingList() 共用同一份
+  // 資料（詳見 computeSalaryMissingGroups() 上方註解）。
+  const missingSalaryGroups = computeSalaryMissingGroups(missingSalary, stuCompanyMap);
+  window._salaryMissingGroups = missingSalaryGroups;
   const companyGaps = companyList
     .map(c => {
       const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
@@ -4858,28 +4946,41 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     }).join('');
   }
 
-  function missingItems(items) {
-    return items.map(j => {
-      // 2026-07-22 修正：改用 getJournalCompany()（月記優先、名冊備援），跟其餘薪資
-      // 統計欄位使用同一套判斷依據，不再自己另外維護一份「名冊優先」的邏輯。
-      const company = getJournalCompany(j, stuCompanyMap) || '-';
-      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(j.seatNo || '-')} ${escapeHtml(j.studentName || '-')}</div><div class="salary-alert-note">${escapeHtml(company)}｜${escapeHtml(j.semester || '')} ${escapeHtml(j.month || '')}月</div></div><strong>未填</strong></div>`;
-    }).join('');
-  }
-
   function gapItems(items) {
     return items.map(c =>
       `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(c.name)}</div><div class="salary-alert-note">最高 ${formatMoney(c.max)}｜最低 ${formatMoney(c.min)}</div></div><strong>差 ${formatMoney(c.gap)}</strong></div>`
     ).join('');
   }
 
+  // 2026-08-11 新增：「薪資缺漏」改成獨立整行卡片（見 .salary-alert-box.full-width
+  // 樣式，跟另外3個清單分開排，不再擠在同一欄寬的網格格子裡），標題列除了既有的筆數
+  // 徽章，額外加上複製範圍下拉選單＋複製按鈕，比照「已逾期未達標」
+  // （copyOverdueList()／#overdue-copy-scope）同一套設計；差異是複製內容只有純座號，
+  // 不附篇數註記，因為薪資缺漏只有「未填」單一狀態，沒有進度可言。
+  const missingScopeOptions = missingSalaryGroups.map(g =>
+    `<option value="${escapeHtml(g.key)}">只複製 ${escapeHtml(g.semester)}　${g.month}月</option>`
+  ).join('');
+  const missingSalaryTitleExtra = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span class="salary-alert-count">${missingSalary.length} 筆</span>
+    <span style="position:relative;display:inline-block">
+      <select id="salary-missing-copy-scope" style="-webkit-appearance:none;-moz-appearance:none;appearance:none;font-size:12px;height:28px;padding:0 18px 0 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text)"><option value="all">複製範圍：全部</option>${missingScopeOptions}</select>
+      <span style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--text2);pointer-events:none">▾</span>
+    </span>
+    <button class="btn btn-secondary btn-sm" onclick="copySalaryMissingList()" id="copy-salary-missing-btn" style="white-space:nowrap;flex-shrink:0">📋 複製</button>
+  </div>`;
+
   const boxes = [
     { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
-    { cls:'warn', title:'薪資缺漏', count:missingSalary.length, html:missingItems(missingSalary) || '<div class="salary-alert-note">沒有已交但薪資空白的月記</div>' },
     { cls:'warn', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
-    { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }
+    { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' },
+    { cls:'warn full-width', title:'薪資缺漏', html:renderSalaryMissingGroupedHtml(missingSalaryGroups), titleExtra:missingSalaryTitleExtra }
   ];
-  el.innerHTML = boxes.map(b => `<div class="salary-alert-box ${b.cls}"><div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div><div class="salary-alert-list">${b.html}</div></div>`).join('');
+  el.innerHTML = boxes.map(b => {
+    const titleRow = b.titleExtra
+      ? `<div class="salary-alert-title"><span>${b.title}</span>${b.titleExtra}</div>`
+      : `<div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div>`;
+    return `<div class="salary-alert-box ${b.cls}">${titleRow}<div class="salary-alert-list">${b.html}</div></div>`;
+  }).join('');
 }
 
 // 2026-07-22 修正：改成「月記自己當時寫入的 company 欄位優先」，名冊只在月記本身
