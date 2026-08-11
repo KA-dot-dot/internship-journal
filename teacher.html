@@ -208,6 +208,9 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .table-wrap { -webkit-overflow-scrolling: touch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
   .stat-value { font-size: 22px; }
+  /* 2026-08-11（第二輪）新增：桌面版固定 3 欄等寬（見 .salary-alert-grid），手機版
+     3 欄會太窄擠壞卡片內容，改回單欄直向堆疊。 */
+  .salary-alert-grid { grid-template-columns: 1fr; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   #page-t-students .table-wrap { overflow-x: visible; }
@@ -580,7 +583,14 @@ tr:last-child td { border-bottom: none; }
 .salary-focus-title { font-size:13px; color:var(--text2); margin-bottom:8px; }
 .salary-focus-value { font-size:20px; font-weight:800; color:var(--text); line-height:1.3; }
 .salary-focus-sub { font-size:12px; color:var(--text3); margin-top:4px; }
-.salary-alert-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:12px; }
+/* 2026-08-11（第二輪）修正：原本 repeat(auto-fit, minmax(250px, 1fr)) 在容器寬度不是
+   250px 整數倍時，瀏覽器分配剩餘空間的方式會讓三張卡片寬度看起來不一致（實測畫面確認
+   低於平均20%／公司內部落差／高於平均30% 三者寬窄不一、右側留白），改成固定
+   repeat(3, minmax(0, 1fr)) 讓三欄永遠等寬平分容器寬度，不受卡片內容或容器寬度影響；
+   手機版（<=768px）改回單欄，見下方 @media (max-width:768px) 內的覆寫。「薪資缺漏」
+   卡片本身仍靠 .salary-alert-box.full-width 的 grid-column:1/-1 橫跨全部欄位，不受
+   影響。 */
+.salary-alert-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:12px; }
 .salary-alert-box { border:1px solid var(--border); border-radius:var(--radius); padding:14px; background:var(--bg2); min-height:96px; }
 .salary-alert-box.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
 .salary-alert-box.danger { border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.08); }
@@ -4870,9 +4880,12 @@ function renderSalaryFocus(studentList, companyList) {
 // 因為薪資統計的查詢區間常常橫跨不同學年（例如查一整學年），不同學年的同一個月份數字
 // （例如114-1的7月跟115-1的7月）混在一起會讓月份分組失去意義。換算公式沿用
 // getTeacherJournalMonthRangeLabel() 既有的「學期+月份→西元年月」邏輯（第1學期7~12月
-// 為當年、1月為隔年；第2學期2~6月皆隔年），不重新發明一套。回傳依時間先後（由舊到新，
-// 跟「已逾期未達標」同一種順序）排序好的陣列，每組含 key（西元年月字串，供複製範圍下拉
-// 選單比對用）、西元年、月、學期、與座號已排序好的學生清單。
+// 為當年、1月為隔年；第2學期2~6月皆隔年），不重新發明一套。
+// 2026-08-11（第二輪）修正：排序改為依時間「由新到舊」（例如先8月再7月）——跟
+// 「已逾期未達標」（window._overdueGroups，依月份由小到大排序）刻意不同：那邊是「越
+// 早逾期的月份越該優先處理」，這裡薪資缺漏是「老師通常最關心最近一次繳交的狀況」，故
+// 兩處排序方向不同，非不一致。回傳的陣列每組含 key（西元年月字串，供複製範圍下拉選單
+// 比對用）、西元年、月、學期、與座號已排序好的學生清單。
 function computeSalaryMissingGroups(missingSalary, stuCompanyMap) {
   const groupMap = {};
   missingSalary.forEach(j => {
@@ -4888,7 +4901,7 @@ function computeSalaryMissingGroups(missingSalary, stuCompanyMap) {
     const company = getJournalCompany(j, stuCompanyMap) || '-';
     groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company });
   });
-  const groups = Object.values(groupMap).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  const groups = Object.values(groupMap).sort((a, b) => (b.year - a.year) || (b.month - a.month));
   groups.forEach(g => g.students.sort((a, b) => String(a.sno).localeCompare(String(b.sno), 'zh-Hant', { numeric: true })));
   return groups;
 }
@@ -4969,11 +4982,14 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     <button class="btn btn-secondary btn-sm" onclick="copySalaryMissingList()" id="copy-salary-missing-btn" style="white-space:nowrap;flex-shrink:0">📋 複製</button>
   </div>`;
 
+  // 2026-08-11（第二輪）調整順序：「薪資缺漏」排最上層（獨立整行），下層依左至右改為
+  // 公司內部落差／低於平均20%／高於平均30%（原順序為低於平均20%在最左、薪資缺漏在
+  // 最下，使用者確認後調整為目前這個順序）。
   const boxes = [
-    { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
+    { cls:'warn full-width', title:'薪資缺漏', html:renderSalaryMissingGroupedHtml(missingSalaryGroups), titleExtra:missingSalaryTitleExtra },
     { cls:'warn', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
-    { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' },
-    { cls:'warn full-width', title:'薪資缺漏', html:renderSalaryMissingGroupedHtml(missingSalaryGroups), titleExtra:missingSalaryTitleExtra }
+    { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
+    { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }
   ];
   el.innerHTML = boxes.map(b => {
     const titleRow = b.titleExtra
