@@ -208,9 +208,6 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .table-wrap { -webkit-overflow-scrolling: touch; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
   .stat-value { font-size: 22px; }
-  /* 2026-08-11（第二輪）新增：桌面版固定 3 欄等寬（見 .salary-alert-grid），手機版
-     3 欄會太窄擠壞卡片內容，改回單欄直向堆疊。 */
-  .salary-alert-grid { grid-template-columns: 1fr; }
   .card { padding: 14px; }
   .btn-lg { min-height: 48px; font-size: 15px; }
   #page-t-students .table-wrap { overflow-x: visible; }
@@ -591,6 +588,15 @@ tr:last-child td { border-bottom: none; }
    卡片本身仍靠 .salary-alert-box.full-width 的 grid-column:1/-1 橫跨全部欄位，不受
    影響。 */
 .salary-alert-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:12px; }
+/* 2026-08-12 修正：手機版單欄覆寫原本寫在較早的 @media (max-width:768px) 區塊裡（第193行
+   附近），但 CSS 層疊規則下，選擇器優先度相同時「原始碼順序在後的規則勝出」——上面這行
+   桌面版 3 欄的規則定義在檔案更後面，導致手機版覆寫實際上完全沒有生效，畫面上仍然套用
+   3 欄等寬，窄螢幕下中文字被擠壓到逐字換行（僅手機版受影響，網頁版原本就是正確的3欄
+   等寬，未變動）。修法：把手機版覆寫規則移到這裡、緊接在桌面版規則之後，讓它在原始碼
+   順序上確實排在後面才能真正蓋過去。 */
+@media (max-width: 768px) {
+  .salary-alert-grid { grid-template-columns: 1fr; }
+}
 .salary-alert-box { border:1px solid var(--border); border-radius:var(--radius); padding:14px; background:var(--bg2); min-height:96px; }
 .salary-alert-box.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
 .salary-alert-box.danger { border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.08); }
