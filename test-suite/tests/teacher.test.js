@@ -1,7 +1,55 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v28
+ * 老師端自動化測試 v29
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v29 新增（2026-08-11）：對應「薪資缺漏」新增依月份分組＋複製功能，分兩輪完成：
+ *
+ * 【第一輪】新增共用函式 computeSalaryMissingGroups()（依真正的西元年月分組，避免查詢
+ * 區間橫跨學年時同一個月份數字被誤合併）、renderSalaryMissingGroupedHtml()（畫面清單，
+ * 月份標題列＋加粗分隔線）、copySalaryMissingList()（比照 copyOverdueList()，只複製座號、
+ * 依複製範圍下拉選單篩選單一月份或全部）；「薪資缺漏」box 拆成獨立整行卡片（.salary-alert-box
+ * .full-width，grid-column:1/-1），標題列加上複製範圍下拉選單＋複製按鈕。
+ *
+ * 【第二輪】使用者確認後追加三項調整：①`.salary-alert-grid` 改成固定 `repeat(3,
+ * minmax(0,1fr))`，讓另外3個清單（低於平均20%／公司內部落差／高於平均30%）永遠等寬平分
+ * （原本 `repeat(auto-fit, minmax(250px,1fr))` 在容器寬度不是250px整數倍時三欄寬度會
+ * 不一致），手機版（≤768px）加對應覆寫改回單欄；②「薪資缺漏」從 boxes 陣列最後面搬到
+ * 最前面（畫面上獨立整行、排最上層），下層依左至右改為公司內部落差／低於平均20%／
+ * 高於平均30%；③`computeSalaryMissingGroups()` 排序方向從「舊到新」改成「新到舊」——
+ * 跟「已逾期未達標」（依月份由小到大）刻意不同：那邊是「越早逾期越該優先處理」，這裡是
+ * 「老師通常最關心最近一次的繳交狀況」，複製範圍下拉選單與複製文字的月份區塊順序皆共用
+ * 同一份已排序資料，不需要另外處理。CSS 變動（①）純屬視覺呈現，本輪未新增對應測試，
+ * 列為已知缺口（比照 2026-08-06 面板改版當時的既有處理方式）；②③則直接反映在下面兩條
+ * 新測試裡。
+ *
+ * 新增：
+ *   T-SEC-50  computeSalaryMissingGroups()／renderSalaryMissingGroupedHtml() 直接呼叫
+ *             函式本體帶合成資料驗證：不同學年同一個月份數字不會被誤合併成同一組、依
+ *             「新到舊」排序（含核心目標情境：同一年內月份較大的排較前面、1月跨年與
+ *             第2學期隔年的換算公式套用正確）、組內依座號排序；renderSalaryMissingGroupedHtml()
+ *             輸出含月份標題列與分組容器 class（供加粗分隔線樣式使用）、每筆項目只顯示
+ *             公司名稱不重複月份文字；renderSalaryAlerts() 已改呼叫這兩個共用函式、把
+ *             分組結果存進 window._salaryMissingGroups、full-width class 與複製按鈕皆
+ *             存在、且「薪資缺漏」在 boxes 陣列裡排最前面。
+ *   T-SEC-51  copySalaryMissingList() 直接呼叫函式本體（暫時注入一個獨立的
+ *             #salary-missing-copy-scope select，測試結束後移除，不依賴「薪資統計」
+ *             頁籤真的跑過查詢），驗證複製文字只有座號不含姓名、依 window._salaryMissingGroups
+ *             既有順序輸出月份區塊（不自己另外排序）、複製範圍下拉選單可篩選單一月份。
+ *
+ * 【T-SEC-43 同步修正（regression fix，不是新發現的問題）】：T-SEC-43 原本檢查
+ * `renderSalaryAlerts.toString()` 裡有沒有 `const company = getJournalCompany(j,
+ * stuCompanyMap)` 這行呼叫——這是「薪資缺漏」清單當初（重構前）寫在 renderSalaryAlerts()
+ * 內部的 missingItems() 區域函式裡的邏輯。第一輪重構把這段邏輯搬進新的頂層函式
+ * computeSalaryMissingGroups() 後，renderSalaryAlerts() 字串裡已經找不到這行，導致
+ * T-SEC-43 在正式環境真的跑出失敗（2026-08-11 test-report.txt：老師端 71/72，唯一
+ * 失敗項正是 T-SEC-43）——**這不是 getJournalCompany()／薪資缺漏歸屬邏輯本身壞掉**，
+ * 是函式搬家後測試檢查的目標沒有跟著搬，跟 T-SEC-43 自己 v25 那次「stuCompanyMap key
+ * 格式改變、fixture 沒跟上」是同一類「修改共用函式時要盤點有哪些測試直接讀它原始碼」的
+ * 教訓（陷阱24／25）。修法：檢查目標改成 `computeSalaryMissingGroups.toString()`，其餘
+ * 斷言（journalWins／rosterFallback／bothMissingFallback／salaryUsesSharedFn／
+ * salaryNoDuplicateLogic）完全不受影響，`getJournalCompany()` 邏輯本身從頭到尾正確
+ * 無誤。
  *
  * v28 新增（2026-08-08）：對應「刪除操作二次確認」——deleteStudent()／單筆刪月記／批次刪
  * 月記共 5 處「無法復原」的刪除流程，新增輸入姓名或固定格式字串才能刪除的第二層確認，
@@ -2300,11 +2348,22 @@ async function runTeacherTests(page, log) {
       const salaryUsesSharedFn = /company:\s*getJournalCompany\(\s*j\s*,\s*stuCompanyMap\s*\)/.test(salaryFnStr);
       const salaryNoDuplicateLogic = !/company:\s*j\.company\s*\|\|\s*getJournalCompany/.test(salaryFnStr);
 
-      // renderSalaryAlerts() 的「薪資缺漏」清單（missingItems）同樣應改呼叫共用函式，
-      // 不再自己另外維護一份 stuCompanyMap[j.seatNo] || j.company 的判斷
-      const alertsFnStr = (typeof renderSalaryAlerts === 'function') ? codeOnly(renderSalaryAlerts.toString()) : '';
-      const alertsUsesSharedFn = /const company = getJournalCompany\(\s*j\s*,\s*stuCompanyMap\s*\)/.test(alertsFnStr);
-      const alertsNoOldPattern = !/stuCompanyMap\[j\.seatNo\]\s*\|\|\s*j\.company/.test(alertsFnStr);
+      // 2026-08-11 補修：「薪資缺漏」清單原本的 getJournalCompany() 呼叫寫在
+      // renderSalaryAlerts() 內部的 missingItems() 這個區域函式裡（當時這條斷言檢查的
+      // 就是 renderSalaryAlerts.toString()）；2026-08-11「薪資缺漏依月份分組＋複製」
+      // 重構把這段邏輯搬到新的頂層共用函式 computeSalaryMissingGroups()（
+      // renderSalaryMissingGroupedHtml() 只負責畫面渲染，不碰 stuCompanyMap），
+      // renderSalaryAlerts() 本身現在只是呼叫這個函式取得結果，字串裡已經找不到這行
+      // 呼叫——這條測試因此在正式環境跑出「T-SEC-43 失敗」（見 2026-08-11
+      // test-report.txt），但不是 getJournalCompany() 邏輯本身壞掉，是函式搬家後測試
+      // 檢查的目標沒有跟著搬。修法：改成直接檢查 computeSalaryMissingGroups.toString()
+      // ——跟陷阱24（`stuCompanyMap` key 格式改變、測試 fixture 沒跟上）、陷阱25
+      // （驗證邏輯抽成共用函式後、依賴讀原始碼字面文字的檢查機制沒跟著看見）是同一類
+      // 「修改共用函式時，要盤點有哪些測試直接讀它的原始碼字串」的教訓，詳見
+      // AI_測試架構說明.md。
+      const missingGroupsFnStr = (typeof computeSalaryMissingGroups === 'function') ? codeOnly(computeSalaryMissingGroups.toString()) : '';
+      const alertsUsesSharedFn = /const company = getJournalCompany\(\s*j\s*,\s*stuCompanyMap\s*\)/.test(missingGroupsFnStr);
+      const alertsNoOldPattern = !/stuCompanyMap\[j\.seatNo\]\s*\|\|\s*j\.company/.test(missingGroupsFnStr);
 
       return {
         skip: false, journalWins, rosterFallback, bothMissingFallback,
@@ -2324,9 +2383,9 @@ async function runTeacherTests(page, log) {
     if (!result.salaryNoDuplicateLogic)
       throw new Error('loadSalaryStats() 仍殘留「j.company || getJournalCompany(...)」的重複判斷，未簡化為直接呼叫共用函式');
     if (!result.alertsUsesSharedFn)
-      throw new Error('renderSalaryAlerts() 的薪資缺漏清單未改呼叫 getJournalCompany()');
+      throw new Error('computeSalaryMissingGroups()（薪資缺漏分組邏輯，2026-08-11 從 renderSalaryAlerts() 內部搬出）未改呼叫 getJournalCompany()');
     if (!result.alertsNoOldPattern)
-      throw new Error('renderSalaryAlerts() 仍殘留舊的「stuCompanyMap[j.seatNo] || j.company」名冊優先判斷');
+      throw new Error('computeSalaryMissingGroups() 仍殘留舊的「stuCompanyMap[j.seatNo] || j.company」名冊優先判斷');
   });
 
   await test('T-SEC-44 公司篩選清單改由「目前日期範圍內的月記」自己的 company 欄位建立，不再讀取整個 /students 集合；loadWorkTypeStats() 補上一致的清單建立呼叫', async () => {
@@ -2681,6 +2740,167 @@ async function runTeacherTests(page, log) {
     if (!result.batchHasCheck) throw new Error('confirmTeacherBatchDelete() 缺少輸入不符時的檢查');
     if (!result.batchOrderOK) throw new Error('confirmTeacherBatchDelete() 的刪除呼叫沒有被輸入驗證正確保護，可能不驗證就直接執行刪除');
     if (!result.domElementsExist) throw new Error('刪除確認 Modal 缺少對應的輸入框或提示文字 DOM 元素');
+  });
+
+  await test('T-SEC-50 computeSalaryMissingGroups()／renderSalaryMissingGroupedHtml() 依西元年月正確分組並由新到舊排序（不同學年同一個月份數字不會被混在一起），renderSalaryAlerts() 已改呼叫這兩個共用函式並把「薪資缺漏」拆成獨立整行卡片、排在最上層', async () => {
+    // 背景：2026-08-11 新增「薪資缺漏依月份分組＋複製」功能，同日第二輪調整又把排序方向
+    // 從「舊到新」改成「新到舊」（老師通常最關心最近一次的繳交狀況），並把「薪資缺漏」
+    // 從4欄網格最下方搬到最上層獨立整行（見 AI_CONTEXT.md）。查詢區間常常橫跨不同學年
+    // （例如查一整學年），computeSalaryMissingGroups() 換算真正的西元年月（沿用
+    // getTeacherJournalMonthRangeLabel() 既有公式：第1學期7~12月為當年、1月為隔年；
+    // 第2學期2~6月皆隔年）當分組鍵，避免不同學年的同一個月份數字被誤合併。這裡直接呼叫
+    // 真正的函式驗證行為，而非只做原始碼比對。
+    const result = await page.evaluate(() => {
+      if (typeof computeSalaryMissingGroups !== 'function' || typeof renderSalaryMissingGroupedHtml !== 'function')
+        return { skip: true };
+
+      // 5筆分屬4個不同的西元年月，其中114-1的7月跟115-1的7月刻意都是「7月」但差一年，
+      // 驗證不會被誤合併成同一組；115-1的1月（第1學期1月跨年）跟115-2的3月（第2學期
+      // 全部隔年）也刻意排進來驗證「學期+月份→西元年月」的換算公式套用正確；115-1的7月
+      // 故意放2筆（座號01、03），驗證組內仍依座號排序。
+      const missingSalary = [
+        { seatNo: '05', studentName: '學生A', semester: '115-2', month: 3 },  // → 2027-03（最新）
+        { seatNo: '02', studentName: '學生B', semester: '114-1', month: 7 },  // → 2025-07（最舊）
+        { seatNo: '07', studentName: '學生C', semester: '115-1', month: 1 },  // → 2027-01（1月跨年）
+        { seatNo: '03', studentName: '學生D', semester: '115-1', month: 7 },  // → 2026-07
+        { seatNo: '01', studentName: '學生E', semester: '115-1', month: 7 },  // → 2026-07（跟上面同組）
+      ];
+      const groups = computeSalaryMissingGroups(missingSalary, {});
+      const keys = groups.map(g => g.key);
+      const notMerged = groups.length === 4; // 114-1的7月跟115-1的7月沒有被誤合併成同一組
+      // 2026-08-11（第二輪）：由新到舊排序，2027-03（最新）排最前，2025-07（最舊）排最後
+      const chronoOrderNewToOld = JSON.stringify(keys) === JSON.stringify(['2027-03', '2027-01', '2026-07', '2025-07']);
+      const julyGroup = groups.find(g => g.key === '2026-07');
+      const intraGroupSorted = !!julyGroup && julyGroup.students.map(s => s.sno).join(',') === '01,03';
+
+      const html = renderSalaryMissingGroupedHtml(groups);
+      const hasGroupClass = html.includes('class="salary-missing-group"');
+      const hasMonthHeader = html.includes('📅 115-1　7月（2筆）');
+      // 每組標題已經有「學期 月份」，項目本身不應再重複顯示同樣的文字，只留公司名稱
+      // （這裡的 company 全部沒有給值，getJournalCompany() 會 fallback 成「未填寫」）
+      const hasCompanyOnlyNote = html.includes('<div class="salary-alert-note">未填寫</div>');
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const alertsFnStr = (typeof renderSalaryAlerts === 'function') ? codeOnly(renderSalaryAlerts.toString()) : '';
+      const usesComputeGroups = /computeSalaryMissingGroups\(\s*missingSalary\s*,\s*stuCompanyMap\s*\)/.test(alertsFnStr);
+      const usesRenderGrouped = /renderSalaryMissingGroupedHtml\(\s*missingSalaryGroups\s*\)/.test(alertsFnStr);
+      const exposesForCopy = /window\._salaryMissingGroups\s*=\s*missingSalaryGroups/.test(alertsFnStr);
+      const hasFullWidthClass = /cls:\s*'warn full-width'/.test(alertsFnStr);
+      const hasCopyButton = /onclick="copySalaryMissingList\(\)"/.test(alertsFnStr);
+      const oldFnGone = !/function\s+missingItems/.test(alertsFnStr);
+
+      // 2026-08-11（第二輪）：「薪資缺漏」應排在 boxes 陣列最前面（畫面上獨立整行、排
+      // 最上層），不是原本（第一輪）排在最後面
+      const missingIdx = alertsFnStr.indexOf(`title:'薪資缺漏'`);
+      const lowIdx = alertsFnStr.indexOf(`title:'低於平均`);
+      const gapIdx = alertsFnStr.indexOf(`title:'公司內部落差'`);
+      const highIdx = alertsFnStr.indexOf(`title:'高於平均`);
+      const missingFirst = missingIdx !== -1 && lowIdx !== -1 && gapIdx !== -1 && highIdx !== -1
+        && missingIdx < lowIdx && missingIdx < gapIdx && missingIdx < highIdx;
+
+      return {
+        skip: false, notMerged, chronoOrderNewToOld, intraGroupSorted, hasGroupClass, hasMonthHeader,
+        hasCompanyOnlyNote, usesComputeGroups, usesRenderGrouped, exposesForCopy,
+        hasFullWidthClass, hasCopyButton, oldFnGone, missingFirst, keys,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.notMerged)
+      throw new Error(`不同學年同一個月份數字被誤合併成同一組，實際分組數：${JSON.stringify(result.keys)}`);
+    if (!result.chronoOrderNewToOld)
+      throw new Error(`分組排序不是「由新到舊」，實際順序：${JSON.stringify(result.keys)}`);
+    if (!result.intraGroupSorted)
+      throw new Error('同一組內的座號未依座號排序');
+    if (!result.hasGroupClass)
+      throw new Error('renderSalaryMissingGroupedHtml() 輸出缺少 salary-missing-group 分組容器（分隔線樣式依賴這個 class）');
+    if (!result.hasMonthHeader)
+      throw new Error('renderSalaryMissingGroupedHtml() 輸出缺少「📅 115-1　7月（2筆）」這種月份標題列');
+    if (!result.hasCompanyOnlyNote)
+      throw new Error('renderSalaryMissingGroupedHtml() 每筆項目的備註未正確只顯示公司名稱');
+    if (!result.usesComputeGroups)
+      throw new Error('renderSalaryAlerts() 未呼叫 computeSalaryMissingGroups() 計算薪資缺漏分組');
+    if (!result.usesRenderGrouped)
+      throw new Error('renderSalaryAlerts() 未呼叫 renderSalaryMissingGroupedHtml() 渲染薪資缺漏清單');
+    if (!result.exposesForCopy)
+      throw new Error('renderSalaryAlerts() 未把分組結果存進 window._salaryMissingGroups，copySalaryMissingList() 會拿不到資料');
+    if (!result.hasFullWidthClass)
+      throw new Error('「薪資缺漏」box 未套用 full-width class，應獨立成整行卡片而非跟其他3個清單並排');
+    if (!result.hasCopyButton)
+      throw new Error('renderSalaryAlerts() 的薪資缺漏標題列缺少複製按鈕（onclick="copySalaryMissingList()"）');
+    if (!result.oldFnGone)
+      throw new Error('舊的 missingItems() 內部函式仍殘留在 renderSalaryAlerts() 裡，應已被 computeSalaryMissingGroups()／renderSalaryMissingGroupedHtml() 取代');
+    if (!result.missingFirst)
+      throw new Error('「薪資缺漏」在 boxes 陣列裡未排在最前面（應獨立整行排最上層，下方依序才是公司內部落差／低於平均20%／高於平均30%）');
+  });
+
+  await test('T-SEC-51 copySalaryMissingList() 複製到剪貼簿的文字只有座號、不含姓名，依 window._salaryMissingGroups 既有順序分組（新到舊），且複製範圍下拉選單可篩選單一月份', async () => {
+    // 背景：比照「已逾期未達標」的 copyOverdueList()，但薪資缺漏沒有「已交X篇」這種
+    // 逐筆註記（只有「未填」二元狀態），複製格式因此更精簡——每個座號各自一行，不附
+    // 任何註記。複製文字的月份區塊順序直接沿用 window._salaryMissingGroups 本身的順序
+    // （2026-08-11 第二輪起改成新到舊），這裡刻意不重新排序，驗證 copySalaryMissingList()
+    // 沒有自己另外排序、真的是「共用同一份已排序好的資料」（見 computeSalaryMissingGroups()
+    // 與 copySalaryMissingList() 上方註解），排序正確性本身由 T-SEC-50 覆蓋。
+    const hasFn = await page.evaluate(() => typeof copySalaryMissingList === 'function');
+    if (!hasFn) return;
+
+    const result = await page.evaluate(async () => {
+      // 暫時插入一個獨立的 <select id="salary-missing-copy-scope">，不依賴「薪資統計」
+      // 頁籤是否已經跑過真實查詢、渲染出真正的下拉選單——測試結束後會移除，不影響頁面
+      // 其他部分。
+      const sel = document.createElement('select');
+      sel.id = 'salary-missing-copy-scope';
+      const optAll = document.createElement('option'); optAll.value = 'all';
+      const optJuly = document.createElement('option'); optJuly.value = '2026-07';
+      sel.appendChild(optAll); sel.appendChild(optJuly);
+      document.body.appendChild(sel);
+
+      // 刻意已經是「新到舊」順序（8月在前、7月在後），驗證 copySalaryMissingList() 只是
+      // 忠實依序輸出，沒有自己另外排序。
+      window._salaryMissingGroups = [
+        { key: '2026-08', year: 2026, month: 8, semester: '115-1', students: [
+          { sno: '12', name: '測試學生丙', company: 'C公司' },
+        ]},
+        { key: '2026-07', year: 2026, month: 7, semester: '115-1', students: [
+          { sno: '01', name: '測試學生甲', company: 'A公司' },
+          { sno: '03', name: '測試學生乙', company: 'B公司' },
+        ]},
+      ];
+
+      const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+      const captured = [];
+      navigator.clipboard.writeText = (text) => { captured.push(text); return Promise.resolve(); };
+
+      try {
+        sel.value = 'all';
+        await copySalaryMissingList();
+        sel.value = '2026-07';
+        await copySalaryMissingList();
+      } finally {
+        navigator.clipboard.writeText = originalWriteText;
+        sel.remove();
+      }
+
+      return { all: captured[0] || '', julyOnly: captured[1] || '' };
+    });
+
+    if (!result.all)
+      throw new Error('copySalaryMissingList() 選「全部」時沒有呼叫 navigator.clipboard.writeText()');
+    if (result.all.includes('測試學生甲') || result.all.includes('測試學生乙') || result.all.includes('測試學生丙'))
+      throw new Error('複製出來的文字仍包含姓名，未依需求只保留座號');
+    if (!result.all.includes('01') || !result.all.includes('03') || !result.all.includes('12'))
+      throw new Error('複製範圍「全部」時，複製出來的文字未包含所有月份的座號');
+    if (!result.all.includes('115-1　7月') || !result.all.includes('115-1　8月'))
+      throw new Error('複製出來的文字缺少月份分組標題（【學期　月份】）');
+    if (result.all.indexOf('115-1　8月') > result.all.indexOf('115-1　7月'))
+      throw new Error('複製文字的月份區塊順序沒有依照 window._salaryMissingGroups 既有順序（8月應排在7月之前）');
+
+    if (!result.julyOnly)
+      throw new Error('copySalaryMissingList() 選特定月份時沒有呼叫 navigator.clipboard.writeText()');
+    if (!result.julyOnly.includes('01') || !result.julyOnly.includes('03'))
+      throw new Error('只複製 2026-07 時，遺失該月份的座號');
+    if (result.julyOnly.includes('12'))
+      throw new Error('複製範圍選了「只複製 2026-07」，但複製出來的文字仍包含 8 月的座號 12，範圍篩選未生效');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
