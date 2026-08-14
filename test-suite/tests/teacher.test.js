@@ -2785,13 +2785,22 @@ async function runTeacherTests(page, log) {
       const usesComputeGroups = /computeSalaryMissingGroups\(\s*missingSalary\s*,\s*stuCompanyMap\s*\)/.test(alertsFnStr);
       const usesRenderGrouped = /renderSalaryMissingGroupedHtml\(\s*missingSalaryGroups\s*\)/.test(alertsFnStr);
       const exposesForCopy = /window\._salaryMissingGroups\s*=\s*missingSalaryGroups/.test(alertsFnStr);
-      const hasFullWidthClass = /cls:\s*'warn full-width'/.test(alertsFnStr);
+      // 2026-08-15 修正：「薪資缺漏」與「薪資單尚未上傳」合併成一個箱子、內部拆成左右
+      // 兩個各自上色的面板後，外層箱子本身改用中性樣式（不再套用 warn 琥珀色，理由是
+      // 避免外層琥珀色跟右側面板的紫色衝突），cls 從 'warn full-width' 變成單純
+      // 'full-width'——這裡原本鎖定 'warn full-width' 的字面比對已經跟不上這次合法的
+      // 重構，改成只驗證真正關鍵的部分（still full-width，不再要求一定要 warn）。
+      const hasFullWidthClass = /cls:\s*'full-width'/.test(alertsFnStr);
       const hasCopyButton = /onclick="copySalaryMissingList\(\)"/.test(alertsFnStr);
       const oldFnGone = !/function\s+missingItems/.test(alertsFnStr);
 
       // 2026-08-11（第二輪）：「薪資缺漏」應排在 boxes 陣列最前面（畫面上獨立整行、排
-      // 最上層），不是原本（第一輪）排在最後面
-      const missingIdx = alertsFnStr.indexOf(`title:'薪資缺漏'`);
+      // 最上層），不是原本（第一輪）排在最後面。
+      // 2026-08-15 修正：box 標題同一輪合併調整為「薪資缺漏／薪資單尚未上傳」，不再是
+      // 單純的「薪資缺漏」四個字，故比對字串拿掉收尾引號改成前綴比對（避免完整字串比對
+      // 因為標題多了「／薪資單尚未上傳」而永遠比對不到，跟 hasFullWidthClass 是同一輪
+      // 合併造成的同一類「測試鎖定舊字面值、沒跟著合法重構更新」問題）。
+      const missingIdx = alertsFnStr.indexOf(`title:'薪資缺漏`);
       const lowIdx = alertsFnStr.indexOf(`title:'低於平均`);
       const gapIdx = alertsFnStr.indexOf(`title:'公司內部落差'`);
       const highIdx = alertsFnStr.indexOf(`title:'高於平均`);
