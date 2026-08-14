@@ -601,6 +601,12 @@ tr:last-child td { border-bottom: none; }
 .salary-alert-box.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
 .salary-alert-box.danger { border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.08); }
 .salary-alert-box.good { border-color:rgba(34,197,94,0.30); background:rgba(34,197,94,0.07); }
+/* 2026-08-15 新增：「公司內部落差」原本跟「薪資缺漏」共用 warn（琥珀色），改成獨立的
+   blue，讓四個箱子（薪資缺漏／薪資單未上傳的合併箱、公司內部落差、低於平均20%、
+   高於平均30%）一個箱子一種顏色，不再有兩個箱子共用同一種琥珀色。RGB 直接沿用
+   --accent 在深色主題下的色值（#4f8ef7），跟 warn/danger/good 三色沿用深色主題色值
+   的既有寫法一致，不特別依主題切換。 */
+.salary-alert-box.blue { border-color:rgba(79,142,247,0.35); background:rgba(79,142,247,0.08); }
 /* 2026-08-11 新增：「薪資缺漏」改為獨立整行卡片（比照已逾期未達標），不再跟另外3個
    清單擠在同一欄寬的網格格子裡，好容納複製按鈕＋月份範圍下拉選單。 */
 .salary-alert-box.full-width { grid-column: 1 / -1; }
@@ -612,6 +618,24 @@ tr:last-child td { border-bottom: none; }
 .salary-alert-item > strong { white-space:nowrap; flex-shrink:0; }
 .salary-alert-main { color:var(--text); font-weight:600; }
 .salary-alert-note { color:var(--text3); font-size:11px; margin-top:2px; }
+/* 2026-08-15 新增：「薪資缺漏」與「薪資單尚未上傳」原本疊在同一個箱子裡上下接續顯示、
+   共用同一條捲軸，改成左右各自獨立一個子面板（.salary-missing-pane），各自的
+   .salary-alert-list 各自套用 max-height/overflow-y，資料多寡互不影響對方的捲動；
+   複製功能維持只有一顆（見 copySalaryMissingList()，本身就是讀
+   window._salaryMissingGroups／_salaryMissingPhotoGroups 兩份資料組合輸出文字，不依賴
+   畫面上分開或合併顯示，這裡拆版面不需要連帶修改複製邏輯）。手機版（<=768px）改回
+   單欄上下堆疊（沿用拆分前的排列順序），但保留桌面版的顏色語言，不退回舊的
+   --accent-incomplete 淺紫。 */
+.salary-missing-split { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+@media (max-width: 768px) {
+  .salary-missing-split { grid-template-columns: 1fr; }
+}
+.salary-missing-pane { border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--bg2); }
+.salary-missing-pane.warn { border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); }
+.salary-missing-pane.purple { border-color:rgba(124,58,237,0.35); background:rgba(124,58,237,0.08); }
+.salary-missing-pane-title { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:12px; font-weight:700; margin-bottom:8px; }
+.salary-missing-pane.warn .salary-missing-pane-title { color:var(--accent-yellow); }
+.salary-missing-pane.purple .salary-missing-pane-title { color:var(--accent2); }
 /* 2026-08-11 新增：「薪資缺漏」依月份分組時，組跟組之間用加粗分隔線＋較大留白區隔
    （比同一組內項目之間那條很淡的 1px 分隔線明顯），跟「已逾期未達標」的月份標題列
    同一種視覺語言（📅 emoji + 月份文字）。 */
@@ -619,16 +643,10 @@ tr:last-child td { border-bottom: none; }
 .salary-missing-group:first-child { margin-top:0; padding-top:0; border-top:none; }
 .salary-missing-group .salary-alert-item:first-child { border-top:none; padding-top:0; }
 .salary-missing-month-header { font-size:12px; font-weight:700; color:var(--accent-yellow); margin-bottom:6px; }
-/* 2026-08-14 新增：「薪資缺漏」箱子裡併入第二種狀態——金額已填但薪資單照片尚未上傳
-   （例如薪資單還沒核發下來）。用一個獨立的子區塊標題＋較粗的上邊框跟「金額尚未填寫」
-   那一段分隔開，顏色改用 --accent-incomplete（跟 student.html／teacher.html 統計表格
-   既有的「本月未完成」淺紫同一套色語言，語意上就是「已經開始、還差一步」，跟金額完全
-   沒填的「未填」紅色刻意做出區隔）。first-child／相鄰選擇器兩條規則處理兩種邊界情況：
-   ①這個子區塊剛好是整個清單第一個元素（金額全部都已填，只有照片缺）時不需要多餘留白；
-   ②緊接在子標題後面的第一組月份，不需要再疊一次自己的上邊框（子標題自己已經有了）。 */
-.salary-missing-photo-header { margin-top:14px; padding-top:10px; border-top:2px solid var(--accent-incomplete); font-size:13px; font-weight:700; color:var(--accent-incomplete); margin-bottom:6px; }
-.salary-missing-photo-header:first-child { margin-top:0; padding-top:0; border-top:none; }
-.salary-missing-photo-header + .salary-missing-group { margin-top:0; padding-top:0; border-top:none; }
+/* 2026-08-15 新增：拆成左右分面板後，「薪資單尚未上傳」面板內的月份標題改跟隨面板本身
+   的紫色（--accent2），不再固定沿用「薪資缺漏」面板的琥珀色，兩個面板從標題到內容都
+   各自維持一致的顏色語言。 */
+.salary-missing-pane.purple .salary-missing-month-header { color:var(--accent2); }
 .salary-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
 .salary-section-title { font-size:15px; font-weight:700; }
 .salary-sub-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -4947,34 +4965,37 @@ function renderSalaryMissingGroupedHtml(groups) {
   if (!groups.length) return '<div class="salary-alert-note">沒有已交但薪資空白的月記</div>';
   return groups.map(g => {
     const items = g.students.map(s =>
-      // 2026-08-14 補上明確紅色（--accent-red）——原本沒有指定顏色、單純用粗體，跟新增
-      // 的「薪資單未上傳」淺紫「缺照片」標籤放在同一個箱子裡時，兩者對比不夠明顯，容易
-      // 一眼看不出是兩種不同狀態，補上紅色讓「完全沒填」看起來更嚴重、更該優先處理。
+      // 2026-08-14 補上明確紅色（--accent-red），原本沒有指定顏色、單純用粗體；
+      // 2026-08-15 拆成左右分面板後，這行紅色跟隔壁「薪資單尚未上傳」面板的紫色
+      // 分屬不同面板背景，理由改成單純標示「完全沒填」的嚴重程度，不再是為了跟
+      // 同一個箱子裡的紫色標籤做對比。
       `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong style="color:var(--accent-red)">未填</strong></div>`
     ).join('');
     return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
   }).join('');
 }
 
-// 2026-08-14 新增：「薪資缺漏」箱子併入的第二種狀態——金額已填、但薪資單照片尚未上傳
-// （例如公司薪資單還沒核發下來，學生先跟老師口頭確認金額填上，之後才補照片）。跟完全
-// 沒填金額的「未填」不同，這裡每筆項目會多顯示「已填 $X」，讓老師一眼看出這位同學不是
-// 真的完全沒交代薪資狀況，只是缺一張照片佐證。回傳值自帶子區塊標題（含筆數），呼叫端
-// 不需要另外組標題文字；若 groups 為空回傳空字串（不留任何殘跡），由呼叫端決定要不要
-// 顯示「沒有資料」的提示，避免跟「薪資缺漏」那邊各自獨立判斷空狀態時互相打架。
+// 2026-08-14 新增，2026-08-15 拆版面：金額已填、但薪資單照片尚未上傳（例如公司薪資單
+// 還沒核發下來，學生先跟老師口頭確認金額填上，之後才補照片）。跟完全沒填金額的「未填」
+// 不同，這裡每筆項目會多顯示「已填 $X」，讓老師一眼看出這位同學不是真的完全沒交代薪資
+// 狀況，只是缺一張照片佐證。2026-08-15 起這個子區塊改成放在自己獨立的面板
+// （.salary-missing-pane.purple）裡，面板本身的標題（含筆數）已經由呼叫端
+// renderSalaryAlerts() 組好，這個函式不再自帶「📷 薪資單尚未上傳」這行標題，只回傳依
+// 月份分組的項目列表；groups 為空時回傳一句「沒有資料」提示（取代原本的空字串），
+// 跟 renderSalaryMissingGroupedHtml() 的空狀態處理方式一致，讓面板不會顯示成完全空白。
+// 「缺照片」的顏色從舊版的 --accent-incomplete（淺紫）改成 --accent2（跟主頁「有評語」
+// 同一套較深的紫色），對應面板本身現在也是用 --accent2 當主色。
 function renderSalaryMissingPhotoGroupedHtml(groups) {
-  if (!groups.length) return '';
-  const totalCount = groups.reduce((sum, g) => sum + g.students.length, 0);
-  const monthsHtml = groups.map(g => {
+  if (!groups.length) return '<div class="salary-alert-note">沒有已填金額但缺薪資單照片的月記</div>';
+  return groups.map(g => {
     const items = g.students.map(s => {
       const salaryNum = Number(s.salary);
       const salaryStr = Number.isFinite(salaryNum) ? `已填 $${salaryNum.toLocaleString()}` : '';
       const note = [s.company, salaryStr].filter(Boolean).join('｜');
-      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(note)}</div></div><strong style="color:var(--accent-incomplete)">缺照片</strong></div>`;
+      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(note)}</div></div><strong style="color:var(--accent2)">缺照片</strong></div>`;
     }).join('');
     return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
   }).join('');
-  return `<div class="salary-missing-photo-header">📷 薪資單尚未上傳（金額已填，${totalCount}筆）</div>${monthsHtml}`;
 }
 
 function renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap }) {
@@ -5052,9 +5073,9 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     const g = missingKeyMeta[k];
     return `<option value="${escapeHtml(k)}">只複製 ${escapeHtml(g.semester)}　${g.month}月</option>`;
   }).join('');
-  // 2026-08-14 補修：筆數徽章改成兩類合計（薪資缺漏＋薪資單未上傳），因為現在是同一個
-  // 箱子、同一顆複製按鈕；各自的筆數已經在箱子內部各自的子標題（📅 月份標題／📷 薪資單
-  // 尚未上傳標題）清楚列出，這裡不需要重複拆開顯示。
+  // 2026-08-14 補修：筆數徽章改成兩類合計（薪資缺漏＋薪資單未上傳），因為複製功能維持
+  // 只有一顆（同一個範圍下拉選單、同一顆按鈕，見 copySalaryMissingList()）；各自的筆數
+  // 已經在下方各自面板的子標題清楚列出，這裡的總筆數只是給老師一眼看整體規模用。
   const missingSalaryTitleExtra = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="salary-alert-count">${missingSalary.length + missingSalaryPhoto.length} 筆</span>
     <span style="position:relative;display:inline-block">
@@ -5063,23 +5084,33 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     </span>
     <button class="btn btn-secondary btn-sm" onclick="copySalaryMissingList()" id="copy-salary-missing-btn" style="white-space:nowrap;flex-shrink:0">📋 複製</button>
   </div>`;
-  // 2026-08-14 新增：組裝「薪資缺漏」箱子內容——先放金額完全未填的清單，再接金額已填但
-  // 缺照片的清單（renderSalaryMissingPhotoGroupedHtml() 自帶子標題，groups 為空時回傳
-  // 空字串，不會留下多餘的空白區塊）。兩者都沒有資料時才顯示單一的「沒有資料」提示，
-  // 避免像各自獨立判斷空狀態時那樣，一邊顯示「沒有薪資空白的月記」、另一邊卻列出一長串
-  // 缺照片名單，讀起來自相矛盾。
-  const missingSalaryHtml = missingSalaryGroups.length ? renderSalaryMissingGroupedHtml(missingSalaryGroups) : '';
-  const missingSalaryPhotoHtml = renderSalaryMissingPhotoGroupedHtml(missingSalaryPhotoGroups);
-  const missingCombinedHtml = (missingSalaryHtml || missingSalaryPhotoHtml)
-    ? (missingSalaryHtml + missingSalaryPhotoHtml)
-    : '<div class="salary-alert-note">沒有薪資缺漏或薪資單未上傳的月記</div>';
+  // 2026-08-15 新增：「薪資缺漏」與「薪資單尚未上傳」拆成左右各自獨立的面板
+  // （.salary-missing-pane，見樣式表），各自有自己的子標題＋筆數＋捲動區域，資料多寡
+  // 互不影響對方；複製功能維持只有上面 missingSalaryTitleExtra 那一顆，不隨版面拆分
+  // 而拆成兩顆。手機版由 .salary-missing-split 的 media query 改回單欄上下堆疊（見
+  // 樣式表），此處 JS 不需要另外判斷裝置寬度。
+  const missingSplitHtml = `<div class="salary-missing-split">
+    <div class="salary-missing-pane warn">
+      <div class="salary-missing-pane-title"><span>薪資缺漏</span><span class="salary-alert-count">${missingSalary.length} 筆</span></div>
+      <div class="salary-alert-list">${renderSalaryMissingGroupedHtml(missingSalaryGroups)}</div>
+    </div>
+    <div class="salary-missing-pane purple">
+      <div class="salary-missing-pane-title"><span>薪資單尚未上傳</span><span class="salary-alert-count">${missingSalaryPhoto.length} 筆</span></div>
+      <div class="salary-alert-list">${renderSalaryMissingPhotoGroupedHtml(missingSalaryPhotoGroups)}</div>
+    </div>
+  </div>`;
 
   // 2026-08-11（第二輪）調整順序：「薪資缺漏」排最上層（獨立整行），下層依左至右改為
   // 公司內部落差／低於平均20%／高於平均30%（原順序為低於平均20%在最左、薪資缺漏在
-  // 最下，使用者確認後調整為目前這個順序）。
+  // 最下，使用者確認後調整為目前這個順序）。2026-08-15：合併箱本身改用中性樣式（不再
+  // 套用 warn 琥珀色），因為裡面已經拆成兩個各自上色的面板，外層再疊一層琥珀色底會跟
+  // 右側的紫色面板衝突；raw:true 表示這個箱子的 html 已經自帶各自的 .salary-alert-list
+  // （見下方 el.innerHTML 組裝邏輯），不需要再被外層包一層公用的 .salary-alert-list。
+  // 「公司內部落差」原本跟「薪資缺漏」共用 warn 琥珀色，改成獨立的 blue，理由見樣式表
+  // .salary-alert-box.blue 上方註解。
   const boxes = [
-    { cls:'warn full-width', title:'薪資缺漏', html:missingCombinedHtml, titleExtra:missingSalaryTitleExtra },
-    { cls:'warn', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
+    { cls:'full-width', title:'薪資缺漏／薪資單尚未上傳', html:missingSplitHtml, titleExtra:missingSalaryTitleExtra, raw:true },
+    { cls:'blue', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
     { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
     { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }
   ];
@@ -5087,7 +5118,8 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     const titleRow = b.titleExtra
       ? `<div class="salary-alert-title"><span>${b.title}</span>${b.titleExtra}</div>`
       : `<div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div>`;
-    return `<div class="salary-alert-box ${b.cls}">${titleRow}<div class="salary-alert-list">${b.html}</div></div>`;
+    const body = b.raw ? b.html : `<div class="salary-alert-list">${b.html}</div>`;
+    return `<div class="salary-alert-box ${b.cls}">${titleRow}${body}</div>`;
   }).join('');
 }
 
