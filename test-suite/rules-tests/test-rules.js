@@ -940,6 +940,31 @@ async function main() {
   });
 
   // ════════════════════════════════════════════════════════════
+  // salaryPhotos（2026-08-13 稽核發現並補上）：學生薪資單照片陣列，2026-08-05 隨
+  // 「薪資單可上傳多張」功能新增，原本 rule.txt 完全沒有對應驗證，只在前端
+  // student.html 檢查數量上限（SALARY_PHOTO_MAX_COUNT=5）與總大小上限
+  // （SALARY_PHOTO_TOTAL_LIMIT=650000字元）。技術使用者可繞過 UI 直接呼叫 API 寫入
+  // 任意數量的字串陣列撐大自己的月記文件，逼近 Firestore 單文件 1MiB 上限（受
+  // ownerUid 保護，只影響自己這份文件，非越權/外洩）。已在 rule.txt 補上共用函式
+  // validSalaryPhotos()，CREATE／UPDATE 一般編輯兩處皆呼叫，只鎖陣列長度<=5——不逐張
+  // 驗證位元組大小，跟 entries[] 既有限制同一類 Firestore Rules 語言限制，比照既有
+  // 取捨不勉強做。下面驗證 CREATE 情境：剛好 5 張（前端上限，邊界值）應成功，6 張
+  // （超過上限）應被拒。
+  // ════════════════════════════════════════════════════════════
+  await test('【2026-08-13】學生 CREATE 月記：salaryPhotos 陣列長度驗證（剛好5張應成功、6張超過上限應被拒）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/salary-photos-ok`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { salaryPhotos: ['p1', 'p2', 'p3', 'p4', 'p5'] }))
+    );
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/salary-photos-over`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { salaryPhotos: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'] }))
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════
   // GET / LIST / DELETE
   // ════════════════════════════════════════════════════════════
   await test('學生可以 get 自己的月記', async () => {

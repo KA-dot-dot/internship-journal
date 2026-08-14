@@ -619,6 +619,16 @@ tr:last-child td { border-bottom: none; }
 .salary-missing-group:first-child { margin-top:0; padding-top:0; border-top:none; }
 .salary-missing-group .salary-alert-item:first-child { border-top:none; padding-top:0; }
 .salary-missing-month-header { font-size:12px; font-weight:700; color:var(--accent-yellow); margin-bottom:6px; }
+/* 2026-08-14 新增：「薪資缺漏」箱子裡併入第二種狀態——金額已填但薪資單照片尚未上傳
+   （例如薪資單還沒核發下來）。用一個獨立的子區塊標題＋較粗的上邊框跟「金額尚未填寫」
+   那一段分隔開，顏色改用 --accent-incomplete（跟 student.html／teacher.html 統計表格
+   既有的「本月未完成」淺紫同一套色語言，語意上就是「已經開始、還差一步」，跟金額完全
+   沒填的「未填」紅色刻意做出區隔）。first-child／相鄰選擇器兩條規則處理兩種邊界情況：
+   ①這個子區塊剛好是整個清單第一個元素（金額全部都已填，只有照片缺）時不需要多餘留白；
+   ②緊接在子標題後面的第一組月份，不需要再疊一次自己的上邊框（子標題自己已經有了）。 */
+.salary-missing-photo-header { margin-top:14px; padding-top:10px; border-top:2px solid var(--accent-incomplete); font-size:13px; font-weight:700; color:var(--accent-incomplete); margin-bottom:6px; }
+.salary-missing-photo-header:first-child { margin-top:0; padding-top:0; border-top:none; }
+.salary-missing-photo-header + .salary-missing-group { margin-top:0; padding-top:0; border-top:none; }
 .salary-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
 .salary-section-title { font-size:15px; font-weight:700; }
 .salary-sub-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -3031,34 +3041,47 @@ function copyOverdueList() {
   });
 }
 
-// 2026-08-11 新增：「薪資缺漏」複製名單，比照 copyOverdueList() 同一套邏輯（複製範圍
-// 下拉選單、只複製座號不含姓名），差異只在：①資料來源是 window._salaryMissingGroups
-// （依西元年月分組，見 computeSalaryMissingGroups()），不是 window._overdueGroups；
-// ②複製內容不附「已交X篇，尚差Y篇」這類篇數註記——薪資缺漏只有「未填」單一狀態，沒有
-// 進度可言，附加註記反而是多餘資訊；③每個月份區塊的識別鍵用 g.key（西元年月字串，例如
-// "2026-07"），不是裸月份數字，避免橫跨學年查詢時不同年份的同一個月份混在一起複製。
+// 2026-08-11 新增，2026-08-14 擴充：「薪資缺漏」箱子的複製名單，比照 copyOverdueList()
+// 同一套邏輯（複製範圍下拉選單、只複製座號不含姓名），差異只在：①資料來源是
+// window._salaryMissingGroups／window._salaryMissingPhotoGroups（依西元年月分組，見
+// computeSalaryMissingGroups()），不是 window._overdueGroups；②複製內容不附「已交X篇，
+// 尚差Y篇」這類篇數註記——薪資缺漏／薪資單未上傳各自只有單一狀態，沒有進度可言，附加
+// 註記反而是多餘資訊；③每個月份區塊的識別鍵用 g.key（西元年月字串，例如"2026-07"），
+// 不是裸月份數字，避免橫跨學年查詢時不同年份的同一個月份混在一起複製。
+// 2026-08-14 新增：這兩類名單的提醒語氣刻意不同，不能共用同一段文字——對「金額完全
+// 沒填」的人講「請儘速補齊」合理，但對「金額已填、只差照片」的人講同一句話，聽起來像
+// 在催他們補交金額（其實金額早就給了，只是薪資單可能還沒核發下來，照片還沒辦法拍）。
+// 兩類各自組成一段文字（有資料才組，沒有就整段省略），若兩段都有內容才用分隔線接起來，
+// 避免其中一類剛好沒人時複製出一段沒有意義的空白區塊。
 function copySalaryMissingList() {
-  const allGroups = window._salaryMissingGroups || [];
-  if (allGroups.length === 0) {
-    toast('目前沒有薪資缺漏的月記，無需提醒', 'info');
+  const salaryGroups = window._salaryMissingGroups || [];
+  const photoGroups = window._salaryMissingPhotoGroups || [];
+  if (salaryGroups.length === 0 && photoGroups.length === 0) {
+    toast('目前沒有薪資缺漏或薪資單未上傳的月記，無需提醒', 'info');
     return;
   }
   const scopeSel = document.getElementById('salary-missing-copy-scope');
   const scope = scopeSel ? scopeSel.value : 'all';
-  const groups = scope === 'all' ? allGroups : allGroups.filter(g => g.key === scope);
-  if (groups.length === 0) {
-    toast('選擇的月份目前沒有薪資缺漏名單', 'info');
+  const filteredSalaryGroups = scope === 'all' ? salaryGroups : salaryGroups.filter(g => g.key === scope);
+  const filteredPhotoGroups = scope === 'all' ? photoGroups : photoGroups.filter(g => g.key === scope);
+  if (filteredSalaryGroups.length === 0 && filteredPhotoGroups.length === 0) {
+    toast('選擇的月份目前沒有薪資缺漏或薪資單未上傳名單', 'info');
     return;
   }
-  const sections = groups.map(g => {
-    const lines = g.students.map(s => s.sno);
-    return `【${g.semester}　${g.month}月】\n${lines.join('\n')}`;
-  });
-  const text = `【薪資缺漏提醒】\n以下同學的月記尚未填寫薪資，請儘速補齊：\n\n${sections.join('\n\n')}`;
+  const blocks = [];
+  if (filteredSalaryGroups.length) {
+    const sections = filteredSalaryGroups.map(g => `【${g.semester}　${g.month}月】\n${g.students.map(s => s.sno).join('\n')}`);
+    blocks.push(`【薪資缺漏提醒】\n以下同學的月記尚未填寫薪資，請儘速補齊：\n\n${sections.join('\n\n')}`);
+  }
+  if (filteredPhotoGroups.length) {
+    const sections = filteredPhotoGroups.map(g => `【${g.semester}　${g.month}月】\n${g.students.map(s => s.sno).join('\n')}`);
+    blocks.push(`【薪資單提醒】\n以下同學薪資金額已填寫，但薪資單照片尚未上傳：\n\n${sections.join('\n\n')}\n\n若薪資單還沒領到，等領到後記得補拍照上傳；已經領到的同學麻煩盡快上傳，謝謝！`);
+  }
+  const text = blocks.join('\n\n－－－\n\n');
   const btn = document.getElementById('copy-salary-missing-btn');
   navigator.clipboard.writeText(text).then(() => {
     if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製'; }, 2000); }
-    toast('已複製薪資缺漏名單，可直接貼到 LINE 群組', 'success');
+    toast('已複製薪資提醒名單，可直接貼到 LINE 群組', 'success');
   }).catch(() => {
     prompt('請手動複製以下內容：', text);
   });
@@ -4905,7 +4928,11 @@ function computeSalaryMissingGroups(missingSalary, stuCompanyMap) {
     // 2026-07-22 修正：改用 getJournalCompany()（月記優先、名冊備援），跟其餘薪資
     // 統計欄位使用同一套判斷依據，不再自己另外維護一份「名冊優先」的邏輯。
     const company = getJournalCompany(j, stuCompanyMap) || '-';
-    groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company });
+    // 2026-08-14 補上 salary 欄位——原本這個函式只服務「薪資缺漏（金額完全未填）」，
+    // 金額本來就沒有可顯示的值；現在同一個函式也拿來組「薪資單未上傳（金額已填、缺
+    // 照片）」的分組資料，把金額一併帶出來，讓 renderSalaryMissingPhotoGroupedHtml()
+    // 可以在項目說明裡顯示「已填 $XXXX」，讓老師一眼看出這位同學不是完全沒交代金額。
+    groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company, salary: j.salary });
   });
   const groups = Object.values(groupMap).sort((a, b) => (b.year - a.year) || (b.month - a.month));
   groups.forEach(g => g.students.sort((a, b) => String(a.sno).localeCompare(String(b.sno), 'zh-Hant', { numeric: true })));
@@ -4920,10 +4947,34 @@ function renderSalaryMissingGroupedHtml(groups) {
   if (!groups.length) return '<div class="salary-alert-note">沒有已交但薪資空白的月記</div>';
   return groups.map(g => {
     const items = g.students.map(s =>
-      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong>未填</strong></div>`
+      // 2026-08-14 補上明確紅色（--accent-red）——原本沒有指定顏色、單純用粗體，跟新增
+      // 的「薪資單未上傳」淺紫「缺照片」標籤放在同一個箱子裡時，兩者對比不夠明顯，容易
+      // 一眼看不出是兩種不同狀態，補上紅色讓「完全沒填」看起來更嚴重、更該優先處理。
+      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong style="color:var(--accent-red)">未填</strong></div>`
     ).join('');
     return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
   }).join('');
+}
+
+// 2026-08-14 新增：「薪資缺漏」箱子併入的第二種狀態——金額已填、但薪資單照片尚未上傳
+// （例如公司薪資單還沒核發下來，學生先跟老師口頭確認金額填上，之後才補照片）。跟完全
+// 沒填金額的「未填」不同，這裡每筆項目會多顯示「已填 $X」，讓老師一眼看出這位同學不是
+// 真的完全沒交代薪資狀況，只是缺一張照片佐證。回傳值自帶子區塊標題（含筆數），呼叫端
+// 不需要另外組標題文字；若 groups 為空回傳空字串（不留任何殘跡），由呼叫端決定要不要
+// 顯示「沒有資料」的提示，避免跟「薪資缺漏」那邊各自獨立判斷空狀態時互相打架。
+function renderSalaryMissingPhotoGroupedHtml(groups) {
+  if (!groups.length) return '';
+  const totalCount = groups.reduce((sum, g) => sum + g.students.length, 0);
+  const monthsHtml = groups.map(g => {
+    const items = g.students.map(s => {
+      const salaryNum = Number(s.salary);
+      const salaryStr = Number.isFinite(salaryNum) ? `已填 $${salaryNum.toLocaleString()}` : '';
+      const note = [s.company, salaryStr].filter(Boolean).join('｜');
+      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(note)}</div></div><strong style="color:var(--accent-incomplete)">缺照片</strong></div>`;
+    }).join('');
+    return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
+  }).join('');
+  return `<div class="salary-missing-photo-header">📷 薪資單尚未上傳（金額已填，${totalCount}筆）</div>${monthsHtml}`;
 }
 
 function renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap }) {
@@ -4941,10 +4992,21 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   const highStudents = studentList.filter(s => s.avg > highThreshold).sort((a,b)=>b.avg-a.avg);
   const missingSalary = allActiveJournals
     .filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)));
+  // 2026-08-14 新增：金額已經填寫（有效數字），但薪資單照片尚未上傳——常見情境是公司
+  // 薪資單還沒核發下來，學生先跟老師確認過金額口頭/文字填上，之後才補拍照上傳。這裡
+  // 用的是 allActiveJournals（本來就只包含「這個月有交月記」的資料），所以天生就已經
+  // 排除「這個月完全沒交月記」的學生，不需要另外judge——這一點是動手前跟老師確認過的
+  // 範圍（完全沒交的人本來就會落在「本月未繳名單」，不重複提醒）。
+  const missingSalaryPhoto = allActiveJournals
+    .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
+    .filter(j => getJournalSalaryPhotos(j).length === 0);
   // 2026-08-11 新增：依西元年月分組，供畫面分組顯示與 copySalaryMissingList() 共用同一份
   // 資料（詳見 computeSalaryMissingGroups() 上方註解）。
   const missingSalaryGroups = computeSalaryMissingGroups(missingSalary, stuCompanyMap);
+  // 2026-08-14 新增：跟上面同一套分組函式，只是餵進去的名單換成「缺照片」那批。
+  const missingSalaryPhotoGroups = computeSalaryMissingGroups(missingSalaryPhoto, stuCompanyMap);
   window._salaryMissingGroups = missingSalaryGroups;
+  window._salaryMissingPhotoGroups = missingSalaryPhotoGroups;
   const companyGaps = companyList
     .map(c => {
       const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
@@ -4976,23 +5038,47 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   // 徽章，額外加上複製範圍下拉選單＋複製按鈕，比照「已逾期未達標」
   // （copyOverdueList()／#overdue-copy-scope）同一套設計；差異是複製內容只有純座號，
   // 不附篇數註記，因為薪資缺漏只有「未填」單一狀態，沒有進度可言。
-  const missingScopeOptions = missingSalaryGroups.map(g =>
-    `<option value="${escapeHtml(g.key)}">只複製 ${escapeHtml(g.semester)}　${g.month}月</option>`
-  ).join('');
+  // 2026-08-14 補修：下拉選單現在要同時涵蓋「薪資缺漏」與「薪資單未上傳」兩類名單的
+  // 月份，兩類名單完全可能出現不重疊的月份（例如某月只有人缺照片、沒人完全沒填），
+  // 用 key（西元年月字串）去重後合併，依時間新到舊排序，跟兩份清單各自的排序方向一致。
+  const missingKeyMeta = {};
+  [...missingSalaryGroups, ...missingSalaryPhotoGroups].forEach(g => {
+    if (!missingKeyMeta[g.key]) missingKeyMeta[g.key] = g;
+  });
+  const missingScopeKeys = Object.keys(missingKeyMeta).sort((a, b) =>
+    (missingKeyMeta[b].year - missingKeyMeta[a].year) || (missingKeyMeta[b].month - missingKeyMeta[a].month)
+  );
+  const missingScopeOptions = missingScopeKeys.map(k => {
+    const g = missingKeyMeta[k];
+    return `<option value="${escapeHtml(k)}">只複製 ${escapeHtml(g.semester)}　${g.month}月</option>`;
+  }).join('');
+  // 2026-08-14 補修：筆數徽章改成兩類合計（薪資缺漏＋薪資單未上傳），因為現在是同一個
+  // 箱子、同一顆複製按鈕；各自的筆數已經在箱子內部各自的子標題（📅 月份標題／📷 薪資單
+  // 尚未上傳標題）清楚列出，這裡不需要重複拆開顯示。
   const missingSalaryTitleExtra = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-    <span class="salary-alert-count">${missingSalary.length} 筆</span>
+    <span class="salary-alert-count">${missingSalary.length + missingSalaryPhoto.length} 筆</span>
     <span style="position:relative;display:inline-block">
       <select id="salary-missing-copy-scope" style="-webkit-appearance:none;-moz-appearance:none;appearance:none;font-size:12px;height:28px;padding:0 18px 0 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text)"><option value="all">複製範圍：全部</option>${missingScopeOptions}</select>
       <span style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--text2);pointer-events:none">▾</span>
     </span>
     <button class="btn btn-secondary btn-sm" onclick="copySalaryMissingList()" id="copy-salary-missing-btn" style="white-space:nowrap;flex-shrink:0">📋 複製</button>
   </div>`;
+  // 2026-08-14 新增：組裝「薪資缺漏」箱子內容——先放金額完全未填的清單，再接金額已填但
+  // 缺照片的清單（renderSalaryMissingPhotoGroupedHtml() 自帶子標題，groups 為空時回傳
+  // 空字串，不會留下多餘的空白區塊）。兩者都沒有資料時才顯示單一的「沒有資料」提示，
+  // 避免像各自獨立判斷空狀態時那樣，一邊顯示「沒有薪資空白的月記」、另一邊卻列出一長串
+  // 缺照片名單，讀起來自相矛盾。
+  const missingSalaryHtml = missingSalaryGroups.length ? renderSalaryMissingGroupedHtml(missingSalaryGroups) : '';
+  const missingSalaryPhotoHtml = renderSalaryMissingPhotoGroupedHtml(missingSalaryPhotoGroups);
+  const missingCombinedHtml = (missingSalaryHtml || missingSalaryPhotoHtml)
+    ? (missingSalaryHtml + missingSalaryPhotoHtml)
+    : '<div class="salary-alert-note">沒有薪資缺漏或薪資單未上傳的月記</div>';
 
   // 2026-08-11（第二輪）調整順序：「薪資缺漏」排最上層（獨立整行），下層依左至右改為
   // 公司內部落差／低於平均20%／高於平均30%（原順序為低於平均20%在最左、薪資缺漏在
   // 最下，使用者確認後調整為目前這個順序）。
   const boxes = [
-    { cls:'warn full-width', title:'薪資缺漏', html:renderSalaryMissingGroupedHtml(missingSalaryGroups), titleExtra:missingSalaryTitleExtra },
+    { cls:'warn full-width', title:'薪資缺漏', html:missingCombinedHtml, titleExtra:missingSalaryTitleExtra },
     { cls:'warn', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
     { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
     { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }

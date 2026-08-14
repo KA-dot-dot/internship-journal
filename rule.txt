@@ -91,6 +91,22 @@ service cloud.firestore {
         && request.resource.data.entriesCompleteAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
       );
     }
+    // 2026-08-13 補修：稽核發現 salaryPhotos（2026-08-05 隨「薪資單可上傳多張」功能新增）
+    // 只在前端 student.html 檢查數量上限（SALARY_PHOTO_MAX_COUNT=5）與總大小上限
+    // （SALARY_PHOTO_TOTAL_LIMIT=650000字元），rule.txt 完全沒有對應驗證——技術使用者
+    // 可繞過 UI 直接呼叫 API，寫入任意數量、任意大小的字串陣列到自己的月記文件。受
+    // ownerUid 保護，只影響學生自己這份文件（撐爆逼近 Firestore 單文件 1MiB 上限，
+    // 屆時連自己這份月記的正常存檔都會開始失敗），非越權或資料外洩，屬中風險而非高風險，
+    // 跟 fcmTokens.userAgent（validFcmTokenWrite()）、studentReplyAt 先前補上 .size()
+    // 上限是同一類問題。只鎖陣列長度（對應前端 5 張上限），不逐張做位元組層級的大小
+    // 驗證——Firestore Rules 沒辦法有效率地對變動長度陣列逐項驗證位元組大小，跟 entries[]
+    // 既有的語言限制是同一種取捨，不勉強做。用 .get(key, []) 帶預設值，欄位不存在時視為
+    // 空陣列（通過），欄位存在但型別不是 list 時 `is list` 直接評估為 false（擋下），
+    // 同時涵蓋「型別錯誤」與「陣列過長」兩種情況。
+    function validSalaryPhotos() {
+      return request.resource.data.get('salaryPhotos', []) is list
+        && request.resource.data.get('salaryPhotos', []).size() <= 5;
+    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -199,6 +215,8 @@ service cloud.firestore {
             // 當下這個欄位不是永遠固定為 null，只能做格式驗證，不能比照 teacherComment 等
             // 欄位要求「一律為 null」）。
             && validEntriesCompleteAt()
+            // 2026-08-13 補修：salaryPhotos 陣列長度驗證（見上方 validSalaryPhotos() 說明）
+            && validSalaryPhotos()
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -245,6 +263,10 @@ service cloud.firestore {
             // 了，或老師調高 minEntries 導致原本達標的變不達標），所以這裡不比對
             // resource.data 的舊值，只驗證格式，跟 CREATE 分支套用完全相同的函式。
             && validEntriesCompleteAt()
+            // 2026-08-13 補修：salaryPhotos 陣列長度驗證（同 CREATE 分支，理由見上方
+            // validSalaryPhotos() 說明；一般編輯沒有「必須維持不變」或「必須歸零」的
+            // 特殊要求，純粹重新驗證這次寫入的陣列長度是否合法，跟 CREATE 呼叫同一個函式）
+            && validSalaryPhotos()
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()

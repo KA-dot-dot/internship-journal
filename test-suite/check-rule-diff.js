@@ -155,6 +155,18 @@ const RISK_TARGETS = [
   // validFcmTokenWrite() 當初補上這條的理由完全相同，這次是新增當下就同步補上，不是像
   // 前幾次（2026-07-03／07-04／07-10）事後稽核才發現的模式。
   { name: 'function validEntriesCompleteAt()', regex: /function\s+validEntriesCompleteAt\s*\(/ },
+  // 2026-08-13 補上：validSalaryPhotos() 是跟 validFcmTokenWrite()／validEntriesCompleteAt()
+  // 同層級的頂層輔助函式（鎖住 salaryPhotos 陣列長度上限，見 rule.txt 對應函式上方註解），
+  // CREATE／UPDATE 兩處呼叫端都巢狀在已監控的 /users/{userId} 區塊裡才會被連帶抓到，函式
+  // 定義本體自己需要獨立一條，否則弱化這個函式內部驗證（例如拿掉 .size()<=5 或整條移除）
+  // 不會被標記為高風險變更。跟前兩者不同的是，這條不是「新增功能當下就同步補上」——
+  // salaryPhotos 本身是 2026-08-05 隨「薪資單可上傳多張」功能新增，rule.txt 當時完全沒有
+  // 對應驗證，直到 2026-08-13 一輪稽核才發現並補上；RISK_TARGETS 這條因此也是稽核當下
+  // 才補，跟 validFcmTokenWrite()／2026-07-25 的 validEntriesCompleteAt() 那次「新增當下
+  // 就同步補上」不同，反而更接近 2026-07-03／07-04／07-10 那幾次「新增東西時監控清單
+  // 忘記同步擴充」的模式——只是這次是欄位本身的驗證規則從一開始就沒補，不是規則補了、
+  // 監控清單沒跟上。
+  { name: 'function validSalaryPhotos()', regex: /function\s+validSalaryPhotos\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },
