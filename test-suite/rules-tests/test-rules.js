@@ -85,6 +85,39 @@ async function test(name, fn) {
   }
 }
 
+// 2026-08-16 新增：把這次真正跑出來的 pass/fail/failedNames 寫進 GitHub Actions 的
+// Job Summary，取代原本「只能人在電腦前跑 RunRulesTest.bat，沒人盯著就可能忘記跑」
+// 這個問題——搬進 CI（.github/workflows/rules-test.yml）後，改成有人改動 rule.txt
+// 推上去就自動觸發，通過或失敗都直接留在 GitHub 網頁上有紀錄，不需要人在場也不需要
+// 記得手動執行。寫法比照 run-tests.js 的 writeGithubStepSummary()：$GITHUB_STEP_SUMMARY
+// 只在 Actions runner 上才存在，本機執行（RunRulesTest.bat）時直接 return，不影響
+// 本機流程；寫入包在 try/catch 裡，失敗不該讓這次規則測試本身被判定失敗。這份檔案
+// 沒有 vNN（YYYY-MM-DD）版本 changelog 格式可抓，不像 student.test.js／teacher.test.js
+// 有版本字串可顯示，Job Summary 這裡只呈現 pass/total 與失敗項目清單。
+function writeGithubStepSummary(passCount, failCount, failedNamesList) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return; // 非 GitHub Actions 環境，安全跳過
+
+  const total = passCount + failCount;
+  const icon = failCount === 0 ? '✅' : '❌';
+  const lines = [
+    '## Firestore Rules 單元測試結果（Layer 1）',
+    '',
+    `**${icon} ${passCount}/${total} 通過，${failCount} 失敗**`,
+  ];
+  if (failCount > 0) {
+    lines.push('', '失敗項目：');
+    failedNamesList.forEach((n) => lines.push(`- ${n}`));
+  }
+
+  try {
+    fs.appendFileSync(summaryPath, lines.join('\n') + '\n');
+  } catch (e) {
+    // 寫入 Job Summary 失敗不該讓整支測試被判定失敗，純粹是顯示用途
+    console.warn('⚠️  寫入 GITHUB_STEP_SUMMARY 失敗（不影響測試結果本身）：', e.message);
+  }
+}
+
 // 2026-07-03 補修：rule.txt 的 schoolUser() 新增 email_verified == true 檢查後，
 // 這個 helper 改為預設帶 email_verified: true——因為全檔既有 64 條測試呼叫 authCtx()
 // 時，代表的都是「合法使用者」（Google 登入的真人，或種子資料裡設定好的學生/老師），
@@ -1310,6 +1343,14 @@ async function main() {
     failedNames.forEach((n) => console.log('  ✗ ' + n));
   }
   console.log('──────────────────────────────────────');
+
+  // 2026-08-16 新增：把真實結果寫進 GitHub Actions 的 Job Summary，寫法比照
+  // test-suite/run-tests.js 的 writeGithubStepSummary()——同一個 $GITHUB_STEP_SUMMARY
+  // 環境變數只在 Actions runner 上才存在，本機執行（RunRulesTest.bat）時這裡會直接
+  // return，不影響本機流程；寫入包在 try/catch 裡，失敗也不該讓這次規則測試本身被
+  // 判定失敗，純粹是顯示用途。這份檔案沒有 run-tests.js 那種 vNN（YYYY-MM-DD）版本
+  // changelog 格式可抓，Job Summary 只顯示 pass/total 與失敗項目清單。
+  writeGithubStepSummary(pass, fail, failedNames);
 
   await testEnv.cleanup();
   process.exit(fail > 0 ? 1 : 0);

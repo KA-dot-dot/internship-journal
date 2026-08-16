@@ -1,0 +1,66 @@
+name: Firestore Rules 單元測試（Layer 1）
+
+# 只在改到 rule.txt 本身或 Layer 1 測試套件自己（test-rules.js／firebase.json／
+# package.json 等）時才觸發，避免每次改 student.html/teacher.html 的無關 commit
+# 也跟著跑一次——跟 Layer 3（check-rule-diff.js）「只在乎有沒有改到危險區塊」是
+# 同一個精神。另外保留 workflow_dispatch，方便在 GitHub 網頁上手動按一次重跑。
+#
+# 2026-08-16 新增：這之前 Layer 1 只能在本機用 RunRulesTest.bat 手動跑，沒有人在
+# 電腦前點開它，這 121 條規則測試就完全不會被驗證，rule.txt 改壞了也不會有任何
+# 自動示警。搬進 CI 後，只要有人把 rule.txt 的改動推上 main，就會自動觸發，通過
+# 或失敗都直接留在這次執行的 GitHub 網頁 Summary 分頁上，不需要人在場、也不需要
+# 記得手動執行 RunRulesTest.bat。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rule.txt'
+      - 'test-suite/rules-tests/**'
+  workflow_dispatch: {}
+
+jobs:
+  rules-test:
+    name: Firestore Rules 單元測試（rule.txt × emulator）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Firestore Emulator 需要 Java 才能執行（本機版 RunRulesTest.bat 也會先檢查
+      # java -version 才繼續）。GitHub 官方 runner image 雖然通常內建多組 JDK，
+      # 但不保證預設 java 在 PATH 上，明確裝一個比較保險，版本對齊本機建議安裝的 17。
+      - name: 安裝 Java（Firestore Emulator 依賴）
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 快取 Firestore Emulator 本身的下載檔——firebase-tools 第一次執行時會另外
+      # 下載 emulator 的 jar（RunRulesTest.bat 註解也提到「第一次執行需下載，請確保
+      # 網路暢通」），CI 每次都是全新容器、次次都是「第一次」，加這層快取單純省時間，
+      # 快取沒命中也不影響正確性，只是照樣重新下載。
+      - name: 快取 Firestore Emulator 下載檔
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('test-suite/rules-tests/package-lock.json') }}
+
+      - name: 安裝測試套件相依套件
+        working-directory: test-suite/rules-tests
+        run: npm ci
+
+      # npm test 這一行已經包辦全部流程：pretest 自動先跑 copy-rules.js（把根目錄
+      # 最新的 rule.txt 同步成 firestore.rules），接著 firebase emulators:exec 自己
+      # 負責啟動 emulator、跑 test-rules.js、再關閉 emulator——跟本機 RunRulesTest.bat
+      # 的 npm test 完全是同一條指令，不需要另外拆步驟手動管 emulator 生命週期。
+      # 本機版 .bat 在這之前還有一段「清除 8080 port 殘留 java.exe 行程」的防呆
+      # （陷阱16），這裡刻意不需要——CI 每次都是全新容器，跑完即銷毀，不存在殘留
+      # 行程這件事。
+      - name: 執行 Rules 單元測試（Firestore Emulator）
+        working-directory: test-suite/rules-tests
+        run: npm test
