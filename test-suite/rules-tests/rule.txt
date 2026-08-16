@@ -51,6 +51,62 @@ service cloud.firestore {
           && request.resource.data.protected == true
         );
     }
+    // 2026-07 補修（稽核 #8）：fcmTokens 文件寫入原本完全沒有欄位型別/大小驗證，
+    // 前端（student.html／teacher.html 的 initPushNotifications()）固定只會寫入
+    // createdAt（ISO 字串）與截斷至 200 字的 userAgent（JS 端截斷，見
+    // AI_推播系統說明.md 3.1 節），但因規則本身沒有驗證，理論上使用者可直接呼叫
+    // Firestore API，在自己的 uid/adminId 路徑下寫入任意型別或超長字串。攻擊範圍天生
+    // 侷限在寫入者自己的裝置清單（get/list 皆固定 false，讀取只透過 Admin SDK），
+    // 不會波及他人，這裡純粹是讓規則本身也能擋下這類寫入，不只依賴前端行為維持乾淨。
+    // hasOnly() 同時鎖住欄位清單，避免夾帶其他未預期欄位。
+    function validFcmTokenWrite() {
+      return request.resource.data.keys().hasOnly(['createdAt', 'userAgent'])
+        && request.resource.data.createdAt is string
+        && request.resource.data.userAgent is string
+        && request.resource.data.userAgent.size() <= 200;
+    }
+    // 2026-07-25 補修：entriesCompleteAt（「篇數真正達到當月最少應繳篇數 minEntries 那一刻」
+    // 的時間戳，2026-07-24 由 student.html saveJournal() 新增寫入，供 teacher.html
+    // isJournalLate() 判斷遲交用，取代原本只看 submittedAt 的做法）原本完全沒有規則層
+    // 驗證。跟 teacherComment 等老師專屬欄位不同，這個欄位在 CREATE 當下不是永遠固定為
+    // null——若學生第一次繳交就直接寫滿達標篇數，entriesCompleteAt 在 CREATE 當下就會是
+    // 一個真正的時間戳，所以不能要求「一律為 null」，只能做格式驗證：值必須是 null，或是
+    // 符合 localISOStr() 輸出格式的字串。Firestore Rules 無法把任意字串解析成 Timestamp
+    // 去跟 request.time 比較範圍（跟 studentReplyContentAt 那次遇到的語言限制相同），
+    // 格式驗證沒辦法阻止學生把這個欄位偽造成「格式合法但內容是假的」過去日期讓自己看起來
+    // 準時（isJournalLate() 目前用字串字典序比較 entriesCompleteAt 跟 closeDate，內容是否
+    // 誠實無法在規則層驗證，屬已知殘留風險，比照 submittedAt 現況接受）。但這條格式驗證
+    // 仍值得加：若完全不驗證，空字串或任何短字串在字典序比較下都可能意外小於 closeDate
+    // 而被誤判為「準時」，等於不需要偽造任何看起來像日期的內容就能免費騙過遲交判斷；加上
+    // 格式驗證後，至少必須提供一個格式正確的日期字串。刻意不另外加 .size() 上限（不像
+    // studentReplyAt 那樣）——`^...$` 完整錨定頭尾的格式正則本身已經把字串長度鎖死在固定
+    // 19 字元（4+1+2+1+2+1+2+1+2+1+2），任何通過這個正則的字串長度必然等於19，另外加長度
+    // 上限只是重複同一件事、不會多擋下任何情況。抽成獨立函式（而非像原本草稿那樣在
+    // CREATE／UPDATE 兩處各寫一次相同的邏輯）跟 validFcmTokenWrite() 同一個理由：避免
+    // 兩處各自演化又脫鉤，且讓 check-rule-diff.js 的 findUnmonitoredFunctions() 自我檢查
+    // 機制能夠監控到這個函式本身（已同步在 RISK_TARGETS 補上對應條目）。
+    function validEntriesCompleteAt() {
+      return request.resource.data.get('entriesCompleteAt', null) == null || (
+        request.resource.data.entriesCompleteAt is string
+        && request.resource.data.entriesCompleteAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
+      );
+    }
+    // 2026-08-13 補修：稽核發現 salaryPhotos（2026-08-05 隨「薪資單可上傳多張」功能新增）
+    // 只在前端 student.html 檢查數量上限（SALARY_PHOTO_MAX_COUNT=5）與總大小上限
+    // （SALARY_PHOTO_TOTAL_LIMIT=650000字元），rule.txt 完全沒有對應驗證——技術使用者
+    // 可繞過 UI 直接呼叫 API，寫入任意數量、任意大小的字串陣列到自己的月記文件。受
+    // ownerUid 保護，只影響學生自己這份文件（撐爆逼近 Firestore 單文件 1MiB 上限，
+    // 屆時連自己這份月記的正常存檔都會開始失敗），非越權或資料外洩，屬中風險而非高風險，
+    // 跟 fcmTokens.userAgent（validFcmTokenWrite()）、studentReplyAt 先前補上 .size()
+    // 上限是同一類問題。只鎖陣列長度（對應前端 5 張上限），不逐張做位元組層級的大小
+    // 驗證——Firestore Rules 沒辦法有效率地對變動長度陣列逐項驗證位元組大小，跟 entries[]
+    // 既有的語言限制是同一種取捨，不勉強做。用 .get(key, []) 帶預設值，欄位不存在時視為
+    // 空陣列（通過），欄位存在但型別不是 list 時 `is list` 直接評估為 false（擋下），
+    // 同時涵蓋「型別錯誤」與「陣列過長」兩種情況。
+    function validSalaryPhotos() {
+      return request.resource.data.get('salaryPhotos', []) is list
+        && request.resource.data.get('salaryPhotos', []).size() <= 5;
+    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -67,7 +123,12 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        allow create, update, delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
+        // 2026-07 補修（稽核 #8）：create/update 額外套用 validFcmTokenWrite() 做欄位
+        // 型別/大小驗證；delete 刻意分開一條、不呼叫 validFcmTokenWrite()——delete 時
+        // request.resource 為 null，呼叫依賴 request.resource.data 的函式會直接評估為
+        // 不通過，等同誤擋刪除本身。
+        allow create, update: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey()) && validFcmTokenWrite();
+        allow delete: if isAdmin() && (adminId == request.auth.uid || adminId == emailKey());
         allow get, list: if false;
       }
     }
@@ -139,6 +200,23 @@ service cloud.firestore {
             // 同屬回覆欄位家族，建立時同樣限制為初始空值（比照 teacherCommentContentAt 的設計，
             // 供 notify-service 判斷學生回覆是否已推播用途）
             && request.resource.data.get('studentReplyContentAt', null) == null
+            // 2026-07 新增：journalSubmitNotifiedAt 是「學生第一次繳交月記」推播用的後端專屬
+            // 標記欄位（notify-service/send-push-notifications.js 的 checkNewJournals() 寫入），
+            // 建立時同樣限制為初始空值 null。這裡的 null 不只是信任邊界考量（防止學生自己先
+            // 塞一個值假裝已經推播過，藉此讓自己的第一次繳交完全不通知老師），還兼職當
+            // 「哨兵值」用：Firestore 的 where(field,'==',null) 只會比對「欄位存在且為 null」
+            // 的文件，完全不會比對到「欄位根本不存在」的文件——這代表這個功能上線之前就
+            // 存在的所有歷史月記（從來沒有這個欄位）永遠不會被 checkNewJournals() 的查詢撈到，
+            // 不需要另外寫一次性遷移腳本、也不需要硬記一個部署日期當分界線。完整說明見
+            // notify-service/send-push-notifications.js 內 checkNewJournals() 開頭的註解。
+            && request.resource.data.get('journalSubmitNotifiedAt', null) == null
+            // 2026-07-25 補修：entriesCompleteAt 格式驗證抽成共用函式 validEntriesCompleteAt()
+            // （定義於檔案前段、validFcmTokenWrite() 旁，完整理由見該函式上方註解——CREATE
+            // 當下這個欄位不是永遠固定為 null，只能做格式驗證，不能比照 teacherComment 等
+            // 欄位要求「一律為 null」）。
+            && validEntriesCompleteAt()
+            // 2026-08-13 補修：salaryPhotos 陣列長度驗證（見上方 validSalaryPhotos() 說明）
+            && validSalaryPhotos()
           ) || isAdmin();
         allow update: if (
             schoolUser()
@@ -166,6 +244,29 @@ service cloud.firestore {
             && request.resource.data.get('studentReplyUnread', false) == resource.data.get('studentReplyUnread', false)
             && request.resource.data.get('studentReplyAt', null) == resource.data.get('studentReplyAt', null)
             && request.resource.data.get('studentReplyContentAt', null) == resource.data.get('studentReplyContentAt', null)
+            // 2026-07 新增：journalSubmitNotifiedAt 語意上跟 studentReplyContentAt 同一類——
+            // 一旦被後端寫成非 null（代表這份月記的「第一次繳交」通知已經送出），學生之後
+            // 任何一般編輯都不該把它動到，否則等同讓學生可以無限次把這個欄位打回 null，
+            // 逼 notify-service 每一輪排程都重新推播一次「有新月記」給全體老師（等同一種
+            // 學生自己就能觸發的通知洗版管道，比單純造成一次誤判更值得擋）。故要求一般編輯
+            // 時必須「維持原值不變」，不像 teacherCommentContentAt 是「必須變成 null」——
+            // 兩者要求本質不同，理由見 AI_推播系統說明.md 對這兩類欄位的既有區分說明。
+            // student.html 的 saveJournal() 只在偵測到「這是第一次繳交」（isFirstSubmit）
+            // 時才會明確寫入 null，一般編輯完全不帶這個欄位，靠 merge:true 天然滿足這裡
+            // 「維持不變」的要求，不需要額外顯式寫入舊值。
+            && request.resource.data.get('journalSubmitNotifiedAt', null) == resource.data.get('journalSubmitNotifiedAt', null)
+            // 2026-07-25 補修：entriesCompleteAt 格式驗證抽成共用函式 validEntriesCompleteAt()
+            // （同 CREATE 分支，定義見檔案前段）。跟 journalSubmitNotifiedAt（一般編輯必須
+            // 維持原值不變）或 teacherCommentContentAt（一般編輯必須歸零）都不同，
+            // entriesCompleteAt 在一般編輯時沒有固定的「必須等於什麼」關係——它可以合法地
+            // 從 null 變成一個時間戳（這次編輯剛好補齊篇數）、從時間戳變回 null（篇數又不足
+            // 了，或老師調高 minEntries 導致原本達標的變不達標），所以這裡不比對
+            // resource.data 的舊值，只驗證格式，跟 CREATE 分支套用完全相同的函式。
+            && validEntriesCompleteAt()
+            // 2026-08-13 補修：salaryPhotos 陣列長度驗證（同 CREATE 分支，理由見上方
+            // validSalaryPhotos() 說明；一般編輯沒有「必須維持不變」或「必須歸零」的
+            // 特殊要求，純粹重新驗證這次寫入的陣列長度是否合法，跟 CREATE 呼叫同一個函式）
+            && validSalaryPhotos()
           ) || (
             // 學生將「有新評語」旗標標為已讀（只能改此單一欄位、只能設為 false）
             schoolUser()
@@ -196,13 +297,43 @@ service cloud.firestore {
             && request.resource.data.studentReply.size() >= 1
             && request.resource.data.studentReply.size() <= 50
             // 2026-06-27 補修：studentReplyAt 型別驗證（只允許 null 或字串，避免寫入任意型別的值）
-            && (request.resource.data.get('studentReplyAt', null) == null || request.resource.data.studentReplyAt is string)
+            // 2026-07-16 補修：原本只驗證型別，沒有長度上限。studentReplyAt 在「內容真的改變」
+            // 分支會被下方 studentReplyContentAt == studentReplyAt 這條間接約束成 localISOStr()
+            // 輸出格式（固定19字元），但在「內容沒變」分支完全不受任何條件限制，只要求是字串——
+            // 技術使用者可直接呼叫 Firestore API，在內容不變的情況下把 studentReplyAt 塞入任意
+            // 長度的字串，撐大自己這份月記文件的大小（影響僅限學生自己這份文件，非越權/外洩，
+            // 但仍是資料完整性缺口，且跟 studentReply 已有 <=50 字上限、studentReplyContentAt
+            // 有格式正則的既有保護標準不一致）。這裡補上 .size() 上限（40字，比 localISOStr()
+            // 實際輸出的19字元留一點餘裕，避免時區/格式微調時誤傷合法寫入）。這一行在下方
+            // 兩個分支（內容改變／內容沒變）的判斷之前就被求值，一次修改即可同時保護兩個分支，
+            // 不需要分別在兩個分支各加一次。
+            && (request.resource.data.get('studentReplyAt', null) == null || (request.resource.data.studentReplyAt is string && request.resource.data.studentReplyAt.size() <= 40))
             && (
               (
                 // 內容真的改變：必須標記未讀、且必須提供 studentReplyContentAt
                 request.resource.data.studentReply != resource.data.get('studentReply', null)
                 && request.resource.data.studentReplyUnread == true
                 && request.resource.data.studentReplyContentAt is string
+                // 2026-07 補修：studentReplyContentAt 先前只驗證型別（is string），沒有任何
+                // 格式或時間合理性檢查，可被直接呼叫 Firestore API 的使用者塞入任意字串（含
+                // 未來時間），讓 notify-service 的 alreadyNotified() 永遠判定「尚未通知」，
+                // 造成同一則回覆每 5 分鐘重複推播給全體老師/管理員（若該月記已有既有評語，
+                // executeBatchReview() 的篩選條件不會處理到它，只能老師逐筆手動開評語 Modal
+                // 才能停止）。teacherCommentContentAt 不受影響、不需要同樣的修法——它完全經
+                // isAdmin() 寫入，跟 teacherComment 本身沒有內容驗證屬於同一信任邊界。
+                // Firestore Rules 沒有能把任意字串解析成 Timestamp 的函式，無法直接拿字串去
+                // 跟 request.time 比較範圍，只能做到兩件事：①格式驗證，擋掉不符合
+                // localISOStr() 輸出格式（'YYYY-MM-DDTHH:mm:ss'，不含時區)的任意字串；
+                // ②要求跟同一次寫入的 studentReplyAt 完全相同——student.html 的
+                // saveStudentReply() 已同步修正為只呼叫一次 localISOStr() 並讓兩個欄位共用
+                // 同一個字串，正常寫入必定相等。這無法阻止有心人把兩個欄位「一起」改成同一個
+                // 未來時間，但堵死了「只竄改 studentReplyContentAt、studentReplyAt 維持正常」
+                // 這種完全不會被使用者自己發現的隱性攻擊——任何竄改都會連帶讓學生自己「我的
+                // 回覆」時間泡泡顯示明顯錯誤的日期，不再是無聲無息。完整解法需把這個欄位改成
+                // 用 serverTimestamp() 寫入的真正 Firestore Timestamp 型別（才能用
+                // request.time 做範圍限制），屬於較大範圍的改動，本次不處理。
+                && request.resource.data.studentReplyContentAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
+                && request.resource.data.studentReplyContentAt == request.resource.data.studentReplyAt
               ) || (
                 // 內容沒變：studentReplyUnread／studentReplyContentAt 皆須維持原值不變
                 request.resource.data.studentReply == resource.data.get('studentReply', null)
@@ -222,7 +353,10 @@ service cloud.firestore {
       // GitHub Actions 排程執行，非 Cloud Functions；Admin SDK 本來就會繞過此規則），
       // 前端不需要也不應該讀回自己的 token 清單。
       match /fcmTokens/{tokenId} {
-        allow create, update, delete: if schoolUser() && request.auth.uid == userId;
+        // 2026-07 補修（稽核 #8）：同上方 /admins/{adminId}/fcmTokens 的做法，
+        // create/update 套用 validFcmTokenWrite()，delete 分開一條不呼叫它。
+        allow create, update: if schoolUser() && request.auth.uid == userId && validFcmTokenWrite();
+        allow delete: if schoolUser() && request.auth.uid == userId;
         allow get, list: if false;
       }
     }
