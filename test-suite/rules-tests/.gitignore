@@ -3,4 +3,3 @@ firestore.rules
 firestore-debug.log
 ui-debug.log
 .firebase/
-package-lock.json
