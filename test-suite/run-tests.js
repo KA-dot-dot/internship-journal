@@ -45,6 +45,62 @@ function formatDuration(ms) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+// ── 動態讀取測試檔自己的版本資訊，取代手打的日期字串 ──────────
+// 這是唯一的資料來源：直接讀取「這次真正被 require 進來執行的那份檔案」本身的
+// 版本註解（開頭 changelog 區塊第一條，格式固定為 vNN 新增/修正（YYYY-MM-DD）），
+// 不再由人手動抄一份到別的地方——檔案內容本身就是唯一真相，讀到什麼就是什麼，
+// 不會有「文件說 v28 但檔案其實已經是 v29」這種漂移，因為每次執行都重新讀一次。
+// 若未來 test.js 的 changelog 格式有變動導致抓不到，寧可顯示「無法讀取」也不要
+// 讓整支測試因為這個純顯示用途的功能而中止執行。
+function getTestFileVersionInfo(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const m = content.match(/v(\d+)\s*(?:新增|修正)?[（(](\d{4}-\d{2}-\d{2})/);
+    return m ? { version: `v${m[1]}`, date: m[2] } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── 把真實測試結果寫進 GitHub Actions 的 Job Summary ──────────
+// $GITHUB_STEP_SUMMARY 是 Actions runner 自動注入給每個 step 的環境變數，指向
+// 一個檔案，寫進去的 markdown 會直接顯示在該次執行的 GitHub 網頁上（Summary 頁籤），
+// 不需要點進 log 就看得到。本機執行（Step2_RunTests.bat）沒有這個環境變數，函式會
+// 直接跳過，不影響本機流程。內容全部來自這次真正跑出來的 summary/pass/fail 數字，
+// 不是任何形式的預期值或手打數字，所以永遠跟實際執行結果一致——canary.yml 的 job
+// 名稱因此不再需要寫死「XX 項＋YY 項」，這裡才是給人看真實數字的地方。
+function writeGithubStepSummary({ versionParts, summary, totalPass, totalAll, totalFail, totalSkipped, totalDur }) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return; // 非 GitHub Actions 環境（例如本機 .bat），安全跳過
+
+  const lines = [];
+  lines.push('## 產學班實習月記系統 — 自動化測試結果');
+  lines.push('');
+  if (versionParts.length) {
+    lines.push(`測試檔版本：${versionParts.join('／')}`);
+    lines.push('');
+  }
+  lines.push('| 項目 | 通過 | 總數 | 失敗 | 跳過 | 耗時 |');
+  lines.push('|---|---|---|---|---|---|');
+  summary.forEach(s => {
+    const icon = s.fail === 0 ? '✅' : '❌';
+    lines.push(`| ${icon} ${s.label} | ${s.pass} | ${s.total} | ${s.fail} | ${s.skipped || 0} | ${s.dur} |`);
+  });
+  lines.push('');
+  const overallIcon = totalFail === 0 ? '✅' : '❌';
+  lines.push(
+    `**合計：${overallIcon} ${totalPass}/${totalAll} 通過，${totalFail} 失敗` +
+    `${totalSkipped ? `，${totalSkipped} 跳過` : ''}（總耗時 ${totalDur}）**`
+  );
+
+  try {
+    fs.appendFileSync(summaryPath, lines.join('\n') + '\n');
+  } catch (e) {
+    // 寫入 Job Summary 失敗不該讓整支測試被判定失敗，純粹是顯示用途
+    console.warn('⚠️  寫入 GITHUB_STEP_SUMMARY 失敗（不影響測試結果本身）：', e.message);
+  }
+}
+
 function printSummary(label, results) {
   const pass    = results.filter(r => r.pass).length;
   const skipped = results.filter(r => r.skipped).length;
@@ -73,19 +129,15 @@ function printSummary(label, results) {
   log('═'.repeat(50));
   log('產學班實習月記系統 自動化測試');
   log(`執行時間：${now}`);
-  // ⚠️ 這行是純手動同步的字串，不會自動反映 tests/*.test.js 的實際版本。
-  //    每次 student.test.js 或 teacher.test.js 版本號變動（v 數字或測試數變動）時，
-  //    要一併把下面日期改成 AI_CONTEXT.md 最新確認的日期，否則報告開頭會顯示過期版本。
-  //    （這是同一個問題第九次過期：2026-06-24／2026-07-03／2026-07-11／2026-07-15／
-  //    2026-07-17／2026-07-23／2026-08-05／2026-08-08 已發生過八次。第三次修正時試過
-  //    「把當下最新版本號寫進這段註解」的做法，結果那組版本號本身也在幾天內過期，等於
-  //    多製造一個要同步的地方——這次（第九次，2026-08-11，對應「薪資缺漏」新增依月份
-  //    分組＋複製功能：teacher.test.js v28→v29 新增 T-SEC-50／T-SEC-51，並修正
-  //    T-SEC-43 因 renderSalaryAlerts() 重構而失效的檢查目標；student.test.js 本輪
-  //    未變動，維持 v28）刻意不再重複「寫版本號進註解」這個做法，只更新日期本身。真要
-  //    根治，仍建議改成執行時動態讀取 tests/*.test.js 開頭的版本注解，而不是任何形式的
-  //    手動記憶，詳見 AI_測試架構說明.md 第四節陷阱17。）
-  log(`對應 AI_CONTEXT.md 版本：2026-08-11`);
+  // 2026-08-16 起改為執行時動態讀取，不再手動維護日期字串（見上方
+  // getTestFileVersionInfo() 說明；取代先前連續過期九次的舊寫法，
+  // 完整歷史記錄見 AI_測試架構說明.md 第四節陷阱17）。
+  const studentMeta = getTestFileVersionInfo(path.join(__dirname, 'tests', 'student.test.js'));
+  const teacherMeta = getTestFileVersionInfo(path.join(__dirname, 'tests', 'teacher.test.js'));
+  const versionParts = [];
+  if (studentMeta) versionParts.push(`student.test.js ${studentMeta.version}（${studentMeta.date}）`);
+  if (teacherMeta) versionParts.push(`teacher.test.js ${teacherMeta.version}（${teacherMeta.date}）`);
+  log(`測試檔版本：${versionParts.join('／') || '（無法從測試檔讀取版本資訊，格式可能已變動）'}`);
   log('═'.repeat(50));
 
   // ── .env 讀取（一次，後面共用）────────────────────────
@@ -263,6 +315,18 @@ function printSummary(label, results) {
   log(`總耗時：${totalDur}`);
   log('═'.repeat(50));
   log('\n報告已儲存至：test-report.txt');
+
+  // 在 GitHub Actions 上執行時，把這次真實結果同步寫進網頁看得到的 Job Summary
+  // （本機執行時 GITHUB_STEP_SUMMARY 不存在，函式內部會直接跳過，見上方定義）
+  writeGithubStepSummary({
+    versionParts,
+    summary,
+    totalPass,
+    totalAll,
+    totalFail,
+    totalSkipped,
+    totalDur,
+  });
 
   process.exit(allPassed ? 0 : 1);
 })();

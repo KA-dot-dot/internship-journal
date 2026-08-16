@@ -13,28 +13,12 @@ on:
 
 jobs:
   canary:
-    # ⚠️ 下面「XX 項 + YY 項」是純說明文字，不會自動跟著 tests/*.test.js 的實際測試數同步，
-    #    每次 student.test.js 或 teacher.test.js 新增/刪除測試時記得手動改這裡
-    #    （目前對應 2026-08-11：teacher.test.js v28→v29（72→74 項，64→66個具名呼叫點 +
-    #     8次頁籤切換迴圈，新增 T-SEC-50／T-SEC-51；student.test.js 本輪未變動，維持
-    #     v28／77項），對應「薪資缺漏」新增依月份分組＋複製功能，分兩輪完成：①新增
-    #     computeSalaryMissingGroups()（依真正的西元年月分組，避免查詢區間橫跨學年時
-    #     同一個月份數字被誤合併）、renderSalaryMissingGroupedHtml()（月份標題列＋加粗
-    #     分隔線）、copySalaryMissingList()（比照 copyOverdueList()，只複製座號、可篩選
-    #     單一月份或全部），「薪資缺漏」box 拆成獨立整行卡片；②使用者確認後追加：三個
-    #     清單改固定等寬三欄（.salary-alert-grid，純CSS，未新增對應測試，列為已知缺口）、
-    #     「薪資缺漏」搬到最上層獨立整行、排序方向從「舊到新」改成「新到舊」。過程中連帶
-    #     修正 T-SEC-43（regression fix，非新發現問題）——這條測試原本檢查
-    #     renderSalaryAlerts.toString() 裡有沒有呼叫 getJournalCompany()，但這段邏輯第
-    #     一輪重構時已搬進新的 computeSalaryMissingGroups()，導致 T-SEC-43 在正式環境
-    #     真的跑出失敗（2026-08-11 test-report.txt：老師端 71/72），已將檢查目標同步
-    #     改過去，getJournalCompany() 邏輯本身從頭到尾正確無誤。完整技術細節見
-    #     AI_CONTEXT.md／AI_測試架構說明.md 對應更新。
-    #     此數字已連續在 2026-06-24／2026-07-03／2026-07-15／2026-07-18／2026-07-23／
-    #     2026-07-25／2026-08-05 過期七次，2026-08-08 第八次，這是第九次，見
-    #     AI_推播系統說明.md 第六節 #9、AI_測試架構說明.md 第四節陷阱17，之後新增/刪除
-    #     測試時務必記得回來改這一行）。
-    name: 完整自動化測試（學生端 77 項 + 老師端 74 項）
+    # 2026-08-16 起 job 名稱不再放測試數字——這個數字過去連續 9 次因為忘記手動同步而
+    # 過期（完整記錄見 AI_測試架構說明.md 第四節陷阱17）。真正的數字現在完全由
+    # run-tests.js 在執行當下動態算出，並寫進這次執行的 GitHub Job Summary（在
+    # Actions 該次執行頁面的「Summary」分頁，不用點進 log 就看得到），永遠反映
+    # 「這次真的跑出來的結果」，不再需要也不應該手動維護在這裡。
+    name: 完整自動化測試（學生端 + 老師端）
     runs-on: ubuntu-latest
     steps:
       - name: 取得程式碼
