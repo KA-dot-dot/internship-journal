@@ -1,0 +1,34 @@
+name: Repository Keepalive（防止排程 workflow 被 GitHub 停用）
+
+# GitHub 規定：公開 repo 裡用 schedule（cron）觸發的 workflow，若整個 repo 連續 60 天
+# 沒有任何 commit，會被自動停用（不會有錯誤訊息，只是排程默默停止執行，只有 GitHub
+# 會在快到期前寄一封警告信到 repo 擁有者信箱）。這個 repo 有兩支排程 workflow 依賴
+# 持續運作：push-notify.yml（每5分鐘，推播送出入口）、canary.yml（每天，健康檢查）。
+#
+# 解法：這支 workflow 本身每月固定跑一次、做一個空 commit（--allow-empty，不改動任何
+# 檔案，純粹是一次 push），讓 repo 的最後活動時間永遠不超過 60 天。「活動」是以整個
+# repo 為單位計算，不分哪支 workflow，所以只要這支自己按時跑成功，就會一併重置
+# push-notify.yml／canary.yml 的計時器。這支 workflow 本身當然也受同一條規則約束，
+# 但每月跑一次遠低於 60 天門檻，正常情況下不會有機會被停用。排程訂在每月 1 號，
+# 比 60 天門檻留了將近一倍的安全餘裕，避免單次失敗或平台延遲把間隔拖過頭。
+on:
+  schedule:
+    - cron: '0 3 1 * *'  # 每月1號 UTC 03:00（台北時間上午11:00）
+  workflow_dispatch: {}   # 方便在網頁上手動立即測試一次
+
+permissions:
+  contents: write   # 跟其他唯讀性質的 workflow 不同，這支需要能 push 一個 commit 回 repo
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 建立空 commit（純粹刷新 repo 最後活動時間，不改動任何檔案）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive（防止排程 workflow 60天未活動被停用，$(date -u +%Y-%m-%d)）"
+          git push
