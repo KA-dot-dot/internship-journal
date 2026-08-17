@@ -4267,10 +4267,20 @@ function buildDeadlineMap(deadlineSnap) {
 // 繳交完成」的判斷邏輯。entriesCompleteAt 為 null 或不存在（例如這個修法上線前就已經存在、
 // 從未有過這個欄位的舊資料）時，退回用 submittedAt 判斷，維持這批舊資料原本的判定結果不變，
 // 不需要額外的一次性遷移腳本。
+// 2026-08-17 補修：判斷遲交的參考時間改成優先讀 entriesFirstCompleteAt（歷史最早一次
+// 達標時間，2026-08-17 新增，一旦有值就不可逆保留，見 student.html
+// computeEntriesFirstCompleteAt() 與 rule.txt keepsEntriesFirstCompleteAtOnceSet() 上方
+// 註解）；這個欄位還沒有值時（例如上線前就已經達標、entriesFirstCompleteAt 從未被寫入過
+// 的舊資料），退回原本的 entriesCompleteAt，entriesCompleteAt 也沒有值時再退回
+// submittedAt——三層 fallback 不需要一次性遷移腳本，舊資料自然沿用原本正確的判斷結果，
+// 只有這次修正之後才會發生的「先達標→篇數掉回不足→又補回達標」情境才會用到最新的
+// entriesFirstCompleteAt。修正背景：entriesCompleteAt 原本會被「補寫回達標」的那次存檔
+// 誤判成剛好跨過門檻，改記錄補寫當下（可能已逾期）的時間，讓明明期限內就已經誠實達標過
+// 一次的學生被誤判遲交，源自使用者提問後發現，完整背景見 AI_CONTEXT_歷程.md 對應討論。
 function isJournalLate(j, deadlineMap) {
   if (!j) return false;
   const closeDate = deadlineMap[`${j.semester}-${j.month}`]?.closeDate || '';
-  const referenceDate = (j.entriesCompleteAt || j.submittedAt || '').slice(0, 10);
+  const referenceDate = (j.entriesFirstCompleteAt || j.entriesCompleteAt || j.submittedAt || '').slice(0, 10);
   return !!(closeDate && referenceDate && referenceDate > closeDate);
 }
 

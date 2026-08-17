@@ -91,6 +91,39 @@ service cloud.firestore {
         && request.resource.data.entriesCompleteAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
       );
     }
+    // 2026-08-17 補修：entriesFirstCompleteAt——修正 entriesCompleteAt 的一個邊界案例。
+    // 學生先在期限內達標（entriesCompleteAt 記下當時時間），之後某次編輯刪除一則工作摘要
+    // 導致篇數掉回未達標（entriesCompleteAt 依既有設計正確清空為 null，這個行為完全不變，
+    // 不修改 validEntriesCompleteAt() 或 entriesCompleteAt 本身），之後補寫回篇數達標時，
+    // entriesCompleteAt 會被視為「這次才剛好跨過門檻」，改記錄補寫當下（可能已逾期）的
+    // 時間，讓明明期限內就已經誠實達標過一次的學生被誤判遲交。這個情境源自使用者提問後
+    // 發現，跟既有文件記載的「規則層無法驗證日期誠實性」殘留風險不是同一類——那個是防
+    // 造假，這個是誠實操作也會被系統自己的計算邏輯搞錯，完整背景見 AI_CONTEXT_歷程.md
+    // 對應討論。修法：新增一個完全獨立的欄位，語意是「這份月記歷史上最早一次被觀測到
+    // 達標的時間」，一旦有值就不可逆保留，不論之後篇數怎麼增減都不會被覆蓋或清空；
+    // entriesCompleteAt 本身不受影響，teacher.html 的 isJournalLate() 改為優先讀這個
+    // 新欄位，讀不到才退回原本的 entriesCompleteAt || submittedAt。
+    // 格式要求跟 validEntriesCompleteAt() 相同（null 或 localISOStr() 格式字串）。
+    function validEntriesFirstCompleteAt() {
+      return request.resource.data.get('entriesFirstCompleteAt', null) == null || (
+        request.resource.data.entriesFirstCompleteAt is string
+        && request.resource.data.entriesFirstCompleteAt.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$')
+      );
+    }
+    // 「不可逆保留」是這個欄位存在的唯一目的，且跟 entriesCompleteAt 不同的是這件事
+    // Firestore Rules 可以直接驗證（不需要解析字串內容當 Timestamp 比較範圍，只需要
+    // 比對「舊值非 null 時，新值是否等於舊值」這種純字串相等比較）——只用在一般編輯
+    // UPDATE 分支（CREATE 時 resource 尚不存在，沒有「舊值」可比較，靠上面的格式驗證
+    // 加上前端一律從 null 起算就足夠）：resource.data 裡這個欄位還是 null 時放行任何
+    // （格式合法的）新值；resource.data 裡已經非 null，就強制 request.resource.data
+    // 的值必須跟 resource.data 完全相同，技術使用者無法透過直接呼叫 API 把這個欄位
+    // 重設回 null 或改成別的時間，堵死「先合法建立、之後用 API 竄改成任意時間」的路徑
+    // （仍然不驗證「第一次寫入的那個時間本身」是否誠實，那部分風險跟 entriesCompleteAt
+    // 現況一致，屬已知殘留風險，比照 submittedAt 現況接受）。
+    function keepsEntriesFirstCompleteAtOnceSet() {
+      return resource.data.get('entriesFirstCompleteAt', null) == null
+        || request.resource.data.get('entriesFirstCompleteAt', null) == resource.data.entriesFirstCompleteAt;
+    }
     // 2026-08-13 補修：稽核發現 salaryPhotos（2026-08-05 隨「薪資單可上傳多張」功能新增）
     // 只在前端 student.html 檢查數量上限（SALARY_PHOTO_MAX_COUNT=5）與總大小上限
     // （SALARY_PHOTO_TOTAL_LIMIT=650000字元），rule.txt 完全沒有對應驗證——技術使用者
@@ -215,6 +248,11 @@ service cloud.firestore {
             // 當下這個欄位不是永遠固定為 null，只能做格式驗證，不能比照 teacherComment 等
             // 欄位要求「一律為 null」）。
             && validEntriesCompleteAt()
+            // 2026-08-17 補修：entriesFirstCompleteAt 格式驗證，共用函式
+            // validEntriesFirstCompleteAt()（定義於檔案前段、validEntriesCompleteAt() 旁，
+            // 完整理由見該函式上方註解）。CREATE 當下沒有「舊值」可比較，只做格式驗證，
+            // 不可逆保留是 UPDATE 分支才有意義的限制，見下方 update 對應說明。
+            && validEntriesFirstCompleteAt()
             // 2026-08-13 補修：salaryPhotos 陣列長度驗證（見上方 validSalaryPhotos() 說明）
             && validSalaryPhotos()
           ) || isAdmin();
@@ -263,6 +301,13 @@ service cloud.firestore {
             // 了，或老師調高 minEntries 導致原本達標的變不達標），所以這裡不比對
             // resource.data 的舊值，只驗證格式，跟 CREATE 分支套用完全相同的函式。
             && validEntriesCompleteAt()
+            // 2026-08-17 補修：entriesFirstCompleteAt 格式驗證＋不可逆保留（共用函式
+            // validEntriesFirstCompleteAt() 與 keepsEntriesFirstCompleteAtOnceSet()，
+            // 定義於檔案前段）。跟 entriesCompleteAt 可雙向切換不同，這個欄位一旦被寫成
+            // 非 null，之後任何一般編輯都必須維持原值不變，技術使用者無法直接呼叫 API
+            // 竄改或清空，完整理由見 validEntriesFirstCompleteAt() 上方註解。
+            && validEntriesFirstCompleteAt()
+            && keepsEntriesFirstCompleteAtOnceSet()
             // 2026-08-13 補修：salaryPhotos 陣列長度驗證（同 CREATE 分支，理由見上方
             // validSalaryPhotos() 說明；一般編輯沒有「必須維持不變」或「必須歸零」的
             // 特殊要求，純粹重新驗證這次寫入的陣列長度是否合法，跟 CREATE 呼叫同一個函式）
