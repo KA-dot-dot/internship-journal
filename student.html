@@ -1676,19 +1676,72 @@ function computeEntriesCompleteAt(entriesCountBefore, entriesCompleteAtBefore, e
 //     entriesCountAfter)——兩者之中只要有一個 >= requiredMinEntries 就會落入這個分支，
 //     取較大值確保下次存檔時①的門檻檢查依然可靠、不會前腳剛凍結後腳就被判定撐不住；
 //     否則維持 { at: null, count: null }
+// 2026-08-18 三次補修：補上「count 缺席但 at 非 null」的專屬遷移分支，關閉一個真實存在、
+// 先前只在 rule.txt 註解記錄成「已知殘留風險」但沒有實際修掉的缺口——entriesFirstCompleteAt
+// 這個新欄位剛上線那個時間點（8/17 第一版，只有這個欄位、沒有 entriesFirstCompleteAtCount
+// 這個 companion 欄位）合法寫入非 null 的既有月記，8/18 這份 fix 上線後第一次被編輯時，
+// 原本（沒有這條遷移分支的版本）會落到最後一個分支重新判斷：
+//   ①該生此刻篇數仍達標 → 改記錄「現在」這個較晚時間，frozen 日期被悄悄往後推移，等於
+//     重演這次修法原本要消除的那個問題，只是換了個觸發途徑；
+//   ②該生此刻篇數未達標 → 會嘗試把 entriesFirstCompleteAt 改回 null，但
+//     rule.txt keepsEntriesFirstCompleteAtOnceSet() 不允許非 null 改回 null，這次存檔
+//     （即使改的是完全無關的欄位）會被整體拒絕，等同把這位學生永久鎖在這份月記外面，
+//     直到重新達標為止——這個情境比①嚴重，不應該等部署時間表判斷是否真的發生過，直接堵。
+// 新增①.5／⑤兩個分支處理這兩種情況，並讓⑤（原本尚未達標的情況）在「先前已經凍結過」
+// 時一併改為 backfill 一個格式合法的 count，而不是原樣傳回可能是 null 的舊 count——
+// rule.txt validEntriesFirstCompleteAt() 要求 entriesFirstCompleteAt 與
+// entriesFirstCompleteAtCount 必須成對出現（同為 null，或同時合法），若這裡回傳
+// { at: 非null, count: null }，會讓這次寫入本身違反這條耦合驗證而被拒绝，等同沒有真正
+// 解決鎖死問題，只是換句話說而已。
+// 呼叫端搭配修正：三處讀快取的地方（checkMonthDeadline()／editJournal()／saveJournal()
+// 現查 fallback）entriesFirstCompleteAtCount 的預設值從 ?? 0 改成 ?? null——0 跟「從未
+// 追蹤過」不能用同一個值代表：凍結只會在篇數 >= minEntries（>= 1，resolveMinEntries()
+// fallback 下限）時才會發生，也就是任何真正被驗證過的 entriesFirstCompleteAtCount
+// 天生就 >= 1，0 這個值不可能是真實紀錄，理論上直接拿 0 當「缺席」的訊號本身不會撞見假
+// 陽性；但語意上仍然是把「未追蹤」跟「合法數值」两種不同意思疊在同一個值上，不夠清楚、
+// 也容易在未來新增分支時被誤用成一個「真的是 0」的情況，改用 null 才是真正精確對應
+// 「這個欄位在文件裡根本不存在」的語意。
 function computeEntriesFirstCompleteAt(entriesFirstCompleteAtBefore, entriesFirstCompleteAtCountBefore, entriesCompleteAtBefore, entriesCountBefore, entriesCountAfter, requiredMinEntries, nowStr) {
-  if (entriesFirstCompleteAtBefore && entriesFirstCompleteAtCountBefore >= requiredMinEntries) {
+  // ①已凍結，且凍結當下驗證篇數在現在門檻下仍然成立 → 維持凍結
+  if (entriesFirstCompleteAtBefore && entriesFirstCompleteAtCountBefore != null && entriesFirstCompleteAtCountBefore >= requiredMinEntries) {
     return { at: entriesFirstCompleteAtBefore, count: entriesFirstCompleteAtCountBefore };
   }
+  // ②已凍結，但凍結當下驗證篇數從未被追蹤過（entriesFirstCompleteAtCount 這個 companion
+  //   欄位上線前就已經合法寫入 entriesFirstCompleteAt 的過渡期資料），且目前已知篇數在
+  //   現在門檻下仍然成立 → 遷移：信任既有日期不變，用目前已知篇數回填 count（不是用
+  //   「現在」這個較晚時間覆蓋掉真正的歷史時間）
+  if (entriesFirstCompleteAtBefore && entriesFirstCompleteAtCountBefore == null && entriesCountBefore >= requiredMinEntries) {
+    return { at: entriesFirstCompleteAtBefore, count: entriesCountBefore };
+  }
+  // ③從未凍結過，但舊 entriesCompleteAt 欄位這次存檔前已經非 null，且目前已知篇數在
+  //   現在門檻下仍然成立 → 遷移（entriesFirstCompleteAt 剛上線時的一次性遷移，這條跟②是
+  //   兩個不同時間點的過渡期資料，互不重疊：③處理的是「entriesFirstCompleteAt 這個欄位
+  //   本身都還沒出現過」，②處理的是「entriesFirstCompleteAt 已經出現、只是 count 還沒」）
   if (!entriesFirstCompleteAtBefore && entriesCompleteAtBefore && entriesCountBefore >= requiredMinEntries) {
     return { at: entriesCompleteAtBefore, count: entriesCountBefore };
   }
+  // ④以上皆不成立：這次存檔前或後只要曾經達標（wasCompleteBefore || isCompleteNow）就
+  //   往前推進到現在（nowStr）——這是唯一被 rule.txt 允許的「改變」方向。
   const wasCompleteBefore = entriesCountBefore >= requiredMinEntries;
   const isCompleteNow = entriesCountAfter >= requiredMinEntries;
   if (wasCompleteBefore || isCompleteNow) {
     return { at: nowStr, count: Math.max(entriesCountBefore, entriesCountAfter) };
   }
-  return { at: null, count: null };
+  // ⑤真正「這次存檔前後都不達標」：如果先前已經凍結過（entriesFirstCompleteAtBefore 非
+  //   null，只是①②的門檻檢查沒過），rule.txt 的 keepsEntriesFirstCompleteAtOnceSet()
+  //   不允許把已經非 null 的值改回 null（見該函式上方註解），維持舊 at 不變、不嘗試清空。
+  //   count 一併 backfill 成 entriesCountBefore（此刻真實已知、雖然不足以達標，但一定是
+  //   非負整數，滿足格式要求）而不是原樣傳回可能是 null 的舊 count——如果這裡繼續傳回
+  //   null，會讓「at 非 null、count 為 null」這個不合法配對被寫回 Firestore，直接撞上
+  //   validEntriesFirstCompleteAt() 的耦合驗證，等於這次存檔照樣被拒絕，鎖死問題沒真的
+  //   解決。這個「停滯」不會造成錯誤顯示：學生在新門檻下仍未達標期間，
+  //   statusSymbolForJournal() 一律優先顯示「篇數不足」，根本不會走到讀這個欄位判斷
+  //   準時/遲交的分支；一旦學生真的在新門檻下達標，就會落入④分支往前推進，不會停滯超過
+  //   那個時間點。從未凍結過的情況（entriesFirstCompleteAtBefore 本來就是 null）則單純
+  //   繼續維持 { at: null, count: null }。
+  return entriesFirstCompleteAtBefore
+    ? { at: entriesFirstCompleteAtBefore, count: entriesFirstCompleteAtCountBefore != null ? entriesFirstCompleteAtCountBefore : entriesCountBefore }
+    : { at: null, count: null };
 }
 
 // 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但篇數未達標的月份
@@ -2242,7 +2295,7 @@ async function checkMonthDeadline(skipFill = false) {
   // 供 computeEntriesFirstCompleteAt() 判斷這次凍結在目前門檻下是否仍然成立，理由見該
   // 函式上方註解。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false, entriesCount: (journalSnap.data().entries || []).length, entriesCompleteAt: journalSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? 0 }
+    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false, entriesCount: (journalSnap.data().entries || []).length, entriesCompleteAt: journalSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? null }
     : { exists: false, sem, month };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -3662,7 +3715,7 @@ async function saveJournal() {
     try {
       const freshSnap = await getDoc(journalRef);
       window._currentJournalCache = freshSnap.exists()
-        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? 0 }
+        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? null }
         : { exists: false, sem, month };
     } catch (e) {
       // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
@@ -3715,7 +3768,7 @@ async function saveJournal() {
   // 下次存檔判斷這個凍結在當時門檻下是否仍然成立。
   const { at: entriesFirstCompleteAt, count: entriesFirstCompleteAtCount } = computeEntriesFirstCompleteAt(
     window._currentJournalCache?.entriesFirstCompleteAt,
-    window._currentJournalCache?.entriesFirstCompleteAtCount ?? 0,
+    window._currentJournalCache?.entriesFirstCompleteAtCount ?? null,
     window._currentJournalCache?.entriesCompleteAt,
     entriesCountBefore,
     entries.length,
@@ -4169,7 +4222,7 @@ async function editJournal(seatNo, sem, month) {
     entriesCount: (j.entries || []).length,
     entriesCompleteAt: j.entriesCompleteAt || null,
     entriesFirstCompleteAt: j.entriesFirstCompleteAt || null,
-    entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? 0
+    entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? null
   };
   // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
   if (j.teacherCommentUnread) {

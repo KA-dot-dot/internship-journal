@@ -1,7 +1,26 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v30
+ * 學生端自動化測試 v31
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v31 修正（2026-08-18）：entriesFirstCompleteAt 第三輪修法——第二輪（v30）只在 rule.txt
+ * 註解裡記錄「count 缺席的過渡期資料」這個殘留風險，沒有實際修掉；使用者確認這是真實
+ * 落差、不是理論案例（尤其案例B會造成永久鎖死，不應等部署時間表判斷），要求現在補上：
+ * computeEntriesFirstCompleteAt() 新增①.5／⑤兩個分支，處理「entriesFirstCompleteAt 已是
+ * 8/17第一版邏輯合法寫入的非null值，但 entriesFirstCompleteAtCount 這個 companion 欄位
+ * 從未被追蹤過（不存在，不是0）」這種過渡期資料——沒有這條分支時，這類文件下次被編輯會
+ * 出現兩種症狀：該生此刻篇數仍達標→frozen日期被悄悄推到今天（重演v29要消除的問題，換了
+ * 觸發途徑）；此刻篇數不足→client嘗試把值改回null但rule.txt不允許，整次存檔被拒，等同
+ * 永久鎖死這位學生。三處快取讀取（checkMonthDeadline()／editJournal()／saveJournal()
+ * 現查fallback）與呼叫端的預設值同步從 ?? 0 改成 ?? null——0跟「從未追蹤過」不能疊在
+ * 同一個值上，即使理論上0不可能是合法紀錄，用null才精確對應「欄位根本不存在」的語意，
+ * 也是新增的遷移分支能用 `!= null` 正確判斷「缺席」的前提。rule.txt 完全沒有異動（耦合
+ * 驗證維持不動，這次修法方向是讓 client 端在所有情境下都正確滿足這條既有驗證，不是放寬
+ * 驗證本身）。
+ *   S-SEC-44  新增情境8／9，分別驗證「count缺席、此刻仍達標」（防悄悄推到今天）與
+ *             「count缺席、此刻不足」（防永久鎖死，本輪核心）兩種過渡期資料情境，已用
+ *             node 直接執行函式本體核對過期望值。
+ *   S-SEC-45  三處快取的配套欄位檢查字串從 ?? 0 改成 ?? null，並修正說明註解。
  *
  * v30 修正（2026-08-18）：entriesFirstCompleteAt 第二輪修法（見 rule.txt
  * validEntriesFirstCompleteAt()／keepsEntriesFirstCompleteAtOnceSet() 上方註解）——
@@ -2678,13 +2697,22 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
   });
 
-  await test('S-SEC-44 computeEntriesFirstCompleteAt() 歷史最早達標時間計算邏輯正確（涵蓋不可逆保留／舊欄位遷移回填／全新達標／尚未達標／minEntries調高後合法前進五類情境，並串接模擬使用者回報的完整 bug 情境）', async () => {
-    // 2026-08-17 新增，2026-08-18 補修。背景見函式定義上方大段註解：原始設計「一旦有值就
-    // 永遠不可逆保留」忽略了 minEntries 也可能被老師事後調高，2026-08-18 改為新增
+  await test('S-SEC-44 computeEntriesFirstCompleteAt() 歷史最早達標時間計算邏輯正確（涵蓋不可逆保留／舊欄位遷移回填／全新達標／尚未達標／minEntries調高後合法前進／count缺席的過渡期資料遷移（含防永久鎖死）六類情境，並串接模擬使用者回報的完整 bug 情境）', async () => {
+    // 2026-08-17 新增，2026-08-18 補修兩輪。第二輪背景見函式定義上方大段註解：原始設計
+    // 「一旦有值就永遠不可逆保留」忽略了 minEntries 也可能被老師事後調高，改為新增
     // entriesFirstCompleteAtCount（凍結當下驗證過的篇數）搭配判斷，讓凍結在較寬鬆舊
     // 門檻下的紀錄，在門檻被調高超過原本驗證篇數時可以合法失效、依現在門檻重新凍結。
-    // 函式簽名同步從 6 參數（回傳純字串）改成 7 參數（回傳 {at, count} 物件），這裡的
-    // 測試呼叫與斷言都要對應新簽名，否則會被舊簽名的參數位移／物件被當字串比較誤判。
+    // 第三輪背景（情境8／9新增）：entriesFirstCompleteAtCount 這個 companion 欄位是
+    // 2026-08-18 第二輪修法才新增的，任何在它上線前、entriesFirstCompleteAt 就已經被
+    // 8/17 第一版邏輯合法寫成非 null 的既有月記，都屬於「count 從未被追蹤過」的過渡期
+    // 資料（不是「count=0」，是這個欄位在文件裡根本不存在）。若沒有專屬分支處理，這種
+    // 文件下次被編輯時：該生此刻篇數仍達標 → 會被誤判成「這次才剛好跨過門檻」，frozen
+    // 日期被悄悄推到今天（重演本輪修法要消除的問題，只是換了個觸發途徑）；該生此刻篇數
+    // 不足 → client 會嘗試把 entriesFirstCompleteAt 改回 null，但 rule.txt
+    // keepsEntriesFirstCompleteAtOnceSet() 不允許非 null 改回 null，這次存檔（即使改的是
+    // 完全無關的欄位）會被整體拒絕，等同把這位學生永久鎖在這份月記外面——這是比前者更嚴重
+    // 的真實生產風險，不是理論案例。情境8／9分別驗證這兩種子情境都已被正確處理。
+    // 函式簽名為 7 參數、回傳 {at, count} 物件，這裡的測試呼叫與斷言都對應這個簽名。
     const result = await page.evaluate(() => {
       if (typeof computeEntriesFirstCompleteAt !== 'function') return { skip: true };
 
@@ -2728,7 +2756,22 @@ async function runStudentTests(page, browserContext, log) {
       const frozen = computeEntriesFirstCompleteAt(null, 0, null, 0, 1, 1, '2026-07-05T09:00:00');
       const case7 = computeEntriesFirstCompleteAt(frozen.at, frozen.count, null, 1, 3, 3, '2026-09-10T09:00:00');
 
-      return { skip: false, case1, case2, case3, case4, case5, case6, case7 };
+      // 情境8（2026-08-18 第三輪修法：count 缺席的過渡期資料，此刻篇數仍達標）：
+      // entriesFirstCompleteAt 已是 8/17 第一版邏輯合法寫入的 7/24，但 count 這個
+      // companion 欄位從未被追蹤過（傳 null，不是 0——0 代表「追蹤到的值是0」，這裡是
+      // 「根本沒追蹤」），此刻篇數(3)在現在門檻(3)下仍然達標 → 應沿用舊日期 7/24 不變、
+      // count 用目前已知篇數(3)回填，不能被誤判成「這次才剛好跨過門檻」而悄悄推到今天。
+      const case8 = computeEntriesFirstCompleteAt('2026-07-24T11:00:00', null, null, 3, 3, 3, '2026-08-18T10:00:00');
+
+      // 情境9（2026-08-18 第三輪修法核心：count 缺席的過渡期資料，此刻篇數不足——
+      // 防永久鎖死案例）：跟情境8同一份過渡期資料，但這次門檻被調高到5篇、此刻只有2篇
+      // （不足）。若這裡回傳 { at: 7/24, count: null }，count 為 null 會讓 at 非 null
+      // 但 count 為 null 這個不合法配對被寫回 Firestore，直接撞上 rule.txt
+      // validEntriesFirstCompleteAt() 的耦合驗證整次存檔被拒——所以這裡必須連 count 都
+      // backfill 成一個格式合法的非負整數（用此刻已知的篇數 2，即使它不足以達標）。
+      const case9 = computeEntriesFirstCompleteAt('2026-07-24T11:00:00', null, null, 2, 2, 5, '2026-08-18T10:00:00');
+
+      return { skip: false, case1, case2, case3, case4, case5, case6, case7, case8, case9 };
     });
 
     if (result.skip) return;
@@ -2746,6 +2789,10 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error(`情境6（無歷史紀錄可用的達標情況）應記錄 {at:現在, count:2}，實際得到 ${JSON.stringify(result.case6)}`);
     if (result.case7.at !== '2026-09-10T09:00:00' || result.case7.count !== 3)
       throw new Error(`情境7（第二輪修法核心：minEntries調高導致舊凍結失效重算）應記錄 {at:9/10, count:3}，實際得到 ${JSON.stringify(result.case7)}——若此測試失敗代表第二輪修法可能已被還原，門檻調高後逾期補齊的學生會被誤判準時`);
+    if (result.case8.at !== '2026-07-24T11:00:00' || result.case8.count !== 3)
+      throw new Error(`情境8（第三輪修法：count缺席的過渡期資料，此刻仍達標）應沿用舊日期 {at:7/24, count:3}，不能被誤判成剛跨過門檻而推到今天，實際得到 ${JSON.stringify(result.case8)}——若此測試失敗代表防「悄悄推到今天」的遷移分支可能已被移除或改壞`);
+    if (result.case9.at !== '2026-07-24T11:00:00' || result.case9.count !== 2)
+      throw new Error(`情境9（第三輪修法核心：count缺席的過渡期資料，此刻不足——防永久鎖死）應維持 {at:7/24, count:2}（count 必須 backfill 成合法非負整數，不能是 null），實際得到 ${JSON.stringify(result.case9)}——若此測試失敗，count 若為 null 會讓這類舊資料下次編輯任何欄位都被 rule.txt 耦合驗證拒絕，等同把學生永久鎖在這份月記外面`);
   });
 
   await test('S-SEC-45 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesFirstCompleteAt／entriesFirstCompleteAtCount，且 saveJournal() 寫入 payload 確實各含 1 處這兩個欄位', async () => {
@@ -2764,12 +2811,20 @@ async function runStudentTests(page, browserContext, log) {
       const checkHasEntriesFirstCompleteAt = checkFnStr.includes('entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null');
       const editHasEntriesFirstCompleteAt = editFnStr.includes('entriesFirstCompleteAt: j.entriesFirstCompleteAt || null');
       const saveFallbackHasEntriesFirstCompleteAt = saveFnStr.includes('entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null');
-      // 2026-08-18 補修：三處快取同步檢查配套欄位 entriesFirstCompleteAtCount 有沒有
-      // 被補齊——沿用 ?? 0（而非 || null）預設值，因為 0 是合法的篇數值，用 || 會把
-      // 「合法但為假值」的 0 也誤判成缺欄位改成預設。
-      const checkHasEntriesFirstCompleteAtCount = checkFnStr.includes('entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? 0');
-      const editHasEntriesFirstCompleteAtCount = editFnStr.includes('entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? 0');
-      const saveFallbackHasEntriesFirstCompleteAtCount = saveFnStr.includes('entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? 0');
+      // 2026-08-18 補修（第二輪）：三處快取同步檢查配套欄位 entriesFirstCompleteAtCount
+      // 有沒有被補齊。2026-08-18 第三輪修法：預設值改用 ?? null（不是 ?? 0）——凍結只會
+      // 在篇數 >= minEntries（>= 1，resolveMinEntries() fallback 下限）時才會發生，真正
+      // 被追蹤過的 entriesFirstCompleteAtCount 天生就 >= 1，0 這個值不可能是合法紀錄，
+      // 所以「這個欄位在文件裡根本不存在」（新增 entriesFirstCompleteAtCount 前就已經
+      // 合法寫入 entriesFirstCompleteAt 的過渡期資料）跟「真的追蹤到 0」不會混淆；但
+      // 用 null 才是精確對應「根本不存在」語意的寫法，也是 computeEntriesFirstCompleteAt()
+      // 情境8／9（S-SEC-44）新增的過渡期遷移分支能正確判斷「缺席」與「已知但不足」兩種
+      // 情況的前提——若這裡繼續用 ?? 0，缺席跟真的計算出0（理論上不會發生但仍是語意
+      // 不精確）會被疊在同一個值上，且與 computeEntriesFirstCompleteAt() 用 `!= null`
+      // 判斷缺席的寫法不一致。
+      const checkHasEntriesFirstCompleteAtCount = checkFnStr.includes('entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? null');
+      const editHasEntriesFirstCompleteAtCount = editFnStr.includes('entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? null');
+      const saveFallbackHasEntriesFirstCompleteAtCount = saveFnStr.includes('entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? null');
 
       // 2026-08-18 補修：原本的負向 lookbehind 排除法只排除了 `?.entriesFirstCompleteAt,`
       // 這種現查快取讀取寫法，沒考慮到函式簽名改成回傳 {at, count} 物件後，呼叫端新增了
