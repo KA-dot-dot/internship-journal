@@ -1626,43 +1626,69 @@ function computeEntriesCompleteAt(entriesCountBefore, entriesCompleteAtBefore, e
   return wasCompleteBefore ? (entriesCompleteAtBefore || null) : nowStr;
 }
 
-// 2026-08-17 新增：entriesFirstCompleteAt——修正 entriesCompleteAt 的一個邊界案例。學生先
-// 在期限內達標（entriesCompleteAt 記下當時時間），之後某次編輯刪除一則工作摘要導致篇數
-// 掉回未達標（entriesCompleteAt 依上面 computeEntriesCompleteAt() 既有設計正確清空為
-// null，這個行為完全不變，本次不修改該函式），之後補寫回篇數達標時，entriesCompleteAt
-// 會被視為「這次才剛好跨過門檻」，改記錄補寫當下（可能已逾期）的時間，讓明明期限內就
-// 已經誠實達標過一次的學生被誤判遲交。這個情境源自使用者提問後發現，跟既有文件記載的
-// 「規則層無法驗證日期誠實性」殘留風險不是同一類——那個是防造假，這個是誠實操作也會被
-// 系統自己的計算邏輯搞錯，完整背景見 AI_CONTEXT_歷程.md 對應討論。
-// 修法：新增一個完全獨立的欄位，語意是「這份月記歷史上最早一次被觀測到達標的時間」，
-// 一旦有值就不可逆保留，不論之後篇數怎麼增減都不會被覆蓋或清空——刻意不修改
-// computeEntriesCompleteAt() 本身或它既有的呼叫方式，兩個欄位完全獨立計算，
-// entriesCompleteAt 的既有行為（可雙向切換 null↔時間戳）維持不變。rule.txt 同步新增
-// keepsEntriesFirstCompleteAtOnceSet()，一般編輯 UPDATE 時強制這個欄位一旦非 null
-// 就必須維持原值，技術使用者無法直接呼叫 API 竄改，前端這裡的「唯讀取新值時才寫入」
-// 只是配合這條規則的正常寫入路徑，不是安全性把關的唯一防線。
+// 2026-08-17 新增，2026-08-18 補修：entriesFirstCompleteAt——修正 entriesCompleteAt 的一個
+// 邊界案例。學生先在期限內達標（entriesCompleteAt 記下當時時間），之後某次編輯刪除一則
+// 工作摘要導致篇數掉回未達標（entriesCompleteAt 依上面 computeEntriesCompleteAt() 既有
+// 設計正確清空為 null，這個行為完全不變，本次不修改該函式），之後補寫回篇數達標時，
+// entriesCompleteAt 會被視為「這次才剛好跨過門檻」，改記錄補寫當下（可能已逾期）的時間，
+// 讓明明期限內就已經誠實達標過一次的學生被誤判遲交。這個情境源自使用者提問後發現，跟
+// 既有文件記載的「規則層無法驗證日期誠實性」殘留風險不是同一類——那個是防造假，這個是
+// 誠實操作也會被系統自己的計算邏輯搞錯，完整背景見 AI_CONTEXT_歷程.md 對應討論。
+// 2026-08-18 補修背景：原始設計「一旦有值就永遠不可逆保留、不論篇數怎麼增減都不會被
+// 覆蓋或清空」忽略了 minEntries 本身也可能被老師事後調高——若調高後學生才在新門檻下
+// 補齊篇數，這個欄位仍然會凍結在舊門檻下就已經記錄的舊日期，讓 isJournalLate() 誤判為
+// 準時。這個情境跟原始設計要修的「篇數中途掉回不足又補回來」在
+// entriesCountBefore／entriesCountAfter／requiredMinEntries 這組輸入下訊號完全相同
+// （都是「這次存檔前不足、這次存檔後（或之前）達標」），無法只靠調整判斷式區分，需要
+// 額外持久化「凍結當下實際驗證過的篇數」（entriesFirstCompleteAtCount）才能在每次存檔
+// 時重新檢查這個凍結是否還撐得住目前的門檻，撐不住就視為失效、比照全新達標重新凍結。
+// rule.txt 同步把 keepsEntriesFirstCompleteAtOnceSet() 從「一旦非 null 就必須完全相等」
+// 放寬成「只能往後（非遞減）」——這裡選擇的是跟使用者確認過的 A 方案（前端信任，不額外
+// 查 /deadlines 做伺服器層驗證），完整取捨討論見 AI_CONTEXT_歷程.md 對應討論。
 // 參數：
-//   entriesFirstCompleteAtBefore  這次存檔前快取裡這個新欄位既有的值（可能是 null）
-//   entriesCompleteAtBefore       這次存檔前快取裡「舊」entriesCompleteAt 欄位的值——用來
-//                                  處理這個新欄位剛上線那一刻的資料遷移：如果舊欄位當時
-//                                  已經是非 null（代表在這個新欄位存在以前，這份月記就已
-//                                  經合法達標過），直接沿用那個時間當作「最早」，不用
-//                                  「現在」這個較晚的時間覆蓋掉真正的歷史時間
+//   entriesFirstCompleteAtBefore       這次存檔前快取裡這個欄位既有的值（可能是 null）
+//   entriesFirstCompleteAtCountBefore  這次存檔前快取裡「凍結當下驗證過的篇數」既有值
+//                                       （entriesFirstCompleteAtBefore 為 null 時這個值
+//                                       沒有意義，呼叫端可傳 0）
+//   entriesCompleteAtBefore            這次存檔前快取裡「舊」entriesCompleteAt 欄位的值
+//                                       ——只用於這個新欄位剛上線那一刻的資料遷移：如果
+//                                       舊欄位當時已經是非 null（代表在這個新欄位存在
+//                                       以前，這份月記就已經合法達標過），直接沿用那個
+//                                       時間當作「最早」，不用「現在」這個較晚的時間
+//                                       覆蓋掉真正的歷史時間
 //   entriesCountBefore／entriesCountAfter／requiredMinEntries／nowStr  同
 //   computeEntriesCompleteAt() 對應參數
-// 三種結果：
-//   ①新欄位已經有值 → 原樣傳回，永遠不變（這個欄位存在的唯一目的就是不可逆保留）
-//   ②新欄位還是 null，但舊 entriesCompleteAt 欄位這次存檔前已經非 null → 沿用舊欄位的
-//     值當作最早達標時間（欄位剛上線時的一次性遷移，靠這次存檔自然收斂，不需要遷移
-//     腳本，跟 journalSubmitNotifiedAt 的哨兵值設計是同一種精神）
-//   ③以上皆非 → 檢查這次存檔前或存檔後是否達標（wasCompleteBefore || isCompleteNow），
-//     只要曾經達標就記錄現在時間，作為系統第一次觀測到「達標」的時間點；否則維持 null
-function computeEntriesFirstCompleteAt(entriesFirstCompleteAtBefore, entriesCompleteAtBefore, entriesCountBefore, entriesCountAfter, requiredMinEntries, nowStr) {
-  if (entriesFirstCompleteAtBefore) return entriesFirstCompleteAtBefore;
-  if (entriesCompleteAtBefore) return entriesCompleteAtBefore;
+// 回傳 { at, count }：
+//   ①已凍結（entriesFirstCompleteAtBefore 非 null），且凍結當下驗證過的篇數在「現在的
+//     門檻」下仍然成立（entriesFirstCompleteAtCountBefore >= requiredMinEntries）→
+//     維持凍結，日期與篇數皆原樣傳回，這是欄位存在的核心目的（不可逆保留）
+//   ②從未凍結過，但舊 entriesCompleteAt 欄位這次存檔前已經非 null，且目前已知的
+//     entriesCountBefore 在現在門檻下仍然成立 → 遷移：借用 entriesCompleteAtBefore
+//     當日期、entriesCountBefore 當已驗證篇數（欄位剛上線時的一次性遷移，靠這次存檔
+//     自然收斂，不需要遷移腳本，跟 journalSubmitNotifiedAt 的哨兵值設計是同一種精神。
+//     entriesCountBefore 是「目前已知最新」的篇數，未必等於 entriesCompleteAtBefore
+//     那個歷史時間點當下的真實篇數，是已知的近似值，比照 entriesCompleteAt 現有的
+//     「規則層無法驗證日期誠實性」殘留風險同一等級接受）
+//   ③以上皆不成立（從未達標過，或凍結／遷移時已驗證的篇數已經撐不住新門檻，例如
+//     minEntries 被調高超過原本記錄的篇數）→ 比照 computeEntriesCompleteAt() 既有邏輯
+//     重新判斷：這次存檔前或後只要曾經達標（wasCompleteBefore || isCompleteNow）就
+//     重新凍結在現在（nowStr），已驗證篇數記錄 Math.max(entriesCountBefore,
+//     entriesCountAfter)——兩者之中只要有一個 >= requiredMinEntries 就會落入這個分支，
+//     取較大值確保下次存檔時①的門檻檢查依然可靠、不會前腳剛凍結後腳就被判定撐不住；
+//     否則維持 { at: null, count: null }
+function computeEntriesFirstCompleteAt(entriesFirstCompleteAtBefore, entriesFirstCompleteAtCountBefore, entriesCompleteAtBefore, entriesCountBefore, entriesCountAfter, requiredMinEntries, nowStr) {
+  if (entriesFirstCompleteAtBefore && entriesFirstCompleteAtCountBefore >= requiredMinEntries) {
+    return { at: entriesFirstCompleteAtBefore, count: entriesFirstCompleteAtCountBefore };
+  }
+  if (!entriesFirstCompleteAtBefore && entriesCompleteAtBefore && entriesCountBefore >= requiredMinEntries) {
+    return { at: entriesCompleteAtBefore, count: entriesCountBefore };
+  }
   const wasCompleteBefore = entriesCountBefore >= requiredMinEntries;
   const isCompleteNow = entriesCountAfter >= requiredMinEntries;
-  return (wasCompleteBefore || isCompleteNow) ? nowStr : null;
+  if (wasCompleteBefore || isCompleteNow) {
+    return { at: nowStr, count: Math.max(entriesCountBefore, entriesCountAfter) };
+  }
+  return { at: null, count: null };
 }
 
 // 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但篇數未達標的月份
@@ -2212,8 +2238,11 @@ async function checkMonthDeadline(skipFill = false) {
   // 2026-08-17 補修：快取再補上 entriesFirstCompleteAt（歷史最早達標時間，不可逆保留，
   // 見 computeEntriesFirstCompleteAt() 上方註解），saveJournal() 需要這個值才能判斷是否
   // 已經記錄過、不需要再改寫。
+  // 2026-08-18 補修：快取再補上 entriesFirstCompleteAtCount（凍結當下驗證過的篇數），
+  // 供 computeEntriesFirstCompleteAt() 判斷這次凍結在目前門檻下是否仍然成立，理由見該
+  // 函式上方註解。
   window._currentJournalCache = journalSnap.exists()
-    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false, entriesCount: (journalSnap.data().entries || []).length, entriesCompleteAt: journalSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null }
+    ? { exists: true, sem, month, company: journalSnap.data().company, submittedAt: journalSnap.data().submittedAt, updatedAt: journalSnap.data().updatedAt, teacherReviewed: journalSnap.data().teacherReviewed, teacherComment: journalSnap.data().teacherComment, studentReply: journalSnap.data().studentReply || null, studentReplyUnread: journalSnap.data().studentReplyUnread || false, entriesCount: (journalSnap.data().entries || []).length, entriesCompleteAt: journalSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? 0 }
     : { exists: false, sem, month };
   if (journalSnap.exists()) {
     const j = journalSnap.data();
@@ -3633,7 +3662,7 @@ async function saveJournal() {
     try {
       const freshSnap = await getDoc(journalRef);
       window._currentJournalCache = freshSnap.exists()
-        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null }
+        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? 0 }
         : { exists: false, sem, month };
     } catch (e) {
       // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
@@ -3677,12 +3706,16 @@ async function saveJournal() {
     requiredMinEntries,
     journalSaveNowStr
   );
-  // 2026-08-17 新增：entriesFirstCompleteAt——見 computeEntriesFirstCompleteAt() 上方註解，
-  // 修正「先達標→篇數掉回不足→又補回達標」被 entriesCompleteAt 誤判成剛好跨過門檻的邊界
-  // 案例。刻意傳入 entriesCompleteAt（舊欄位）「這次存檔前」的快取值，不是剛算出來的新值，
-  // 讓遷移判斷（第②種情況）看到的是尚未被這次存檔改動過的歷史狀態。
-  const entriesFirstCompleteAt = computeEntriesFirstCompleteAt(
+  // 2026-08-17 新增，2026-08-18 補修：entriesFirstCompleteAt——見
+  // computeEntriesFirstCompleteAt() 上方註解，修正「先達標→篇數掉回不足→又補回達標」被
+  // entriesCompleteAt 誤判成剛好跨過門檻的邊界案例，2026-08-18 再補修「minEntries 被
+  // 老師事後調高」的邊界案例。刻意傳入 entriesCompleteAt（舊欄位）「這次存檔前」的快取
+  // 值，不是剛算出來的新值，讓遷移判斷（第②種情況）看到的是尚未被這次存檔改動過的歷史
+  // 狀態。回傳 { at, count } 物件，count 是這次凍結（或維持凍結）當下驗證過的篇數，供
+  // 下次存檔判斷這個凍結在當時門檻下是否仍然成立。
+  const { at: entriesFirstCompleteAt, count: entriesFirstCompleteAtCount } = computeEntriesFirstCompleteAt(
     window._currentJournalCache?.entriesFirstCompleteAt,
+    window._currentJournalCache?.entriesFirstCompleteAtCount ?? 0,
     window._currentJournalCache?.entriesCompleteAt,
     entriesCountBefore,
     entries.length,
@@ -3710,7 +3743,8 @@ async function saveJournal() {
       : window._currentJournalCache.submittedAt,    // 保留第一次繳交時間
     updatedAt: localISOStr(),                      // 每次儲存都更新
     entriesCompleteAt,                             // 2026-07-24 新增：篇數真正達到 minEntries 那一刻的時間（見上方計算註解），null 表示尚未達標
-    entriesFirstCompleteAt,                        // 2026-08-17 新增：歷史最早一次達標時間，一旦有值不可逆保留（見上方計算註解）
+    entriesFirstCompleteAt,                        // 2026-08-17 新增：歷史最早一次達標時間，見上方計算註解（2026-08-18 起：門檻被調高超過凍結當下驗證篇數時會失效重算，非永久不可逆）
+    entriesFirstCompleteAtCount,                   // 2026-08-18 新增：entriesFirstCompleteAt 凍結當下驗證過的篇數，供下次存檔判斷凍結是否仍然撐得住目前門檻（見上方計算註解）
     ownerUid: currentUser.uid || '',
     ownerEmail: currentUser.email || '',
     storagePath: 'user',
@@ -4121,6 +4155,7 @@ async function editJournal(seatNo, sem, month) {
   // 2026-07-22 補修：補上 company，理由同 checkMonthDeadline() 對應註解。
   // 2026-07-24 補修：補上 entriesCount／entriesCompleteAt，理由同 checkMonthDeadline() 對應註解。
   // 2026-08-17 補修：補上 entriesFirstCompleteAt，理由同 checkMonthDeadline() 對應註解。
+  // 2026-08-18 補修：補上 entriesFirstCompleteAtCount，理由同 checkMonthDeadline() 對應註解。
   window._currentJournalCache = {
     exists: true,
     sem, month,
@@ -4133,7 +4168,8 @@ async function editJournal(seatNo, sem, month) {
     studentReplyUnread: j.studentReplyUnread || false,
     entriesCount: (j.entries || []).length,
     entriesCompleteAt: j.entriesCompleteAt || null,
-    entriesFirstCompleteAt: j.entriesFirstCompleteAt || null
+    entriesFirstCompleteAt: j.entriesFirstCompleteAt || null,
+    entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? 0
   };
   // 有新評語旗標 → 背景靜默清除（非關鍵操作，失敗不影響主流程）
   if (j.teacherCommentUnread) {
