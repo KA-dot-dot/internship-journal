@@ -973,11 +973,155 @@ async function main() {
   });
 
   // ════════════════════════════════════════════════════════════
+  // entriesFirstCompleteAt（2026-08-17 新增：「這份月記歷史上最早一次被觀測到達標的
+  // 時間」，一旦有值就不可逆保留，修正 entriesCompleteAt 因「先達標→篇數掉回不足→
+  // 又補回達標」被誤判成剛好跨過門檻、把最早達標時間往後推移導致誤判遲交的邊界案例，
+  // 完整背景見 rule.txt validEntriesFirstCompleteAt() 上方註解／AI_CONTEXT_歷程.md
+  // 對應討論）
+  // ════════════════════════════════════════════════════════════
+  // 格式驗證（validEntriesFirstCompleteAt()）跟 entriesCompleteAt 完全同規格，下面 CREATE
+  // 六條測試直接比照 entriesCompleteAt 那組（null／缺欄位／合法格式／帶毫秒Z／空字串／
+  // 數字型別），差異只在 UPDATE：這個欄位額外多一層 keepsEntriesFirstCompleteAtOnceSet()
+  // 「不可逆」驗證，entriesCompleteAt 沒有這層限制。
+
+  await test('【2026-08-17】學生 CREATE 月記：entriesFirstCompleteAt: null（篇數尚未達標，最常見的情境）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: null }))
+    );
+  });
+
+  await test('【2026-08-17】學生 CREATE 月記：完全不提 entriesFirstCompleteAt 欄位 → 應成功（.get() 帶預設值對缺欄位一樣視為 null）', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-02`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL))
+    );
+  });
+
+  await test('【2026-08-17】學生 CREATE 月記：entriesFirstCompleteAt 為合法格式的時間戳（第一次繳交就直接寫滿達標篇數的真實情境）→ 應成功', async () => {
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-03`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T10:30:00' }))
+    );
+  });
+
+  await test('【2026-08-17】學生 CREATE 月記：entriesFirstCompleteAt 格式不符（帶毫秒/Z，非 localISOStr() 格式）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-04`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: new Date().toISOString() }))
+    );
+  });
+
+  await test('【2026-08-17】學生 CREATE 月記：entriesFirstCompleteAt 為空字串 → 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-05`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '' }))
+    );
+  });
+
+  await test('【2026-08-17】學生 CREATE 月記：entriesFirstCompleteAt 寫入數字（非 string/null）→ 應被拒', async () => {
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/entries-first-complete-create-06`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: 20260724103000 }))
+    );
+  });
+
+  // 下面五條驗證一般編輯的「不可逆保留」（keepsEntriesFirstCompleteAtOnceSet()）——
+  // 跟 entriesCompleteAt 可以自由雙向切換不同，這個欄位一旦非 null，之後任何一般編輯都
+  // 必須維持完全相同的值，這是這個欄位存在的核心目的，測試需要涵蓋「舊值 null 時可自由
+  // 寫入格式合法的新值」跟「舊值非 null 時完全鎖死」兩種狀態。
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesFirstCompleteAt 從既有的 null 變成合法時間戳（系統第一次觀測到達標）→ 應成功', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: null }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '這次編輯剛好第一次達標', entriesFirstCompleteAt: '2026-07-24T11:00:00' }), { merge: true })
+    );
+  });
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值仍是 null 時，寫入格式不合法的字串 → 應被拒（格式驗證跟舊值是否為 null 是兩件獨立的事）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: null }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想塞垃圾格式', entriesFirstCompleteAt: '不是日期格式的字串' }), { merge: true })
+    );
+  });
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次寫入完全相同的值（真實 saveJournal() 寫法：每次存檔都重新算一次、算出同一個值）→ 應成功', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00' }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '這次編輯篇數又掉回不足', entriesFirstCompleteAt: '2026-07-24T11:00:00' }), { merge: true })
+    );
+  });
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 完全不提 entriesFirstCompleteAt、既有值已是時間戳 → 應成功（merge 天然保留舊值不動）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00' }));
+    });
+    await assertSucceeds(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .update({ content: '只改內容，不碰 entriesFirstCompleteAt' })
+    );
+  });
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次嘗試竄改成另一個時間戳 → 應被拒（不可逆保留的核心測試：不只不能清空，也不能改成別的合法時間）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00' }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想竄改成別的時間', entriesFirstCompleteAt: '2026-08-01T00:00:00' }), { merge: true })
+    );
+  });
+
+  await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次嘗試打回 null → 應被拒（防止學生直接呼叫 API 清空這個欄位讓自己重新有機會在逾期後偽造更早的達標時間）', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00' }));
+    });
+    await assertFails(
+      authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
+        .doc(`users/${STUDENT_UID}/journals/existing-01`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { content: '想清空重來', entriesFirstCompleteAt: null }), { merge: true })
+    );
+  });
+
+  // ════════════════════════════════════════════════════════════
   // salaryPhotos（2026-08-13 稽核發現並補上）：學生薪資單照片陣列，2026-08-05 隨
   // 「薪資單可上傳多張」功能新增，原本 rule.txt 完全沒有對應驗證，只在前端
   // student.html 檢查數量上限（SALARY_PHOTO_MAX_COUNT=5）與總大小上限
   // （SALARY_PHOTO_TOTAL_LIMIT=650000字元）。技術使用者可繞過 UI 直接呼叫 API 寫入
   // 任意數量的字串陣列撐大自己的月記文件，逼近 Firestore 單文件 1MiB 上限（受
+
   // ownerUid 保護，只影響自己這份文件，非越權/外洩）。已在 rule.txt 補上共用函式
   // validSalaryPhotos()，CREATE／UPDATE 一般編輯兩處皆呼叫，只鎖陣列長度<=5——不逐張
   // 驗證位元組大小，跟 entries[] 既有限制同一類 Firestore Rules 語言限制，比照既有

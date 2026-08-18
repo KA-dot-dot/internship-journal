@@ -167,6 +167,19 @@ const RISK_TARGETS = [
   // 忘記同步擴充」的模式——只是這次是欄位本身的驗證規則從一開始就沒補，不是規則補了、
   // 監控清單沒跟上。
   { name: 'function validSalaryPhotos()', regex: /function\s+validSalaryPhotos\s*\(/ },
+  // 2026-08-17 補上：validEntriesFirstCompleteAt() 與 keepsEntriesFirstCompleteAtOnceSet()
+  // 是跟 validFcmTokenWrite()／validEntriesCompleteAt()／validSalaryPhotos() 同層級的頂層
+  // 輔助函式，修正 entriesCompleteAt 的一個邊界案例（學生先在期限內達標，之後某次編輯
+  // 刪除一則工作摘要導致篇數掉回未達標，再補寫回達標時被誤判成「這次才剛好跨過門檻」，
+  // 讓誠實達標過的學生被誤判遲交，見 rule.txt 對應函式上方註解／AI_CONTEXT_歷程.md）。
+  // 新增一個獨立欄位 entriesFirstCompleteAt（歷史最早達標時間，一旦有值不可逆保留），
+  // CREATE／UPDATE 兩處呼叫端都巢狀在已監控的 /users/{userId} 區塊裡才會被連帶抓到，
+  // 函式定義本體自己需要獨立條目，否則弱化這兩個函式內部驗證（例如拿掉格式正則、或讓
+  // keepsEntriesFirstCompleteAtOnceSet() 的「舊值非 null 時必須相等」這個不可逆保護失效）
+  // 不會被標記為高風險變更。跟 validEntriesCompleteAt() 當初補上這條的理由相同，這次是
+  // 新增功能當下就同步補上，不是事後稽核才發現的模式。
+  { name: 'function validEntriesFirstCompleteAt()', regex: /function\s+validEntriesFirstCompleteAt\s*\(/ },
+  { name: 'function keepsEntriesFirstCompleteAtOnceSet()', regex: /function\s+keepsEntriesFirstCompleteAtOnceSet\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },

@@ -1,7 +1,21 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v28
+ * 學生端自動化測試 v29
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v29 新增（2026-08-17）：對應「entriesFirstCompleteAt」——修正 entriesCompleteAt 的一個
+ * 邊界案例（學生先在期限內達標，之後某次編輯刪除一則工作摘要導致篇數掉回未達標，再補寫回
+ * 篇數達標時被誤判成「這次才剛好跨過門檻」，讓誠實達標過的學生被誤判遲交，源自使用者提問
+ * 後發現，完整背景見 AI_CONTEXT_歷程.md）。新增一個獨立欄位，語意是「這份月記歷史上最早
+ * 一次被觀測到達標的時間」，一旦有值就不可逆保留，不修改 computeEntriesCompleteAt() 本身：
+ *   S-SEC-44  computeEntriesFirstCompleteAt() 直接呼叫函式本體帶合成資料，涵蓋「不可逆
+ *             保留」「舊 entriesCompleteAt 欄位遷移回填」「全新達標」「尚未達標」四類情境，
+ *             並串接模擬使用者回報的完整 bug 情境（7月達標→8月刪除→8月補寫回，全程應維持
+ *             7月那個最早時間不變）
+ *   S-SEC-45  checkMonthDeadline()／editJournal()／saveJournal() 自己的快取新鮮度現查
+ *             fallback 三處，皆有把 entriesFirstCompleteAt 補進快取物件，且 saveJournal()
+ *             最終送出的 Firestore payload 確實含 entriesFirstCompleteAt 欄位（shorthand
+ *             寫法），跟 S-SEC-41 同一類「快取結構完整性」測試，只是這次檢查新欄位
  *
  * v28 新增（2026-08-08）：對應「刪除操作二次確認」——deleteStudent()／單筆刪月記／批次刪
  * 月記共 5 處「無法復原」的刪除流程，新增輸入姓名或固定格式字串才能刪除的第二層確認，
@@ -2642,6 +2656,107 @@ async function runStudentTests(page, browserContext, log) {
     if (result.payloadMatchCount !== 1)
       throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
   });
+
+  await test('S-SEC-44 computeEntriesFirstCompleteAt() 歷史最早達標時間計算邏輯正確（涵蓋不可逆保留／舊欄位遷移回填／全新達標／尚未達標四類情境，並串接模擬使用者回報的完整 bug 情境）', async () => {
+    // 2026-08-17 新增。背景：使用者提問「7月準時寫滿2篇，8月刪掉其中一篇後續補寫回，
+    // 是否會被標記遲交」，追查後確認 computeEntriesCompleteAt() 存在邊界案例——只看「這次
+    // 存檔前後」有沒有跨過門檻，完全沒有保留「歷史上是否曾經在期限內達標過」，導致「先
+    // 達標→篇數掉回不足→又補回達標」被誤判成剛好跨過門檻，把最早達標時間往後推移到補寫
+    // 當下（可能已逾期）。修法：新增獨立函式 computeEntriesFirstCompleteAt()（定義於
+    // computeEntriesCompleteAt() 旁），語意是「這份月記歷史上最早一次被觀測到達標的
+    // 時間」，一旦有值就不可逆保留，刻意不修改 computeEntriesCompleteAt() 本身。
+    const result = await page.evaluate(() => {
+      if (typeof computeEntriesFirstCompleteAt !== 'function') return { skip: true };
+
+      // 情境1（全新達標，模擬7月準時寫滿2篇）：兩個「舊值」參數皆為 null，這次存檔前後
+      // 剛好跨過門檻 → 應記錄現在（準時）的時間。
+      const case1 = computeEntriesFirstCompleteAt(null, null, 0, 2, 2, '2026-07-20T10:00:00');
+
+      // 情境2（不可逆保留，承接情境1）：entriesFirstCompleteAtBefore 已經是情境1算出的
+      // 7月時間，模擬8月誤刪1篇導致篇數掉回不足（entriesCompleteAtBefore 這次存檔前已被
+      // 舊邏輯清空為 null，但完全不影響這個新欄位）→ 應原封不動維持情境1的7月時間。
+      const case2 = computeEntriesFirstCompleteAt(case1, null, 2, 1, 2, '2026-08-05T09:00:00');
+
+      // 情境3（不可逆保留，承接情境2，這正是使用者原始問題的核心情境）：8月補寫回2篇，
+      // entriesCompleteAt（舊欄位）會被舊邏輯誤判成「這次才剛好跨過門檻」改記錄8/6，但
+      // entriesFirstCompleteAt 應該完全不受影響，繼續維持最早的7月時間，不能變成8/6。
+      const case3 = computeEntriesFirstCompleteAt(case2, null, 1, 2, 2, '2026-08-06T09:00:00');
+
+      // 情境4（舊欄位遷移回填）：這個新欄位剛上線那一刻的舊資料——entriesFirstCompleteAtBefore
+      // 從未存在過（null），但舊 entriesCompleteAt 欄位這次存檔前已經是非 null 的合法時間戳
+      // （代表在這個新欄位存在以前，這份月記就已經合法達標過）→ 應直接沿用舊欄位的值當作
+      // 「最早」，不是用「現在」這個較晚的時間覆蓋掉真正的歷史時間。
+      const case4 = computeEntriesFirstCompleteAt(null, '2026-07-15T09:00:00', 2, 1, 2, '2026-08-10T09:00:00');
+
+      // 情境5（尚未達標）：兩個「舊值」皆為 null，這次存檔前後都未達標 → 應維持 null。
+      const case5 = computeEntriesFirstCompleteAt(null, null, 0, 1, 2, '2026-08-01T09:00:00');
+
+      // 情境6（沒有任何歷史紀錄可用的達標情況，補充邊界案例）：entriesFirstCompleteAtBefore
+      // 與 entriesCompleteAtBefore 皆為 null，但這次存檔前後篇數已經達標（例如全新文件
+      // 一次寫入就已達標，且是這個新欄位上線後第一次被計算，沒有更早的歷史可回填）→ 只能
+      // 記錄現在的時間，屬於系統能力邊界內的最佳努力，不是 bug。
+      const case6 = computeEntriesFirstCompleteAt(null, null, 2, 2, 2, '2026-08-01T09:00:00');
+
+      return { skip: false, case1, case2, case3, case4, case5, case6 };
+    });
+
+    if (result.skip) return;
+    if (result.case1 !== '2026-07-20T10:00:00')
+      throw new Error(`情境1（全新達標，準時寫滿2篇）應記錄準時當下的時間，實際得到 ${result.case1}`);
+    if (result.case2 !== result.case1)
+      throw new Error(`情境2（承接情境1，8月誤刪1篇）應原封不動維持情境1的時間（${result.case1}），實際得到 ${result.case2}——不可逆保留失效`);
+    if (result.case3 !== result.case1)
+      throw new Error(`情境3（承接情境2，8月補寫回2篇，使用者原始回報的核心情境）應維持最早的7月時間（${result.case1}），實際得到 ${result.case3}——若此測試失敗代表修法可能已被還原，學生會被誤判遲交`);
+    if (result.case4 !== '2026-07-15T09:00:00')
+      throw new Error(`情境4（新欄位剛上線的舊資料遷移，舊 entriesCompleteAt 已是7/15）應直接沿用舊欄位的7/15，不能用補寫當下（8/10）覆蓋，實際得到 ${result.case4}`);
+    if (result.case5 !== null)
+      throw new Error(`情境5（尚未達標）應維持 null，實際得到 ${result.case5}`);
+    if (result.case6 !== '2026-08-01T09:00:00')
+      throw new Error(`情境6（無歷史紀錄可用的達標情況）應記錄現在的時間，實際得到 ${result.case6}`);
+  });
+
+  await test('S-SEC-45 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesFirstCompleteAt，且 saveJournal() 寫入 payload 確實含 entriesFirstCompleteAt 欄位', async () => {
+    // 2026-08-17 新增，跟 S-SEC-41 同一類「快取結構完整性」測試，只是這次檢查
+    // computeEntriesFirstCompleteAt()（S-SEC-44）依賴的兩個輸入來源
+    // （entriesFirstCompleteAtBefore／entriesCompleteAtBefore）有沒有確實被快取補齊——
+    // S-SEC-44 驗證的是計算邏輯本身「輸入正確時輸出對不對」，這條測試驗證輸入來源本身
+    // 有沒有被正確寫入快取，兩者互補，缺一都測不出完整的回歸保護。
+    const result = await page.evaluate(() => {
+      const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
+      const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!checkFnStr || !editFnStr || !saveFnStr) return { skip: true };
+
+      const checkHasEntriesFirstCompleteAt = checkFnStr.includes('entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null');
+      const editHasEntriesFirstCompleteAt = editFnStr.includes('entriesFirstCompleteAt: j.entriesFirstCompleteAt || null');
+      const saveFallbackHasEntriesFirstCompleteAt = saveFnStr.includes('entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null');
+
+      // 跟 S-SEC-41 同一種負向 lookbehind 排除法：saveJournal() 內部呼叫
+      // computeEntriesFirstCompleteAt() 時會傳入 `window._currentJournalCache?.entriesFirstCompleteAt,`
+      // 當參數（前面接 `.`，來自 `?.`），這不是最終要寫入 Firestore 的 payload 欄位本身，
+      // 必須排除，只計算真正的 shorthand payload 屬性寫法。
+      const payloadMatches = saveFnStr.match(/(?<!\.)\bentriesFirstCompleteAt\s*,/g) || [];
+
+      return {
+        skip: false,
+        checkHasEntriesFirstCompleteAt,
+        editHasEntriesFirstCompleteAt,
+        saveFallbackHasEntriesFirstCompleteAt,
+        payloadMatchCount: payloadMatches.length,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.checkHasEntriesFirstCompleteAt)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支缺少 entriesFirstCompleteAt');
+    if (!result.editHasEntriesFirstCompleteAt)
+      throw new Error('editJournal() 的快取物件缺少 entriesFirstCompleteAt');
+    if (!result.saveFallbackHasEntriesFirstCompleteAt)
+      throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少 entriesFirstCompleteAt');
+    if (result.payloadMatchCount !== 1)
+      throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesFirstCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
+  });
+
 
   await test('S-SEC-42 薪資單可上傳多張，儲存/顯示/PDF 均改用 salaryPhotos，且保留舊 salaryPhoto 相容與 Firestore 大小防呆', async () => {
     const result = await page.evaluate(() => {

@@ -1,7 +1,19 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v29
+ * 老師端自動化測試 v30
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v30 新增（2026-08-17）：對應「entriesFirstCompleteAt」——修正 entriesCompleteAt 的一個
+ * 邊界案例（學生先在期限內達標，之後某次編輯刪除一則工作摘要導致篇數掉回未達標，再補寫回
+ * 篇數達標時被誤判成「這次才剛好跨過門檻」，讓誠實達標過的學生被誤判遲交，源自使用者提問
+ * 後發現，完整背景見 AI_CONTEXT_歷程.md）。student.html 新增獨立欄位 entriesFirstCompleteAt
+ * （歷史最早達標時間，一旦有值不可逆保留，見姊妹檔 student_test.js 的 S-SEC-44／45）：
+ *   T-SEC-52  isJournalLate() 直接呼叫函式本體帶合成資料，驗證三層 fallback
+ *             entriesFirstCompleteAt || entriesCompleteAt || submittedAt 優先序正確，
+ *             並重現使用者回報的核心 bug 情境本身（entriesFirstCompleteAt=7月準時，
+ *             entriesCompleteAt=8月／舊版計算邏輯在該情境下會算出的錯誤值）確認已修正，
+ *             同時重新確認 isJournalComplete()／statusSymbolForJournal() 呼叫順序這次
+ *             沒有被牽動，寫法比照 T-SEC-47
  *
  * v29 新增（2026-08-11）：對應「薪資缺漏」新增依月份分組＋複製功能，分兩輪完成：
  *
@@ -2910,6 +2922,129 @@ async function runTeacherTests(page, log) {
       throw new Error('只複製 2026-07 時，遺失該月份的座號');
     if (result.julyOnly.includes('12'))
       throw new Error('複製範圍選了「只複製 2026-07」，但複製出來的文字仍包含 8 月的座號 12，範圍篩選未生效');
+  });
+
+  await test('T-SEC-52 isJournalLate() 優先讀 entriesFirstCompleteAt，缺欄位時退回 entriesCompleteAt，再缺才退回 submittedAt，且 isJournalComplete()／statusSymbolForJournal() 未被這次修改牽動', async () => {
+    // 2026-08-17 新增。背景：使用者提問「7月準時寫滿2篇，8月刪掉其中一篇後續補寫回，是否
+    // 會被標記遲交」，追查後確認 entriesCompleteAt 存在邊界案例——只看「這次存檔前後」有
+    // 沒有跨過門檻，被「先達標→篇數掉回不足→又補回達標」誤判成剛好跨過門檻，把最早達標
+    // 時間往後推移到補寫當下（可能已逾期）。修法：student.html 新增獨立欄位
+    // entriesFirstCompleteAt（歷史最早達標時間，一旦有值不可逆保留，見 S-SEC-44／45），
+    // isJournalLate() 這裡同步改成三層 fallback：entriesFirstCompleteAt || entriesCompleteAt
+    // || submittedAt。直接呼叫 isJournalLate()／statusSymbolForJournal() 本體帶合成資料
+    // 驗證，不做原始碼字串比對，寫法比照 T-SEC-47。
+    //
+    // 驗證七項：
+    //   caseA  entriesFirstCompleteAt 準時，entriesCompleteAt／submittedAt 皆遲交（若被
+    //          誤讀會判成遲交）→ 準時，證明新欄位優先於「兩者」
+    //   caseB  使用者回報的核心 bug 情境本身：entriesFirstCompleteAt=7月（準時），
+    //          entriesCompleteAt=8月（這正是舊版 computeEntriesCompleteAt() 在「先達標→
+    //          掉回不足→補回達標」情境下會算出的錯誤值）→ 準時，重現並驗證這次回報的
+    //          bug 已修正
+    //   caseC  entriesFirstCompleteAt 為 null，entriesCompleteAt 有值且遲交 → 退回讀
+    //          entriesCompleteAt，這裡遲交（沿用 T-SEC-47 caseB 的既有 fallback 行為）
+    //   caseD  entriesFirstCompleteAt／entriesCompleteAt 皆為 null → 退回用 submittedAt，
+    //          這裡準時
+    //   caseE  entriesFirstCompleteAt／entriesCompleteAt 兩個欄位皆完全不存在（更貼近真實
+    //          舊資料的形狀——這個功能上線前的月記文件本來就不會有這兩個欄位）→ 同樣退回
+    //          用 submittedAt，這裡遲交
+    //   caseF  端對端反向驗證（statusSymbolForJournal()）：entriesFirstCompleteAt 遲交、
+    //          entriesCompleteAt 反而準時 → 應顯示▲不是✓，證明優先序方向正確，不是兩個
+    //          測試值剛好對稱造成誤判通過
+    //   caseG  篇數不足（1/2）、entriesFirstCompleteAt 刻意塞一個很早的日期 → 應顯示△，
+    //          不會被 isJournalLate() 讀到（isJournalComplete() 先擋下），驗證「entries
+    //          不夠時偽造 entriesFirstCompleteAt 沒有用」
+    // 另外兩項回歸確認（沿用 T-SEC-47 既有邏輯，重新驗證這次修改沒有牽動）：
+    // isJournalComplete() 完全不提 entriesFirstCompleteAt／entriesCompleteAt，
+    // statusSymbolForJournal() 仍先呼叫 isJournalComplete() 才呼叫 isJournalLate()。
+    const result = await page.evaluate(() => {
+      if (typeof isJournalLate !== 'function' || typeof statusSymbolForJournal !== 'function' || typeof isJournalComplete !== 'function') {
+        return { skip: true };
+      }
+      const deadlineMap = { '115-1-7': { minEntries: 2, closeDate: '2026-07-31' } };
+
+      const caseA = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-08-20T00:00:00',
+        entriesCompleteAt: '2026-08-15T00:00:00',
+        entriesFirstCompleteAt: '2026-07-20T00:00:00',
+      }, deadlineMap);
+
+      const caseB = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-08-06T00:00:00',
+        entriesFirstCompleteAt: '2026-07-20T00:00:00',
+      }, deadlineMap);
+
+      const caseC = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-08-01T00:00:00',
+        entriesFirstCompleteAt: null,
+      }, deadlineMap);
+
+      const caseD = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: null,
+        entriesFirstCompleteAt: null,
+      }, deadlineMap);
+
+      const caseE = isJournalLate({
+        semester: '115-1', month: 7,
+        submittedAt: '2026-08-15T00:00:00',
+      }, deadlineMap);
+
+      const caseF = statusSymbolForJournal({
+        semester: '115-1', month: 7,
+        entries: [{}, {}],
+        submittedAt: '2026-07-10T00:00:00',
+        entriesCompleteAt: '2026-07-20T00:00:00',
+        entriesFirstCompleteAt: '2026-08-01T00:00:00',
+      }, deadlineMap);
+
+      const caseG = statusSymbolForJournal({
+        semester: '115-1', month: 7,
+        entries: [{}],
+        submittedAt: '2026-07-10T00:00:00',
+        entriesFirstCompleteAt: '2026-01-01T00:00:00',
+      }, deadlineMap);
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const isJournalCompleteUntouched = !codeOnly(isJournalComplete.toString()).includes('entriesCompleteAt')
+        && !codeOnly(isJournalComplete.toString()).includes('entriesFirstCompleteAt');
+      const statusFnCode = codeOnly(statusSymbolForJournal.toString());
+      const completeCallIdx = statusFnCode.indexOf('isJournalComplete(');
+      const lateCallIdx = statusFnCode.indexOf('isJournalLate(');
+      const completeCheckedBeforeLate = completeCallIdx !== -1 && lateCallIdx !== -1 && completeCallIdx < lateCallIdx;
+
+      return {
+        skip: false,
+        caseA, caseB, caseC, caseD, caseE, caseF, caseG,
+        isJournalCompleteUntouched, completeCheckedBeforeLate,
+      };
+    });
+
+    if (result.skip) return;
+    if (result.caseA !== false)
+      throw new Error(`情境A（entriesFirstCompleteAt準時，其餘兩個欄位若誤讀皆會判遲交）應為準時(false)，實際得到 ${result.caseA}——代表函式沒有優先讀 entriesFirstCompleteAt`);
+    if (result.caseB !== false)
+      throw new Error(`情境B（使用者回報的核心bug情境：entriesFirstCompleteAt=7月準時，entriesCompleteAt=8月／這正是舊版計算邏輯在「先達標→掉回不足→補回達標」情境下的錯誤值）應為準時(false)，實際得到 ${result.caseB}——若此測試失敗代表這次修法可能已被還原，學生會被誤判遲交`);
+    if (result.caseC !== true)
+      throw new Error(`情境C（entriesFirstCompleteAt為null，退回entriesCompleteAt遲交）應為遲交(true)，實際得到 ${result.caseC}`);
+    if (result.caseD !== false)
+      throw new Error(`情境D（entriesFirstCompleteAt／entriesCompleteAt皆為null，退回submittedAt準時）應為準時(false)，實際得到 ${result.caseD}`);
+    if (result.caseE !== true)
+      throw new Error(`情境E（entriesFirstCompleteAt／entriesCompleteAt兩欄位皆不存在，退回submittedAt遲交）應為遲交(true)，實際得到 ${result.caseE}`);
+    if (result.caseF !== '▲')
+      throw new Error(`情境F（端對端反向驗證：entriesFirstCompleteAt遲交、entriesCompleteAt反而準時）應顯示▲，實際得到 ${result.caseF}——若不是▲，優先序方向可能反了`);
+    if (result.caseG !== '△')
+      throw new Error(`情境G（篇數不足、entriesFirstCompleteAt偽造成很早的日期）應顯示△不受影響，實際得到 ${result.caseG}——若不是△代表 isJournalComplete() 的擋關失效了`);
+    if (!result.isJournalCompleteUntouched)
+      throw new Error('isJournalComplete() 不應提到 entriesFirstCompleteAt／entriesCompleteAt，這次修改理當只動 isJournalLate() 本身');
+    if (!result.completeCheckedBeforeLate)
+      throw new Error('statusSymbolForJournal() 應先呼叫 isJournalComplete() 才呼叫 isJournalLate()，順序被調換的話「篇數不夠時完全不看遲交判斷」這個既有行為會被破壞');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
