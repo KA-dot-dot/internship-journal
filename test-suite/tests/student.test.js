@@ -1,7 +1,28 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v29
+ * 學生端自動化測試 v30
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v30 修正（2026-08-18）：entriesFirstCompleteAt 第二輪修法（見 rule.txt
+ * validEntriesFirstCompleteAt()／keepsEntriesFirstCompleteAtOnceSet() 上方註解）——
+ * v29 的原始設計「一旦有值就永遠不可逆保留」忽略了 minEntries 也可能被老師事後調高，
+ * 若調高後學生才在新門檻下補齊篇數，這個欄位會凍結在舊門檻下的舊日期，讓 isJournalLate()
+ * 誤判準時。修法新增配套欄位 entriesFirstCompleteAtCount（凍結當下驗證過的篇數），
+ * computeEntriesFirstCompleteAt() 函式簽名同步從 6 參數（回傳純字串）改成 7 參數（回傳
+ * {at, count} 物件）。本輪只更新測試本身以對應新簽名／新欄位，不是新增功能：
+ *   S-SEC-44  改用新的 7 參數函式簽名與 {at, count} 回傳物件重寫全部斷言（v29 版本用舊
+ *             簽名呼叫會造成參數位移，且拿整個物件跟字串比較恆為 false，導致
+ *             「應記錄...實際得到 [object Object]」這類失敗——這是測試沒跟上函式簽名
+ *             變動，不是 production 邏輯本身的 bug，已用 node 直接執行函式本體重新核對
+ *             過所有情境的正確期望值），並新增情境7（minEntries 調高導致舊凍結失效重算）
+ *             直接覆蓋這次修法要解決的核心 bug。
+ *   S-SEC-45  三處快取新增檢查配套欄位 entriesFirstCompleteAtCount 是否補齊；payload
+ *             shorthand 屬性計數的負向 lookbehind 排除法補上排除 "at: "／"count: "
+ *             前綴——函式簽名改成回傳物件後，呼叫端新增了
+ *             `const { at: entriesFirstCompleteAt, count: entriesFirstCompleteAtCount } = ...`
+ *             解構賦值，解構目標本身字面上跟 payload shorthand 屬性長得一樣（都是
+ *             `entriesFirstCompleteAt,`），舊版排除法沒考慮到這個新增的程式碼形狀，導致
+ *             誤算成「找到2處」。
  *
  * v29 新增（2026-08-17）：對應「entriesFirstCompleteAt」——修正 entriesCompleteAt 的一個
  * 邊界案例（學生先在期限內達標，之後某次編輯刪除一則工作摘要導致篇數掉回未達標，再補寫回
@@ -2657,70 +2678,83 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
   });
 
-  await test('S-SEC-44 computeEntriesFirstCompleteAt() 歷史最早達標時間計算邏輯正確（涵蓋不可逆保留／舊欄位遷移回填／全新達標／尚未達標四類情境，並串接模擬使用者回報的完整 bug 情境）', async () => {
-    // 2026-08-17 新增。背景：使用者提問「7月準時寫滿2篇，8月刪掉其中一篇後續補寫回，
-    // 是否會被標記遲交」，追查後確認 computeEntriesCompleteAt() 存在邊界案例——只看「這次
-    // 存檔前後」有沒有跨過門檻，完全沒有保留「歷史上是否曾經在期限內達標過」，導致「先
-    // 達標→篇數掉回不足→又補回達標」被誤判成剛好跨過門檻，把最早達標時間往後推移到補寫
-    // 當下（可能已逾期）。修法：新增獨立函式 computeEntriesFirstCompleteAt()（定義於
-    // computeEntriesCompleteAt() 旁），語意是「這份月記歷史上最早一次被觀測到達標的
-    // 時間」，一旦有值就不可逆保留，刻意不修改 computeEntriesCompleteAt() 本身。
+  await test('S-SEC-44 computeEntriesFirstCompleteAt() 歷史最早達標時間計算邏輯正確（涵蓋不可逆保留／舊欄位遷移回填／全新達標／尚未達標／minEntries調高後合法前進五類情境，並串接模擬使用者回報的完整 bug 情境）', async () => {
+    // 2026-08-17 新增，2026-08-18 補修。背景見函式定義上方大段註解：原始設計「一旦有值就
+    // 永遠不可逆保留」忽略了 minEntries 也可能被老師事後調高，2026-08-18 改為新增
+    // entriesFirstCompleteAtCount（凍結當下驗證過的篇數）搭配判斷，讓凍結在較寬鬆舊
+    // 門檻下的紀錄，在門檻被調高超過原本驗證篇數時可以合法失效、依現在門檻重新凍結。
+    // 函式簽名同步從 6 參數（回傳純字串）改成 7 參數（回傳 {at, count} 物件），這裡的
+    // 測試呼叫與斷言都要對應新簽名，否則會被舊簽名的參數位移／物件被當字串比較誤判。
     const result = await page.evaluate(() => {
       if (typeof computeEntriesFirstCompleteAt !== 'function') return { skip: true };
 
-      // 情境1（全新達標，模擬7月準時寫滿2篇）：兩個「舊值」參數皆為 null，這次存檔前後
-      // 剛好跨過門檻 → 應記錄現在（準時）的時間。
-      const case1 = computeEntriesFirstCompleteAt(null, null, 0, 2, 2, '2026-07-20T10:00:00');
+      // 情境1（全新達標，模擬7月準時寫滿2篇，門檻2篇）：兩個「舊值」皆為 null/0，這次
+      // 存檔前後剛好跨過門檻 → 應記錄現在（準時）的時間，count 記錄較大的那次篇數。
+      const case1 = computeEntriesFirstCompleteAt(null, 0, null, 0, 2, 2, '2026-07-20T10:00:00');
 
-      // 情境2（不可逆保留，承接情境1）：entriesFirstCompleteAtBefore 已經是情境1算出的
-      // 7月時間，模擬8月誤刪1篇導致篇數掉回不足（entriesCompleteAtBefore 這次存檔前已被
-      // 舊邏輯清空為 null，但完全不影響這個新欄位）→ 應原封不動維持情境1的7月時間。
-      const case2 = computeEntriesFirstCompleteAt(case1, null, 2, 1, 2, '2026-08-05T09:00:00');
+      // 情境2（不可逆保留，承接情境1）：entriesFirstCompleteAtBefore／Count 已是情境1算出
+      // 的7月時間與篇數，模擬8月誤刪1篇導致篇數掉回不足（門檻仍2篇未變）→ 凍結當下驗證
+      // 過的篇數(2)依然撐得住現在門檻(2)，應原封不動維持情境1的7月時間。
+      const case2 = computeEntriesFirstCompleteAt(case1.at, case1.count, null, 2, 1, 2, '2026-08-05T09:00:00');
 
-      // 情境3（不可逆保留，承接情境2，這正是使用者原始問題的核心情境）：8月補寫回2篇，
-      // entriesCompleteAt（舊欄位）會被舊邏輯誤判成「這次才剛好跨過門檻」改記錄8/6，但
-      // entriesFirstCompleteAt 應該完全不受影響，繼續維持最早的7月時間，不能變成8/6。
-      const case3 = computeEntriesFirstCompleteAt(case2, null, 1, 2, 2, '2026-08-06T09:00:00');
+      // 情境3（不可逆保留，承接情境2，這正是使用者原始問題的核心情境）：8月補寫回2篇
+      // （門檻仍2篇未變），entriesCompleteAt（舊欄位）會被舊邏輯誤判成「這次才剛好跨過
+      // 門檻」改記錄8/6，但 entriesFirstCompleteAt 應該完全不受影響，繼續維持最早的7月
+      // 時間，不能變成8/6。
+      const case3 = computeEntriesFirstCompleteAt(case2.at, case2.count, null, 1, 2, 2, '2026-08-06T09:00:00');
 
       // 情境4（舊欄位遷移回填）：這個新欄位剛上線那一刻的舊資料——entriesFirstCompleteAtBefore
-      // 從未存在過（null），但舊 entriesCompleteAt 欄位這次存檔前已經是非 null 的合法時間戳
-      // （代表在這個新欄位存在以前，這份月記就已經合法達標過）→ 應直接沿用舊欄位的值當作
-      // 「最早」，不是用「現在」這個較晚的時間覆蓋掉真正的歷史時間。
-      const case4 = computeEntriesFirstCompleteAt(null, '2026-07-15T09:00:00', 2, 1, 2, '2026-08-10T09:00:00');
+      // 從未存在過（null/0），但舊 entriesCompleteAt 欄位這次存檔前已經是非 null 的合法
+      // 時間戳（代表在這個新欄位存在以前，這份月記就已經合法達標過），且 entriesCountBefore
+      // 在現在門檻下仍然成立 → 應直接沿用舊欄位的值當作「最早」，count 記錄
+      // entriesCountBefore，不是用「現在」這個較晚的時間覆蓋掉真正的歷史時間。
+      const case4 = computeEntriesFirstCompleteAt(null, 0, '2026-07-15T09:00:00', 2, 1, 2, '2026-08-10T09:00:00');
 
-      // 情境5（尚未達標）：兩個「舊值」皆為 null，這次存檔前後都未達標 → 應維持 null。
-      const case5 = computeEntriesFirstCompleteAt(null, null, 0, 1, 2, '2026-08-01T09:00:00');
+      // 情境5（尚未達標）：兩個「舊值」皆為 null/0，這次存檔前後都未達標（門檻2篇，
+      // 前0後1）→ 應維持 { at: null, count: null }。
+      const case5 = computeEntriesFirstCompleteAt(null, 0, null, 0, 1, 2, '2026-08-01T09:00:00');
 
       // 情境6（沒有任何歷史紀錄可用的達標情況，補充邊界案例）：entriesFirstCompleteAtBefore
       // 與 entriesCompleteAtBefore 皆為 null，但這次存檔前後篇數已經達標（例如全新文件
       // 一次寫入就已達標，且是這個新欄位上線後第一次被計算，沒有更早的歷史可回填）→ 只能
       // 記錄現在的時間，屬於系統能力邊界內的最佳努力，不是 bug。
-      const case6 = computeEntriesFirstCompleteAt(null, null, 2, 2, 2, '2026-08-01T09:00:00');
+      const case6 = computeEntriesFirstCompleteAt(null, 0, null, 2, 2, 2, '2026-08-01T09:00:00');
 
-      return { skip: false, case1, case2, case3, case4, case5, case6 };
+      // 情境7（2026-08-18 第二輪修法的核心情境，補充邊界案例）：7月門檻1篇時凍結在7/5
+      // （count=1），9月老師把門檻調高到3篇，這次存檔前1篇、後3篇 → 舊凍結（門檻1篇下
+      // 驗證過的count=1）撐不住現在的門檻(3)，應該失效重算，改記錄9月才真正補齊3篇的
+      // 時間，count 更新成3。若此測試失敗代表第二輪修法可能已被還原，minEntries 調高後
+      // 逾期補齊的學生會被誤判準時。
+      const frozen = computeEntriesFirstCompleteAt(null, 0, null, 0, 1, 1, '2026-07-05T09:00:00');
+      const case7 = computeEntriesFirstCompleteAt(frozen.at, frozen.count, null, 1, 3, 3, '2026-09-10T09:00:00');
+
+      return { skip: false, case1, case2, case3, case4, case5, case6, case7 };
     });
 
     if (result.skip) return;
-    if (result.case1 !== '2026-07-20T10:00:00')
-      throw new Error(`情境1（全新達標，準時寫滿2篇）應記錄準時當下的時間，實際得到 ${result.case1}`);
-    if (result.case2 !== result.case1)
-      throw new Error(`情境2（承接情境1，8月誤刪1篇）應原封不動維持情境1的時間（${result.case1}），實際得到 ${result.case2}——不可逆保留失效`);
-    if (result.case3 !== result.case1)
-      throw new Error(`情境3（承接情境2，8月補寫回2篇，使用者原始回報的核心情境）應維持最早的7月時間（${result.case1}），實際得到 ${result.case3}——若此測試失敗代表修法可能已被還原，學生會被誤判遲交`);
-    if (result.case4 !== '2026-07-15T09:00:00')
-      throw new Error(`情境4（新欄位剛上線的舊資料遷移，舊 entriesCompleteAt 已是7/15）應直接沿用舊欄位的7/15，不能用補寫當下（8/10）覆蓋，實際得到 ${result.case4}`);
-    if (result.case5 !== null)
-      throw new Error(`情境5（尚未達標）應維持 null，實際得到 ${result.case5}`);
-    if (result.case6 !== '2026-08-01T09:00:00')
-      throw new Error(`情境6（無歷史紀錄可用的達標情況）應記錄現在的時間，實際得到 ${result.case6}`);
+    if (result.case1.at !== '2026-07-20T10:00:00' || result.case1.count !== 2)
+      throw new Error(`情境1（全新達標，準時寫滿2篇）應記錄 {at:準時當下, count:2}，實際得到 ${JSON.stringify(result.case1)}`);
+    if (result.case2.at !== result.case1.at || result.case2.count !== result.case1.count)
+      throw new Error(`情境2（承接情境1，8月誤刪1篇，門檻未變）應原封不動維持情境1（${JSON.stringify(result.case1)}），實際得到 ${JSON.stringify(result.case2)}——不可逆保留失效`);
+    if (result.case3.at !== result.case1.at || result.case3.count !== result.case1.count)
+      throw new Error(`情境3（承接情境2，8月補寫回2篇，使用者原始回報的核心情境，門檻未變）應維持最早的7月紀錄（${JSON.stringify(result.case1)}），實際得到 ${JSON.stringify(result.case3)}——若此測試失敗代表第一輪修法可能已被還原，學生會被誤判遲交`);
+    if (result.case4.at !== '2026-07-15T09:00:00' || result.case4.count !== 2)
+      throw new Error(`情境4（新欄位剛上線的舊資料遷移，舊 entriesCompleteAt 已是7/15）應直接沿用 {at:7/15, count:2}，不能用補寫當下（8/10）覆蓋，實際得到 ${JSON.stringify(result.case4)}`);
+    if (result.case5.at !== null || result.case5.count !== null)
+      throw new Error(`情境5（尚未達標）應維持 {at:null, count:null}，實際得到 ${JSON.stringify(result.case5)}`);
+    if (result.case6.at !== '2026-08-01T09:00:00' || result.case6.count !== 2)
+      throw new Error(`情境6（無歷史紀錄可用的達標情況）應記錄 {at:現在, count:2}，實際得到 ${JSON.stringify(result.case6)}`);
+    if (result.case7.at !== '2026-09-10T09:00:00' || result.case7.count !== 3)
+      throw new Error(`情境7（第二輪修法核心：minEntries調高導致舊凍結失效重算）應記錄 {at:9/10, count:3}，實際得到 ${JSON.stringify(result.case7)}——若此測試失敗代表第二輪修法可能已被還原，門檻調高後逾期補齊的學生會被誤判準時`);
   });
 
-  await test('S-SEC-45 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesFirstCompleteAt，且 saveJournal() 寫入 payload 確實含 entriesFirstCompleteAt 欄位', async () => {
-    // 2026-08-17 新增，跟 S-SEC-41 同一類「快取結構完整性」測試，只是這次檢查
-    // computeEntriesFirstCompleteAt()（S-SEC-44）依賴的兩個輸入來源
-    // （entriesFirstCompleteAtBefore／entriesCompleteAtBefore）有沒有確實被快取補齊——
-    // S-SEC-44 驗證的是計算邏輯本身「輸入正確時輸出對不對」，這條測試驗證輸入來源本身
-    // 有沒有被正確寫入快取，兩者互補，缺一都測不出完整的回歸保護。
+  await test('S-SEC-45 checkMonthDeadline()／editJournal()／saveJournal() 現查 fallback 三處快取皆補上 entriesFirstCompleteAt／entriesFirstCompleteAtCount，且 saveJournal() 寫入 payload 確實各含 1 處這兩個欄位', async () => {
+    // 2026-08-17 新增，2026-08-18 補修，跟 S-SEC-41 同一類「快取結構完整性」測試，只是
+    // 這次檢查 computeEntriesFirstCompleteAt()（S-SEC-44）依賴的輸入來源
+    // （entriesFirstCompleteAtBefore／entriesFirstCompleteAtCountBefore／
+    // entriesCompleteAtBefore）有沒有確實被快取補齊——S-SEC-44 驗證的是計算邏輯本身
+    // 「輸入正確時輸出對不對」，這條測試驗證輸入來源本身有沒有被正確寫入快取，兩者互補，
+    // 缺一都測不出完整的回歸保護。
     const result = await page.evaluate(() => {
       const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
       const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
@@ -2730,19 +2764,34 @@ async function runStudentTests(page, browserContext, log) {
       const checkHasEntriesFirstCompleteAt = checkFnStr.includes('entriesFirstCompleteAt: journalSnap.data().entriesFirstCompleteAt || null');
       const editHasEntriesFirstCompleteAt = editFnStr.includes('entriesFirstCompleteAt: j.entriesFirstCompleteAt || null');
       const saveFallbackHasEntriesFirstCompleteAt = saveFnStr.includes('entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null');
+      // 2026-08-18 補修：三處快取同步檢查配套欄位 entriesFirstCompleteAtCount 有沒有
+      // 被補齊——沿用 ?? 0（而非 || null）預設值，因為 0 是合法的篇數值，用 || 會把
+      // 「合法但為假值」的 0 也誤判成缺欄位改成預設。
+      const checkHasEntriesFirstCompleteAtCount = checkFnStr.includes('entriesFirstCompleteAtCount: journalSnap.data().entriesFirstCompleteAtCount ?? 0');
+      const editHasEntriesFirstCompleteAtCount = editFnStr.includes('entriesFirstCompleteAtCount: j.entriesFirstCompleteAtCount ?? 0');
+      const saveFallbackHasEntriesFirstCompleteAtCount = saveFnStr.includes('entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? 0');
 
-      // 跟 S-SEC-41 同一種負向 lookbehind 排除法：saveJournal() 內部呼叫
-      // computeEntriesFirstCompleteAt() 時會傳入 `window._currentJournalCache?.entriesFirstCompleteAt,`
-      // 當參數（前面接 `.`，來自 `?.`），這不是最終要寫入 Firestore 的 payload 欄位本身，
-      // 必須排除，只計算真正的 shorthand payload 屬性寫法。
-      const payloadMatches = saveFnStr.match(/(?<!\.)\bentriesFirstCompleteAt\s*,/g) || [];
+      // 2026-08-18 補修：原本的負向 lookbehind 排除法只排除了 `?.entriesFirstCompleteAt,`
+      // 這種現查快取讀取寫法，沒考慮到函式簽名改成回傳 {at, count} 物件後，呼叫端新增了
+      // `const { at: entriesFirstCompleteAt, count: entriesFirstCompleteAtCount } = ...`
+      // 這樣的解構賦值——解構目標 `entriesFirstCompleteAt,`（在 "at: " 後面）字面上一樣
+      // 符合「shorthand 屬性」的樣子，會被舊 regex 誤算成第二個「payload 欄位」，因而
+      // 誤判成「找到2處」。新增排除 "at: " 前綴（解構賦值目標的固定寫法），只計算真正
+      // 出現在 payload 物件字面量裡的 shorthand 屬性寫法。entriesFirstCompleteAtCount
+      // 同理需要排除 "count: " 前綴。
+      const atPayloadMatches = saveFnStr.match(/(?<!\.)(?<!at:\s)\bentriesFirstCompleteAt\s*,/g) || [];
+      const countPayloadMatches = saveFnStr.match(/(?<!\.)(?<!count:\s)\bentriesFirstCompleteAtCount\s*,/g) || [];
 
       return {
         skip: false,
         checkHasEntriesFirstCompleteAt,
         editHasEntriesFirstCompleteAt,
         saveFallbackHasEntriesFirstCompleteAt,
-        payloadMatchCount: payloadMatches.length,
+        checkHasEntriesFirstCompleteAtCount,
+        editHasEntriesFirstCompleteAtCount,
+        saveFallbackHasEntriesFirstCompleteAtCount,
+        atPayloadMatchCount: atPayloadMatches.length,
+        countPayloadMatchCount: countPayloadMatches.length,
       };
     });
 
@@ -2753,8 +2802,16 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('editJournal() 的快取物件缺少 entriesFirstCompleteAt');
     if (!result.saveFallbackHasEntriesFirstCompleteAt)
       throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少 entriesFirstCompleteAt');
-    if (result.payloadMatchCount !== 1)
-      throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesFirstCompleteAt 欄位（shorthand 寫法），實際找到 ${result.payloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
+    if (!result.checkHasEntriesFirstCompleteAtCount)
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支缺少配套欄位 entriesFirstCompleteAtCount');
+    if (!result.editHasEntriesFirstCompleteAtCount)
+      throw new Error('editJournal() 的快取物件缺少配套欄位 entriesFirstCompleteAtCount');
+    if (!result.saveFallbackHasEntriesFirstCompleteAtCount)
+      throw new Error('saveJournal() 的快取新鮮度現查 fallback 缺少配套欄位 entriesFirstCompleteAtCount');
+    if (result.atPayloadMatchCount !== 1)
+      throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesFirstCompleteAt 欄位（shorthand 寫法），實際找到 ${result.atPayloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
+    if (result.countPayloadMatchCount !== 1)
+      throw new Error(`saveJournal() 送出的 payload 應恰好有 1 處 entriesFirstCompleteAtCount 欄位（shorthand 寫法），實際找到 ${result.countPayloadMatchCount} 處——不是完全缺席就是位置對不上預期`);
   });
 
 
