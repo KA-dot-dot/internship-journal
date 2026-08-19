@@ -3988,14 +3988,22 @@ function applyNMonthDates() {
 // dl-min-{m} 的缺口（見 resolveMinEntries()、renderDeadlineMonthTable() 上方的既有註解）。
 // 跟 applyBatchDates()/applyNMonthDates() 一樣，這裡只是把值填進畫面上的 input，
 // 真正寫入 Firestore 仍要按下方「一次儲存全部月份期限」（saveAllDeadlines()）。
-// 關鍵細節：③逐月微調表格本身刻意不預先帶出已存的值（「整組重填後送出」設計），若某個月
-// 只填了最少篇數、開放/截止日兩個欄位仍是空的，saveAllDeadlines() 會因為
-// `!openRaw && !closeRaw` 直接把整個月跳過，最少篇數也會一併不見、白填。為避免這個陷阱，
-// 套用前先讀一次這個學期目前已存在 Firestore 的各月期限，對「開放/截止日欄位仍空白、但這個
-// 月其實已經存過期限」的月份，順便把既有日期一併帶入，讓這個月不會被略過；從未設定過期限、
-// 也還沒在畫面上填過日期的月份維持空白（本來就無法只靠最少篇數單獨成立一筆期限資料，仍需
-// 老師之後補上日期）。已在畫面上填過日期的月份（不論是這次手動填的還是套用 A/B 帶出的）
-// 一律保留不覆蓋。
+// 關鍵細節：③逐月微調表格本身刻意不預先帶出已存的值（「整組重填後送出」設計）。
+// 2026-08-19 補修前：若某個月只填了最少篇數、開放/截止日兩個欄位仍是空的，
+// saveAllDeadlines() 會因為 `!openRaw && !closeRaw` 直接把整個月跳過，最少篇數也會一併
+// 不見、白填；且 setDoc() 沒有 merge:true，只改日期不動篇數欄位時還會把該月既有的
+// minEntries 整份覆蓋清空（完整成因見 BUG交接_截止日期設定覆蓋問題_2026-08-19.md）。
+// 2026-08-19 補修後：saveAllDeadlines() 本身已經能安全處理「只填篇數不填日期」（該月已有
+// 既有日期時 merge 寫入單一欄位，否則明確 toast 提示無法單獨儲存）與「只填日期不填篇數」
+// （merge 保留既有 minEntries，不再被覆蓋清空）兩種情境，這個函式已不是避免資料流失的
+// 必要手段。**保留這個函式的理由**：這裡要解決的是不同的使用情境——一次把同一個篇數套用
+// 到「所有月份」（批次），若不順便回填既有日期，老師仍必須自己逐月重新輸入日期才能讓
+// saveAllDeadlines() 認得這些月份、把新篇數寫進去，這個函式省下這個手動重打的麻煩，屬於
+// 操作便利性而非資料安全性考量。套用前先讀一次這個學期目前已存在 Firestore 的各月期限，
+// 對「開放/截止日欄位仍空白、但這個月其實已經存過期限」的月份，順便把既有日期一併帶入；
+// 從未設定過期限、也還沒在畫面上填過日期的月份維持空白（本來就無法只靠最少篇數單獨成立
+// 一筆期限資料，仍需老師之後補上日期）。已在畫面上填過日期的月份（不論是這次手動填的還是
+// 套用 A/B 帶出的）一律保留不覆蓋。
 async function applyBatchMinEntries() {
   const sem = getDeadlineSemKey();
   if (!sem) return toast('請先選擇學期', 'error');
@@ -4065,35 +4073,75 @@ async function saveAllDeadlines() {
   const months = getDeadlineSemMonths(sem.half);
   const adY1 = sem.y + 1911, adY2 = sem.y + 1912;
   const semesterLabel = sem.half === 1 ? `${sem.y}學年第1學期 (${adY1}/7～${adY2}/1)` : `${sem.y}學年第2學期 (${adY2}/2～${adY2}/6)`;
-  const entries = [];
-  for (const m of months) {
-    const openRaw = document.getElementById(`dl-open-${m}`)?.value || '';
-    const closeRaw = document.getElementById(`dl-close-${m}`)?.value || '';
-    // 2026-07-16 新增：最少篇數輸入框，跟開放/截止日一樣不預先帶出舊值——若這個月同時要
-    // 調整最少篇數，記得連同開放日/截止日一起重新填寫，不然這個月會被下面 `continue` 整月跳過
-    const minRaw = (document.getElementById(`dl-min-${m}`)?.value || '').trim();
-    if (!openRaw && !closeRaw) continue;
-    const openDate = normalizeToISODate(openRaw);
-    const closeDate = normalizeToISODate(closeRaw);
-    if (!openDate || !closeDate) { toast(`${m}月的日期格式有誤，請重新確認`, 'error'); return; }
-    if (openDate > closeDate) { toast(`${m}月的開放日不能晚於截止日`, 'error'); return; }
-    const data = { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() };
-    if (minRaw) {
-      const minEntries = parseInt(minRaw, 10);
-      if (!Number.isInteger(minEntries) || minEntries < 1 || String(minEntries) !== minRaw) {
-        toast(`${m}月的最少篇數請填 1 以上的整數`, 'error');
-        return;
-      }
-      data.minEntries = minEntries;
-    }
-    entries.push({ id: `${sem.key}-${m}`, data });
-  }
-  if (!entries.length) return toast('所有月份都是空的，請填寫後再儲存', 'error');
   showLoading();
-  const { doc, setDoc } = firebase_funcs;
+  const { doc, setDoc, collection, getDocs } = firebase_funcs;
   try {
-    await Promise.all(entries.map(({ id, data }) => setDoc(doc(db, 'deadlines', id), data)));
-    toast(`✅ 已儲存 ${entries.length} 個月份的期限設定`, 'success');
+    // 2026-08-19 補修（BUG交接_截止日期設定覆蓋問題）：只填「最少篇數」、開放/截止日兩欄仍
+    // 空白的月份，需要知道這個月是否已經有既有期限資料，才能判斷能不能安全只 merge 寫入
+    // minEntries 單一欄位——完全沒設定過的月份沒有日期可用，無法只靠最少篇數單獨成立一筆
+    // 期限。跟 applyBatchMinEntries() 既有做法一致，先讀一次整個 deadlines 集合；讀取失敗
+    // 不阻擋其餘正常填了日期的月份，只讓「只填篇數」這類月份保守視為沒有既有資料（略過並
+    // 提示），等同修復前的行為，不會更差。
+    let existingMap = {};
+    try {
+      const snap = await getDocs(collection(db, 'deadlines'));
+      snap.docs.forEach(d => { existingMap[d.id] = d.data(); });
+    } catch (e) { /* 讀取失敗，existingMap 維持空物件，見上方註解的保守處理 */ }
+
+    const entries = [];
+    const skippedNoDateMonths = [];
+    for (const m of months) {
+      const openRaw = document.getElementById(`dl-open-${m}`)?.value || '';
+      const closeRaw = document.getElementById(`dl-close-${m}`)?.value || '';
+      // 2026-07-16 新增：最少篇數輸入框，跟開放/截止日一樣不預先帶出舊值。
+      const minRaw = (document.getElementById(`dl-min-${m}`)?.value || '').trim();
+      const id = `${sem.key}-${m}`;
+      if (!openRaw && !closeRaw) {
+        // 2026-08-19 補修：這個月完全沒填日期。沒填最少篇數則維持原行為整月跳過（這個月
+        // 什麼都沒填）；填了最少篇數則不再無聲跳過——只有這個月已經存在既有期限資料（含
+        // openDate/closeDate）時才能安全 merge 寫入單一 minEntries 欄位，否則記錄下來，
+        // 存檔完成後用 toast 明確提示「無法單獨儲存」，而不是靜默忽略這次修改。
+        if (!minRaw) continue;
+        const existing = existingMap[id];
+        if (!existing || !existing.openDate || !existing.closeDate) {
+          skippedNoDateMonths.push(m);
+          continue;
+        }
+        const minEntries = parseInt(minRaw, 10);
+        if (!Number.isInteger(minEntries) || minEntries < 1 || String(minEntries) !== minRaw) {
+          toast(`${m}月的最少篇數請填 1 以上的整數`, 'error');
+          return;
+        }
+        entries.push({ id, data: { minEntries, updatedAt: localISOStr() } });
+        continue;
+      }
+      const openDate = normalizeToISODate(openRaw);
+      const closeDate = normalizeToISODate(closeRaw);
+      if (!openDate || !closeDate) { toast(`${m}月的日期格式有誤，請重新確認`, 'error'); return; }
+      if (openDate > closeDate) { toast(`${m}月的開放日不能晚於截止日`, 'error'); return; }
+      const data = { semester: sem.key, semesterLabel, month: m, openDate, closeDate, updatedAt: localISOStr() };
+      if (minRaw) {
+        const minEntries = parseInt(minRaw, 10);
+        if (!Number.isInteger(minEntries) || minEntries < 1 || String(minEntries) !== minRaw) {
+          toast(`${m}月的最少篇數請填 1 以上的整數`, 'error');
+          return;
+        }
+        data.minEntries = minEntries;
+      }
+      entries.push({ id, data });
+    }
+    if (!entries.length) {
+      return toast(skippedNoDateMonths.length
+        ? `${skippedNoDateMonths.join('、')}月尚未設定過開放/截止日，只填最少篇數無法單獨儲存，請先補上日期`
+        : '所有月份都是空的，請填寫後再儲存', 'error');
+    }
+    // 2026-08-19 補修（BUG交接_截止日期設定覆蓋問題「問題一」）：加上 { merge: true }。原本
+    // 沒有 merge，若某個月這次沒填最少篇數（data 裡沒有 minEntries 這個 key），setDoc() 沒
+    // merge 就是整份覆蓋，會把該月之前已設定的 minEntries 悄悄清空回預設值 1，且無任何提示。
+    await Promise.all(entries.map(({ id, data }) => setDoc(doc(db, 'deadlines', id), data, { merge: true })));
+    let msg = `✅ 已儲存 ${entries.length} 個月份的期限設定`;
+    if (skippedNoDateMonths.length) msg += `（${skippedNoDateMonths.join('、')}月尚未設定過開放/截止日，只填最少篇數無法單獨儲存，已略過，請先補上日期）`;
+    toast(msg, 'success');
     loadDeadlinesTable();
   } catch(e) {
     toast('儲存失敗：' + (e.message || '請重試'), 'error');
