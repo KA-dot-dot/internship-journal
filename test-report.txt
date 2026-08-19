@@ -1,7 +1,7 @@
 ══════════════════════════════════════════════════
 產學班實習月記系統 自動化測試
-執行時間：2026/8/19 上午4:44:57
-測試檔版本：student.test.js v31（2026-08-18）／teacher.test.js v30（2026-08-17）
+執行時間：2026/8/19 上午9:50:12
+測試檔版本：student.test.js v31（2026-08-18）／teacher.test.js v31（2026-08-19）
 ══════════════════════════════════════════════════
 
 🤖 偵測到老師帳號 .env 設定，自動產生老師 session...
@@ -23,7 +23,6 @@
    ✅ Firebase SDK 登入成功（uid: YYltObOqHVZtmW5DhhMPjVT8vs93）
    🔍 登入後狀態：{"appDisplay":"block","hasCurrentUser":true,"authUid":"YYltObOqHVZtmW5DhhMPjVT8vs93","bodyTextSnippet":"\n\n\n  \n  載入中...\n\n\n\n\n\n\n  \n    \n    \n      ⚠️ 你在LINE瀏覽器開啟，無法登入\n      \n        \n          💬\n          LINE 內建瀏覽器\n        \n        →\n        \n          \n "}
    🔍 Console（最後 8 筆）：
-      [console.error] Failed to load resource: the server responded with a status of 404 ()
       [console.log] ✅ Firebase 連線成功
       [console.warning] Service Worker registration blocked by Playwright
    ✅ 登入流程成功，app 已顯示
@@ -121,7 +120,7 @@
 ──────────────────────────────────────────────────
 學生端 測試結果：79/79 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：20.4s
+耗時：25.1s
 
 ══════════════════════════════════════════════════
 老師端測試（teacher.html）
@@ -202,21 +201,22 @@
   ✅ T-SEC-50 computeSalaryMissingGroups()／renderSalaryMissingGroupedHtml() 依西元年月正確分組並由新到舊排序（不同學年同一個月份數字不會被混在一起），renderSalaryAlerts() 已改呼叫這兩個共用函式並把「薪資缺漏」拆成獨立整行卡片、排在最上層
   ✅ T-SEC-51 copySalaryMissingList() 複製到剪貼簿的文字只有座號、不含姓名，依 window._salaryMissingGroups 既有順序分組（新到舊），且複製範圍下拉選單可篩選單一月份
   ✅ T-SEC-52 isJournalLate() 優先讀 entriesFirstCompleteAt，缺欄位時退回 entriesCompleteAt，再缺才退回 submittedAt，且 isJournalComplete()／statusSymbolForJournal() 未被這次修改牽動
+  ✅ T-SEC-53 saveAllDeadlines() 加上 merge:true，且「只填最少篇數不填日期」的月份不再靜默略過（2026-08-19 截止日期設定覆蓋問題修復）
   ✅ T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）
 
 ──────────────────────────────────────────────────
-老師端 測試結果：75/75 通過，0 失敗
+老師端 測試結果：76/76 通過，0 失敗
 ──────────────────────────────────────────────────
-耗時：14.6s
+耗時：15.7s
 
 ══════════════════════════════════════════════════
 整體測試結果
 ══════════════════════════════════════════════════
-✅ 學生端：79/79 通過（20.4s）
-✅ 老師端：75/75 通過（14.6s）
+✅ 學生端：79/79 通過（25.1s）
+✅ 老師端：76/76 通過（15.7s）
 
-合計：154/154 通過，0 失敗
-總耗時：47.4s
+合計：155/155 通過，0 失敗
+總耗時：113.4s
 ══════════════════════════════════════════════════
 
 報告已儲存至：test-report.txt

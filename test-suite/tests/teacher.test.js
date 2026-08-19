@@ -1,7 +1,21 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v30
+ * 老師端自動化測試 v31
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v31 新增（2026-08-19）：對應「截止日期設定覆蓋問題」修復（saveAllDeadlines()，見
+ * 修復報告_截止日期設定覆蓋問題_2026-08-19.md）。稽核發現該函式原本沒有 merge:true，只要
+ * 這次沒帶到某個欄位（例如只改日期沒重填最少篇數）就會整份覆蓋，把該月既有 minEntries
+ * 悄悄清空回預設值1；反過來只填最少篇數不填日期的月份又會被 `!openRaw && !closeRaw` 整月
+ * 靜默跳過，篇數修改完全沒存進去卻顯示存檔成功。使用者已用 Firebase Console + 網頁手動
+ * 實測全部6個驗證步驟（含既有 minEntries 保留、只改篇數安全merge、從未設定過期限的月份
+ * 明確提示而非靜默略過、正常情境迴歸、全空白迴歸、連動顯示邏輯）確認修復生效，本輪新增
+ * 對應的靜態分析回歸測試：
+ *   T-SEC-53  saveAllDeadlines() 直接讀函式本體，驗證 setDoc() 帶 { merge: true }、有讀取
+ *             既有 deadlines 集合、有 skippedNoDateMonths 追蹤變數、只在既有資料同時具備
+ *             openDate 與 closeDate 時才允許只 merge 寫入 minEntries、對「無法單獨儲存」
+ *             情境有明確 toast 提示文字，並確認原本「完全沒填任何東西的月份整月跳過」的
+ *             `!openRaw && !closeRaw` 判斷式仍然存在（regression check，避免連帶被改掉）。
  *
  * v30 新增（2026-08-17）：對應「entriesFirstCompleteAt」——修正 entriesCompleteAt 的一個
  * 邊界案例（學生先在期限內達標，之後某次編輯刪除一則工作摘要導致篇數掉回未達標，再補寫回
@@ -3045,6 +3059,44 @@ async function runTeacherTests(page, log) {
       throw new Error('isJournalComplete() 不應提到 entriesFirstCompleteAt／entriesCompleteAt，這次修改理當只動 isJournalLate() 本身');
     if (!result.completeCheckedBeforeLate)
       throw new Error('statusSymbolForJournal() 應先呼叫 isJournalComplete() 才呼叫 isJournalLate()，順序被調換的話「篇數不夠時完全不看遲交判斷」這個既有行為會被破壞');
+  });
+
+  await test('T-SEC-53 saveAllDeadlines() 加上 merge:true，且「只填最少篇數不填日期」的月份不再靜默略過（2026-08-19 截止日期設定覆蓋問題修復）', async () => {
+    // 背景：BUG交接_截止日期設定覆蓋問題_2026-08-19.md 發現兩個問題——①setDoc() 原本沒有
+    // merge:true，只要這次沒填某個欄位（例如只改日期沒重填最少篇數），該月既有的 minEntries
+    // 會被整份覆蓋悄悄清空回預設值1，且無任何提示；②只填最少篇數不填日期的月份會被
+    // `!openRaw && !closeRaw` 整月跳過，篇數修改完全沒存進去但畫面卻顯示存檔成功。使用者已
+    // 用 Firebase Console + 網頁手動實測全部6個驗證步驟確認修復生效（2026-08-19，見修復報告
+    // 第三節），這裡補上對應的靜態分析回歸測試，防止未來改動不小心把 merge:true 或
+    // skippedNoDateMonths 邏輯改掉。跟 T-SEC-39（applyBatchMinEntries()）互補，不重複——
+    // 那邊測的是「套用到畫面欄位」，這裡測的是「實際寫入 Firestore 時的覆蓋/略過邏輯」。
+    const result = await page.evaluate(() => {
+      if (typeof saveAllDeadlines !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(saveAllDeadlines.toString());
+      return {
+        skip: false,
+        hasMergeTrue: fnStr.includes('setDoc(') && /\{\s*merge\s*:\s*true\s*\}/.test(fnStr),
+        fetchesExistingDeadlines: /getDocs\s*\(\s*collection\s*\(\s*db\s*,\s*['"]deadlines['"]\s*\)\s*\)/.test(fnStr),
+        tracksSkippedMonths: fnStr.includes('skippedNoDateMonths'),
+        checksExistingDatesBeforeMinOnlyMerge: fnStr.includes('existing.openDate') && fnStr.includes('existing.closeDate') && fnStr.includes('skippedNoDateMonths.push'),
+        hasClearSkipToast: fnStr.includes('無法單獨儲存'),
+        stillHasOldEmptyMonthSkip: /!openRaw\s*&&\s*!closeRaw/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasMergeTrue)
+      throw new Error('saveAllDeadlines() 的 setDoc() 找不到 { merge: true }，可能又回到整份覆蓋，會讓只改日期沒重填最少篇數的月份，既有 minEntries 被悄悄清空回預設值1');
+    if (!result.fetchesExistingDeadlines)
+      throw new Error('saveAllDeadlines() 未讀取既有 deadlines 集合，無法判斷「只填最少篇數不填日期」的月份是否已有既有日期可安全 merge');
+    if (!result.tracksSkippedMonths)
+      throw new Error('saveAllDeadlines() 找不到 skippedNoDateMonths 追蹤變數，「從未設定過期限、只填篇數」的月份可能又變回靜默略過');
+    if (!result.checksExistingDatesBeforeMinOnlyMerge)
+      throw new Error('saveAllDeadlines() 未驗證既有資料是否同時有 openDate 與 closeDate 才允許只 merge 寫入 minEntries，可能誤判殘缺文件為「已有既有期限」');
+    if (!result.hasClearSkipToast)
+      throw new Error('saveAllDeadlines() 對「只填最少篇數但這個月從未設定過日期」的情況，找不到明確提示「無法單獨儲存」的文字，可能又變回靜默忽略');
+    if (!result.stillHasOldEmptyMonthSkip)
+      throw new Error('saveAllDeadlines() 找不到 `!openRaw && !closeRaw` 判斷式，「完全沒填任何東西的月份要整月跳過」這個既有行為可能被意外改掉');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
