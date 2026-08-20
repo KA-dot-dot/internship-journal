@@ -1,7 +1,26 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v33
+ * 學生端自動化測試 v34
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v34 修正（2026-08-21）：修復「少數學生薪資單／工作照片存檔後變成整張黑色」問題（見
+ * 修復報告_薪資單與工作照片壓縮後變黑圖問題_2026-08-21.md）。根本原因：<canvas> 預設全
+ * 透明，img.onload 只保證中繼資料可讀不保證真的完整繪製完成，部分行動裝置瀏覽器記憶體
+ * 不足時 drawImage() 會靜默失敗（不丟錯誤），canvas 維持全透明，輸出 JPEG 時被強制合成
+ * 為純黑。修法：新增共用函式 compressImageFile()（優先用 createImageBitmap()，解碼失敗
+ * 會 reject 而非靜默吃掉）＋ isLikelyBlankCanvas()（黑圖偵測保險網，即使解碼「成功」仍
+ * 額外檢查輸出是否整張近乎全黑），handlePhotoUpload()／compressSalaryPhoto() 皆改呼叫
+ * 這個共用函式，避免兩份各自複製一份的壓縮邏輯繼續各自演化脫鉤。純前端修法，未新增/
+ * 修改任何 Firestore 欄位或 rule.txt。
+ *   S-SEC-47  靜態驗證共用函式存在、compressImageFile() 確實用了 createImageBitmap()
+ *             與 isLikelyBlankCanvas()，且 handlePhotoUpload()／compressSalaryPhoto()
+ *             兩處呼叫端都真的改呼叫共用函式（防止未來重構被誤還原成各自內嵌的舊邏輯，
+ *             也就是這次要修的「兩份需要人工同步的複本」問題本身）；另確認
+ *             handlePhotoUpload() 補上了原本完全沒有的 try/catch。
+ *   S-SEC-48  真的在瀏覽器建立 <canvas>，實際呼叫 isLikelyBlankCanvas() 驗證四種情境：
+ *             從未繪製的預設全透明 canvas（drawImage 靜默失敗的真實狀態）／明確填滿純黑
+ *             皆須偵測為疑似失敗；正常顏色照片／超過閾值的深灰色不應被誤判。是真執行
+ *             不是字串比對，直接驗證這次修復的核心防線本身可靠，不只是「函式有寫」。
  *
  * v33 修正（2026-08-20）：P1 規則新增「月記文件 ID 必須等於
  * {seatNo}-{semester}-{month}」後，這份正式環境 REST 規則測試仍用任意的
@@ -3031,6 +3050,95 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.domElementsExist) throw new Error('刪除確認 Modal 缺少對應的輸入框或提示文字 DOM 元素');
   });
 
+  await test('S-SEC-47 compressImageFile()／isLikelyBlankCanvas() 共用函式存在，且兩處呼叫皆改用共用函式', async () => {
+    // 2026-08-21 新增。修復「少數學生薪資單／工作照片存檔後變成整張黑色」問題（見
+    // 修復報告_薪資單與工作照片壓縮後變黑圖問題_2026-08-21.md）後的回歸保護：
+    // handlePhotoUpload()／compressSalaryPhoto() 原本各自維護一份幾乎一樣的
+    // 「讀取→解碼→縮圖→輸出JPEG」邏輯，正是這次要修的「兩份需要人工同步的複本」問題
+    // 本身。這裡不驗證黑圖 bug 有沒有重現（那需要真的讓瀏覽器 drawImage() 失敗，測試
+    // 環境重現不了），而是釘住「未來重構/還原不會不小心讓兩處退回各自內嵌的舊寫法」，
+    // 避免黑圖漏洞無聲無息地原地重現。
+    const result = await page.evaluate(() => {
+      const hasFns = typeof compressImageFile === 'function' && typeof isLikelyBlankCanvas === 'function';
+      if (!hasFns) return { skip: true };
+
+      const compressFnStr = compressImageFile.toString();
+      const uploadFnStr = (typeof handlePhotoUpload === 'function') ? handlePhotoUpload.toString() : '';
+      const salaryFnStr = (typeof compressSalaryPhoto === 'function') ? compressSalaryPhoto.toString() : '';
+      if (!uploadFnStr || !salaryFnStr) return { skip: true };
+
+      return {
+        skip: false,
+        // createImageBitmap 是優先解碼路徑（修法①），isLikelyBlankCanvas() 是黑圖偵測
+        // 保險網（修法②）——兩者缺一都代表這次修復的核心防線被拿掉了。
+        usesCreateImageBitmap: /createImageBitmap\s*\(/.test(compressFnStr),
+        callsBlankCheck: /isLikelyBlankCanvas\s*\(/.test(compressFnStr),
+        // 兩處呼叫端必須真的改呼叫共用函式，不能各自維持一份內嵌的 img.onload 壓縮流程
+        uploadUsesShared: /compressImageFile\s*\(/.test(uploadFnStr),
+        salaryUsesShared: /compressImageFile\s*\(/.test(salaryFnStr),
+        // handlePhotoUpload() 原本完全沒有錯誤處理，解碼失敗時佔位符會永遠卡在「處理中...」；
+        // 改用 async/await 後必須用 try/catch 接住 compressImageFile() 的 reject
+        uploadHasTryCatch: /try\s*{/.test(uploadFnStr) && /catch\s*\(/.test(uploadFnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.usesCreateImageBitmap) throw new Error('compressImageFile() 未使用 createImageBitmap()（優先解碼路徑）');
+    if (!result.callsBlankCheck) throw new Error('compressImageFile() 未呼叫 isLikelyBlankCanvas()（黑圖偵測保險網）');
+    if (!result.uploadUsesShared) throw new Error('handlePhotoUpload() 未呼叫共用函式 compressImageFile()，可能被還原成各自內嵌的舊壓縮邏輯');
+    if (!result.salaryUsesShared) throw new Error('compressSalaryPhoto() 未呼叫共用函式 compressImageFile()，可能被還原成各自內嵌的舊壓縮邏輯');
+    if (!result.uploadHasTryCatch) throw new Error('handlePhotoUpload() 缺少 try/catch，圖片處理失敗時佔位符可能永遠卡在「處理中...」');
+  });
+
+  await test('S-SEC-48 isLikelyBlankCanvas() 實際偵測全黑／正常顏色 canvas 結果正確', async () => {
+    // 2026-08-21 新增。不是字串比對，是真的在瀏覽器建立 <canvas> 並實際呼叫函式驗證回傳
+    // 值，直接驗證這次修復的核心防線（黑圖偵測閾值）本身可靠，不只是「函式有寫」，比照
+    // 專案一貫的「Actual execution over reasoning」標準。
+    const result = await page.evaluate(() => {
+      if (typeof isLikelyBlankCanvas !== 'function') return { skip: true };
+
+      function makeCanvasCtx(fillStyle) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 50;
+        canvas.height = 50;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = fillStyle;
+        ctx.fillRect(0, 0, 50, 50);
+        return ctx;
+      }
+
+      // 情境一：從未被畫過、維持預設全透明（RGBA全0）——這正是 drawImage() 靜默失敗時
+      // canvas 的真實狀態，不是額外模擬出來的極端案例。
+      const blankCanvas = document.createElement('canvas');
+      blankCanvas.width = 50; blankCanvas.height = 50;
+      const blankCtx = blankCanvas.getContext('2d');
+
+      // 情境二：明確填滿純黑（不透明）——內容本身仍是全黑，理應同樣被判定為疑似失敗。
+      const blackCtx = makeCanvasCtx('rgb(0,0,0)');
+
+      // 情境三：正常顏色照片，不應誤判為失敗。
+      const redCtx = makeCanvasCtx('rgb(200,80,40)');
+
+      // 情境四：邊界案例——超過閾值(4)的深灰色，不應被誤判（避免閾值被改鬆或改嚴都測不出來）。
+      const nearBlackCtx = makeCanvasCtx('rgb(6,6,6)');
+
+      return {
+        skip: false,
+        blankDetected: isLikelyBlankCanvas(blankCtx, 50, 50),
+        solidBlackDetected: isLikelyBlankCanvas(blackCtx, 50, 50),
+        normalColorNotFlagged: !isLikelyBlankCanvas(redCtx, 50, 50),
+        nearBlackNotFlagged: !isLikelyBlankCanvas(nearBlackCtx, 50, 50),
+      };
+    });
+    if (result.skip) return;
+    if (!result.blankDetected)
+      throw new Error('isLikelyBlankCanvas() 沒有偵測到「從未繪製、預設全透明」的 canvas（drawImage 靜默失敗的真實狀態）');
+    if (!result.solidBlackDetected)
+      throw new Error('isLikelyBlankCanvas() 沒有偵測到明確填滿純黑的 canvas');
+    if (!result.normalColorNotFlagged)
+      throw new Error('isLikelyBlankCanvas() 誤判正常顏色照片為黑圖失敗');
+    if (!result.nearBlackNotFlagged)
+      throw new Error('isLikelyBlankCanvas() 誤判超過閾值的深灰色照片為黑圖失敗（閾值判斷可能被改鬆或改嚴）');
+  });
 
   return results;
 }

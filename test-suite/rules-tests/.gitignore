@@ -3,3 +3,4 @@ firestore.rules
 firestore-debug.log
 ui-debug.log
 .firebase/
+test-report.txt

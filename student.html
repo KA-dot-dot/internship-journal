@@ -3408,43 +3408,137 @@ function bindWriteProgressFloat() {
   _writeProgressFloatBound = true;
 }
 
+// 共用圖片壓縮函式：handlePhotoUpload()（工作照片）與 compressSalaryPhoto()
+// （薪資單）共用同一套「讀取→解碼→縮圖→輸出JPEG」邏輯，避免兩份各自演化又脫鉤。
+//
+// 2026-08-21 新增，修復「少數學生薪資單／工作照片存檔後變成整張黑色」問題：
+// 原本兩處各自用 <img>.onload 判斷「圖片已可用」就直接 drawImage()，但 onload
+// 只保證瀏覽器認為中繼資料（寬高）可讀，不保證當下真的完整解碼繪製完成——已知
+// 在部分行動裝置瀏覽器（尤其 iOS Safari/WebKit）對高解析度來源照片、裝置當下
+// 可用記憶體不足時，drawImage() 會靜默失敗、canvas 維持預設全透明，且不丟出
+// 任何錯誤；canvas 匯出 JPEG 時（JPEG 不支援透明）會把全透明像素強制轉成純黑，
+// 於是存出一張「全黑」的照片，前端完全不知道發生過失敗。
+//
+// 修法①：改用 createImageBitmap()（優先）——其 Promise 只有在真正完整解碼
+// 成功時才會 resolve，解碼失敗會 reject 而不是靜默吃掉，把原本無聲的失敗轉成
+// 可以攔截、可以提示使用者重試的錯誤。不支援 createImageBitmap() 的瀏覽器
+// （理論上目前應已極少）自動退回原本 <img> 路徑。
+// 修法②（保險網）：即使解碼過程完全沒有丟出任何錯誤，仍在壓縮完成後額外檢查
+// 輸出畫面是否「整張近乎全黑」（isLikelyBlankCanvas()），偵測到就視同失敗、
+// reject——避免未來換了新機型、踩到目前還不知道的其他極限情境時，又是靜默
+// 存入一張黑圖而沒有任何人發現。
+// ⚠️ 已知殘留風險：修法①大幅降低但無法在理論上 100% 保證消除「decode 成功但
+// 內容仍不完整」的所有裝置極限情境，這正是為什麼修法②要獨立存在、不能只做①。
+async function compressImageFile(file, maxW, maxH, quality = 0.75) {
+  let source = null;      // 實際拿去 drawImage() 的來源（ImageBitmap 或 <img>）
+  let naturalW, naturalH;
+  let usedBitmap = false;
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      // 2026-08-21 補充：明確指定 imageOrientation:'from-image'，不倚賴瀏覽器
+      // 預設值——createImageBitmap() 的 EXIF 方向處理預設值在規格演進過程中
+      // 曾經不一致（早期草案預設忽略 EXIF，後來才改成跟 <img> 一致的
+      // 'from-image'），若不明確指定，理論上在少數舊版瀏覽器上可能讓直式拍攝
+      // 的照片解碼後方向跑掉，變成這次修復意外造成的新問題。明確指定後，行為
+      // 保證跟原本 <img> 路徑（本來就會自動套用 EXIF 方向）一致，不受瀏覽器
+      // 版本差異影響。
+      source = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      naturalW = source.width;
+      naturalH = source.height;
+      usedBitmap = true;
+    } catch (err) {
+      // createImageBitmap 解碼失敗，退回 <img> 路徑再試一次
+      source = null;
+    }
+  }
+
+  if (!source) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('圖片讀取失敗'));
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    });
+    source = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('圖片格式無法讀取'));
+      img.onload = () => resolve(img);
+      img.src = dataUrl;
+    });
+    naturalW = source.naturalWidth || source.width;
+    naturalH = source.naturalHeight || source.height;
+  }
+
+  let w = naturalW, h = naturalH;
+  if (w > maxW) { h = h * maxW / w; w = maxW; }
+  if (h > maxH) { w = w * maxH / h; h = maxH; }
+  w = Math.max(1, Math.round(w));
+  h = Math.max(1, Math.round(h));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, w, h);
+
+  if (usedBitmap && source.close) source.close(); // 盡快釋放 ImageBitmap 記憶體
+
+  if (isLikelyBlankCanvas(ctx, w, h)) {
+    throw new Error('圖片處理失敗（可能是裝置記憶體不足），請重新選擇這張照片或改用相機直接拍攝');
+  }
+
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+// 偵測 canvas 是否「整張近乎全黑」——drawImage() 靜默失敗時 canvas 會維持預設
+// 的全透明（RGBA全0），輸出成JPEG後變成純黑。這裡抽樣約400個點檢查是否全部
+// 都極接近黑色。閾值刻意抓緊（<=4），真實照片（含刻意拍攝的暗色物體）幾乎不
+// 可能所有抽樣點都完全一致地趨近 (0,0,0)，避免誤判正常的暗色照片。
+function isLikelyBlankCanvas(ctx, w, h) {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const THRESHOLD = 4;
+  const totalPixels = w * h;
+  const step = Math.max(1, Math.floor(totalPixels / 400));
+  for (let p = 0; p < totalPixels; p += step) {
+    const idx = p * 4;
+    if (data[idx] > THRESHOLD || data[idx + 1] > THRESHOLD || data[idx + 2] > THRESHOLD) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function handlePhotoUpload(event, id) {
   const files = Array.from(event.target.files);
   const container = document.getElementById(`${id}-photos`);
-  files.forEach(file => {
-    // 壓縮中佔位符：在 FileReader 讀取 + canvas 壓縮期間顯示 spinner
+  files.forEach(async file => {
+    // 壓縮中佔位符：在讀取 + canvas 壓縮期間顯示 spinner
     const placeholder = document.createElement('div');
     placeholder.className = 'photo-compress-placeholder';
     placeholder.innerHTML = '<div class="photo-compress-spinner"></div><div class="photo-compress-label">處理中...</div>';
     container.appendChild(placeholder);
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const img = new Image();
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        const maxW = 800, maxH = 600;
-        let w = img.width, h = img.height;
-        if (w > maxW) { h = h * maxW / w; w = maxW; }
-        if (h > maxH) { w = w * maxH / h; h = maxH; }
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        const previewSrc = canvas.toDataURL('image/jpeg', 0.75);
-        const wrap = document.createElement('div');
-        wrap.className = 'photo-thumb-wrap';
-        wrap.innerHTML = `<img src="${previewSrc}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button><div class="photo-pending-upload" style="position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,0.58);color:#fff;border-radius:6px;padding:2px 5px;font-size:10px">儲存時上傳</div>`;
-        wrap.style.position = 'relative';
-        // 移除佔位符，插入縮圖
-        placeholder.replaceWith(wrap);
-        const imgEl = wrap.querySelector('img');
-        imgEl.dataset.pendingUpload = '1';
-        imgEl.dataset.localDataUrl = previewSrc;
-        imgEl.dataset.base64 = '';
-        updateWriteProgress();
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    // 2026-08-21 修復：改呼叫共用函式 compressImageFile()（見上方新增區塊），
+    // 修復少數裝置壓縮後整張變黑的問題；並補上原本完全沒有的錯誤處理——
+    // 原本若解碼失敗，佔位符會永遠卡在「處理中...」不會消失也不會提示。
+    try {
+      const previewSrc = await compressImageFile(file, 800, 600, 0.75);
+      const wrap = document.createElement('div');
+      wrap.className = 'photo-thumb-wrap';
+      wrap.innerHTML = `<img src="${previewSrc}" class="photo-thumb" onclick="openPhotoModal(this.src)"><button class="photo-remove" onclick="this.parentElement.remove(); scheduleWriteDraftSave(); updateWriteProgress()">×</button><div class="photo-pending-upload" style="position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,0.58);color:#fff;border-radius:6px;padding:2px 5px;font-size:10px">儲存時上傳</div>`;
+      wrap.style.position = 'relative';
+      placeholder.replaceWith(wrap);
+      const imgEl = wrap.querySelector('img');
+      imgEl.dataset.pendingUpload = '1';
+      imgEl.dataset.localDataUrl = previewSrc;
+      imgEl.dataset.base64 = '';
+      updateWriteProgress();
+    } catch (err) {
+      console.error('工作照片處理失敗', err);
+      placeholder.remove();
+      toast(err?.message || '這張照片處理失敗，請重新選擇或改用相機直接拍攝', 'error');
+    }
   });
   event.target.value = '';
 }
@@ -3491,36 +3585,14 @@ function removeSalaryPhoto(button) {
 }
 
 function compressSalaryPhoto(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('圖片讀取失敗'));
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('圖片格式無法讀取'));
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        // 2026-08-05 補修：薪資單截圖多為手機直式長圖（寬高比常接近 0.46，類似
-        // 1080x2340 螢幕截圖），若沿用一般工作照片的 maxH=600，寬度會被高度這條
-        // 限制壓到只剩約277px，數字/表格文字嚴重模糊。改成 maxH=1200 後，同一張
-        // 截圖輸出約 554x1200（寬度x2、總像素x4），文字清晰度明顯提升；儲存空間
-        // 仍遠低於 SALARY_PHOTO_TOTAL_LIMIT（單張約23KB提升至4倍仍遠低於總額度
-        // 650000字元，5張仍綽綽有餘）。刻意只調整這支薪資單專用的壓縮函式，不動
-        // handlePhotoUpload()（一般工作照片，走 Cloudinary，maxW=800/maxH=600
-        // 維持不變）——兩者用途與儲存方式不同，薪資單需要保留小字清晰度、工作照片
-        // 是一般拍照內容，不需要同步放寬。
-        const maxW = 800, maxH = 1200;
-        let w = img.width, h = img.height;
-        if (w > maxW) { h = h * maxW / w; w = maxW; }
-        if (h > maxH) { w = w * maxH / h; h = maxH; }
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.75));
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
+  // 2026-08-05 補修（沿用既有理由）：薪資單截圖多為手機直式長圖（寬高比常
+  // 接近 0.46，類似 1080x2340 螢幕截圖），若沿用一般工作照片的 maxH=600，
+  // 寬度會被高度這條限制壓到只剩約277px，數字/表格文字嚴重模糊。maxH=1200
+  // 讓同一張截圖輸出約 554x1200，文字清晰度明顯提升，儲存空間仍遠低於
+  // SALARY_PHOTO_TOTAL_LIMIT。
+  // 2026-08-21 修復：實作改為呼叫共用函式 compressImageFile()（見上方新增
+  // 區塊），修復少數裝置壓縮後整張變黑的問題，maxW/maxH 沿用不變。
+  return compressImageFile(file, 800, 1200, 0.75);
 }
 
 async function handleSalaryPhoto(event) {
@@ -3563,7 +3635,9 @@ async function handleSalaryPhoto(event) {
     if (skippedForSize) toast('部分薪資單照片壓縮後仍超過總大小限制，請改拍得更近或移除其他照片', 'error');
   } catch (e) {
     console.error('薪資單照片處理失敗', e);
-    toast('薪資單照片處理失敗，請改用一般 JPG/PNG 圖片後重試', 'error');
+    // 2026-08-21 修復：改用 e.message（compressImageFile() 現在會給出具體原因，
+    // 例如記憶體不足導致的黑圖偵測），找不到訊息時才退回原本的通用提示文字。
+    toast(e?.message || '薪資單照片處理失敗，請改用一般 JPG/PNG 圖片後重試', 'error');
   } finally {
     input.disabled = false;
   }
