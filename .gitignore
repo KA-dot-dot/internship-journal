@@ -17,3 +17,4 @@ test-suite/session-teacher.json
 notify-service/firebase-debug.log
 notify-service/firestore-debug.log
 notify-service/node_modules/
+test-report.txt
