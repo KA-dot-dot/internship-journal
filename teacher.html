@@ -1769,26 +1769,100 @@ function cloudinaryThumb(url, size = 64) {
 }
 
 // 上傳前壓縮：長邊限 maxDim px，JPEG 0.85
+// 2026-08-21 修復：跟 student.html 同一天「薪資單／工作照片壓縮後變黑圖」問題同一個
+// 根本原因（見 修復報告_薪資單與工作照片壓縮後變黑圖問題_2026-08-21.md）——這裡是老師
+// 端上傳學生大頭照（單筆 handleStudentPhotoSelect()／批次 batchImportPhotos()）用的
+// 獨立一份壓縮函式，跟 student.html 的 compressImageFile() 同名但完全獨立（兩個 html
+// 各自內嵌 <script>，互不 import），這裡一併套用同一套修法：<canvas> 預設全透明，
+// <img>.onload 只保證中繼資料（寬高）可讀，不保證 drawImage() 真的把完整像素內容畫上
+// 去——部分行動裝置瀏覽器（尤其 iOS Safari/WebKit）記憶體不足時 drawImage() 會靜默
+// 失敗、且不丟出任何錯誤，輸出 JPEG 時全透明像素被強制合成純黑；原本這裡兩處呼叫端
+// 的 try/catch 完全攔截不到，因為這個函式從頭到尾沒有任何一條路徑會 reject。
+// 修法①：優先改用 createImageBitmap()（解碼失敗才退回 <img> 路徑），明確指定
+// imageOrientation:'from-image' 維持跟原本 <img> 路徑一致的 EXIF 方向處理。
+// 修法②（保險網）：drawImage() 完成後用 isLikelyBlankCanvas() 額外檢查輸出是否整張
+// 近乎全黑（定義同 student.html 版本，各自獨立一份，理由同上）。
+// ⚠️ 跟 student.html 刻意選擇不同的失敗處理方式：這裡輸出的 Blob 是直接上傳
+// Cloudinary（不像 student.html 的 salaryPhotos 陣列要內嵌進 Firestore、受
+// SALARY_PHOTO_TOTAL_LIMIT=650,000 字元總量上限限制），Cloudinary 對原始解析度檔案
+// 本來就能正常收，畫面顯示也一律另外經 cloudinaryThumb() 動態轉檔縮圖，所以偵測到
+// 疑似黑圖時**不 reject**，而是沿用這個函式從最初設計就有的「處理失敗就退回原始檔案」
+// 既有哲學——直接跳過壓縮、改上傳原圖，讓上傳照常成功（尤其 batchImportPhotos() 一次
+// 可能處理數十位學生，沒必要讓其中一張因為裝置端 canvas 問題就整批多出不必要的失敗
+// 紀錄），且原圖保證不可能是黑的（沒有經過任何 canvas 繪製）。
 async function compressImageFile(file, maxDim = 800) {
+  let source = null;
+  let naturalW, naturalH;
+  let usedBitmap = false;
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      source = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      naturalW = source.width;
+      naturalH = source.height;
+      usedBitmap = true;
+    } catch (err) {
+      source = null; // 解碼失敗，退回 <img> 路徑再試一次
+    }
+  }
+
+  if (!source) {
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('圖片讀取失敗'));
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(file);
+      });
+      source = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('圖片格式無法讀取'));
+        img.onload = () => resolve(img);
+        img.src = dataUrl;
+      });
+      naturalW = source.naturalWidth || source.width;
+      naturalH = source.naturalHeight || source.height;
+    } catch (err) {
+      return file; // 兩條解碼路徑皆失敗，維持既有設計：退回原始檔案，不擋上傳
+    }
+  }
+
+  const scale = Math.min(1, maxDim / Math.max(naturalW, naturalH));
+  const w = Math.round(naturalW * scale);
+  const h = Math.round(naturalH * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, w, h);
+
+  if (usedBitmap && source.close) source.close(); // 盡快釋放 ImageBitmap 記憶體
+
+  if (isLikelyBlankCanvas(ctx, w, h)) {
+    return file; // 疑似黑圖：不上傳壓縮結果，退回原始檔案（保證不可能是黑的）
+  }
+
   return new Promise(resolve => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85);
-      };
-      img.onerror = () => resolve(file);
-      img.src = e.target.result;
-    };
-    reader.onerror = () => resolve(file);
-    reader.readAsDataURL(file);
+    canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85);
   });
+}
+
+// 偵測 canvas 是否「整張近乎全黑」——drawImage() 靜默失敗時 canvas 會維持預設的全透明
+// （RGBA全0），輸出成JPEG後變成純黑。抽樣約400個點檢查是否全部都極接近黑色，閾值刻意
+// 抓緊（<=4），真實照片（含刻意拍攝的暗色物體）幾乎不可能所有抽樣點都完全一致地趨近
+// (0,0,0)，避免誤判正常的暗色照片。跟 student.html 同名函式邏輯完全相同（各自獨立一份，
+// 理由見上方 compressImageFile() 註解）。
+function isLikelyBlankCanvas(ctx, w, h) {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const THRESHOLD = 4;
+  const totalPixels = w * h;
+  const step = Math.max(1, Math.floor(totalPixels / 400));
+  for (let p = 0; p < totalPixels; p += step) {
+    const idx = p * 4;
+    if (data[idx] > THRESHOLD || data[idx + 1] > THRESHOLD || data[idx + 2] > THRESHOLD) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function semesterLabel(semKey) {
