@@ -180,6 +180,10 @@ const RISK_TARGETS = [
   // 新增功能當下就同步補上，不是事後稽核才發現的模式。
   { name: 'function validEntriesFirstCompleteAt()', regex: /function\s+validEntriesFirstCompleteAt\s*\(/ },
   { name: 'function keepsEntriesFirstCompleteAtOnceSet()', regex: /function\s+keepsEntriesFirstCompleteAtOnceSet\s*\(/ },
+  // 2026-08-20 新增：這個函式把月記文件 ID 與資料欄位的 seatNo/semester/month 綁定；
+  // 若被弱化，技術使用者就能用不一致的欄位污染老師端按欄位分組的統計，因此和其他
+  // 頂層規則輔助函式一樣必須獨立納入高風險變更偵測。
+  { name: 'function hasMatchingJournalId()', regex: /function\s+hasMatchingJournalId\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },

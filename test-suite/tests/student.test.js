@@ -1,7 +1,22 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v31
+ * 學生端自動化測試 v33
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v33 修正（2026-08-20）：P1 規則新增「月記文件 ID 必須等於
+ * {seatNo}-{semester}-{month}」後，這份正式環境 REST 規則測試仍用任意的
+ * test-create-{timestamp} 文件 ID，加上固定 semester:'test'/month:0，因此正常 CREATE
+ * 被正確拒絕，連帶讓所有需要先建立測試月記的 UPDATE/DELETE 測項失敗。新增
+ * _makeJournalTestIdentity()，讓每一筆合成資料同時產生唯一且合法的 ID／semester／month；
+ * 偽造 seatNo 的測項也刻意讓 ID 與偽造資料一致，確保它仍是在驗證 binding 座號限制本身。
+ *
+ * v32 修正（2026-08-20）：學生首頁的「已繳交」累計原本直接計所有月記文件，篇數未達
+ * minEntries 的草稿也會被誤算為已繳；本月狀態則只區分達標／未達標，達標後才補交的學生會
+ * 看見綠色✅，與老師端▲遲繳不一致。新增 getCompletedJournals() 統一累計判斷，並以
+ * isStudentJournalLate() 對齊 teacher.html 的優先時間欄位與日期比較邏輯；歷史清單也會
+ * 標記▲遲繳，不再把所有已達標月記一律渲染成✅。
+ *   S-SEC-46  直接餵入「準時達標／篇數不足／達標但遲繳」三份合成月記，驗證累計只保留
+ *             達標兩份、遲繳判斷與明細標記正確，且首頁確實使用共用結果。
  *
  * v31 修正（2026-08-18）：entriesFirstCompleteAt 第三輪修法——第二輪（v30）只在 rule.txt
  * 註解裡記錄「count 缺席的過渡期資料」這個殘留風險，沒有實際修掉；使用者確認這是真實
@@ -656,28 +671,41 @@ async function runStudentTests(page, browserContext, log) {
       return _fsSeatNo;
     };
 
-    const _makeJournalDoc = (uid, email, seatNo) => ({
-      fields: {
-        ownerUid:             { stringValue: uid },
-        ownerEmail:           { stringValue: email },
-        storagePath:          { stringValue: 'user' },
-        semester:             { stringValue: 'test' },
-        month:                { integerValue: 0 },
-        seatNo:               { stringValue: seatNo },
-        teacherComment:       { nullValue: null },
-        teacherReviewed:      { booleanValue: false },
-        reviewedAt:           { nullValue: null },
-        teacherCommentUnread: { booleanValue: false },
-      }
-    });
+    // P1（2026-08-20）後，正式規則會驗證文件 ID 與資料欄位完全一致。測試 ID 不能再
+    // 只用任意字串；由同一個 identity 供應 docId／semester／month，避免未來有人只改其中
+    // 一邊又讓「正常 CREATE」測試因測試資料不合法而產生誤導性的 403。
+    const _makeJournalTestIdentity = (seatNo, testName) => {
+      const semester = `test-${testName}-${Date.now()}`;
+      const month = 1;
+      return { semester, month, docId: `${seatNo}-${semester}-${month}` };
+    };
+
+    const _makeJournalDoc = (uid, email, seatNo, identity) => {
+      if (!identity) throw new Error('Rules 測試缺少月記 identity（需同步提供合法 docId/semester/month）');
+      return {
+        fields: {
+          ownerUid:             { stringValue: uid },
+          ownerEmail:           { stringValue: email },
+          storagePath:          { stringValue: 'user' },
+          semester:             { stringValue: identity.semester },
+          month:                { integerValue: identity.month },
+          seatNo:               { stringValue: seatNo },
+          teacherComment:       { nullValue: null },
+          teacherReviewed:      { booleanValue: false },
+          reviewedAt:           { nullValue: null },
+          teacherCommentUnread: { booleanValue: false },
+        }
+      };
+    };
 
     await test('S-WRITE-REAL Firestore CREATE 規則驗證（學生身份 REST 直接寫入）', async () => {
       requireStudentSession();
       await _captureFsCtx(); // 失敗會 throw，不再靜默通過
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-create-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'create');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (r.status === 200) {
         await _fsRequest('DELETE', path + '/' + docId);
       }
@@ -685,8 +713,8 @@ async function runStudentTests(page, browserContext, log) {
       if (r.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1），無法驗證 rule，請確認網路連線');
       if (r.status === 403) throw new Error(
         'journals CREATE 被拒（403）：' +
-        'CREATE rule 可能仍用 !keys().hasAny() 而非 .get()==null，' +
-        'saveJournal() 固定帶 teacher 欄位 null/false 時會被擋。'
+        '正常測試資料已使用合法的 {seatNo}-{semester}-{month} 文件 ID，' +
+        '請確認正式 rule.txt 部署版本與學生身份／studentBindings 設定。'
       );
       if (r.status >= 400) throw new Error('journals CREATE 異常（HTTP ' + r.status + '）');
     });
@@ -713,9 +741,10 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-update-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'update');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo);
+      const doc = _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity);
       const cr = await _fsRequest('POST', path + '?documentId=' + docId, doc);
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），可能是 rule 問題導致無法建立測試文件，請先確認 S-WRITE-REAL');
@@ -732,21 +761,14 @@ async function runStudentTests(page, browserContext, log) {
     await test('S-RULES-03 journals CREATE 安全性：teacherComment 偽造應被拒（403）', async () => {
       requireStudentSession();
       await _captureFsCtx();
-      const docId = 'test-fake-teacher-' + Date.now();
-      const path = '/users/' + _fsUser.uid + '/journals';
       const seatNo = await _getTestSeatNo();
+      const identity = _makeJournalTestIdentity(seatNo, 'fake-teacher');
+      const { docId } = identity;
+      const path = '/users/' + _fsUser.uid + '/journals';
       const fakeDoc = {
         fields: {
-          ownerUid:        { stringValue: _fsUser.uid },
-          ownerEmail:      { stringValue: _fsUser.email },
-          storagePath:     { stringValue: 'user' },
-          semester:        { stringValue: 'test' },
-          month:           { integerValue: 0 },
-          seatNo:          { stringValue: seatNo },
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity).fields,
           teacherComment:  { stringValue: 'FAKE TEACHER REVIEW' },
-          teacherReviewed: { booleanValue: false },
-          reviewedAt:      { nullValue: null },
-          teacherCommentUnread: { booleanValue: false },
         }
       };
       const r = await _fsRequest('POST', path + '?documentId=' + docId, fakeDoc);
@@ -767,14 +789,15 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-fake-review-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'fake-review');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
         fields: {
-          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo).fields,
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity).fields,
           teacherReviewed: { booleanValue: true },
         }
       };
@@ -791,9 +814,10 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-delete-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'delete');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const dr = await _fsRequest('DELETE', path + '/' + docId);
@@ -813,9 +837,10 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-reply-lock-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'reply-lock');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
@@ -847,9 +872,10 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-reply-empty-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'reply-empty');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const replyUpdate = {
@@ -875,9 +901,10 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-reply-badtype-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'reply-badtype');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const replyUpdate = {
@@ -906,9 +933,10 @@ async function runStudentTests(page, browserContext, log) {
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
       const forgedSeatNo = seatNo + '_FORGED';
-      const docId = 'test-seatno-forge-' + Date.now();
+      const identity = _makeJournalTestIdentity(forgedSeatNo, 'seatno-forge');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, forgedSeatNo));
+      const r = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, forgedSeatNo, identity));
       if (r.status === 200) {
         await _fsRequest('DELETE', path + '/' + docId);
         throw new Error('journals CREATE 安全漏洞：偽造 seatNo 未被拒絕（HTTP 200）！');
@@ -923,14 +951,15 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-seatno-change-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'seatno-change');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
       const fakeUpdate = {
         fields: {
-          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo + '_CHANGED').fields,
+          ..._makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo + '_CHANGED', identity).fields,
         }
       };
       const ur = await _fsRequest('PATCH', path + '/' + docId, fakeUpdate);
@@ -972,11 +1001,12 @@ async function runStudentTests(page, browserContext, log) {
       requireStudentSession();
       await _captureFsCtx();
       const seatNo = await _getTestSeatNo();
-      const docId = 'test-badge-forge-' + Date.now();
+      const identity = _makeJournalTestIdentity(seatNo, 'badge-forge');
+      const { docId } = identity;
       const path = '/users/' + _fsUser.uid + '/journals';
 
       // 先建立一筆正常月記（teacherCommentUnread:false, teacherCommentUpdated:false）
-      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo));
+      const cr = await _fsRequest('POST', path + '?documentId=' + docId, _makeJournalDoc(_fsUser.uid, _fsUser.email, seatNo, identity));
       if (cr.status === -1) throw new Error('Firestore REST 請求網路失敗（status -1）');
       if (cr.status === 403) throw new Error('前置 CREATE 被拒（403），請先確認 S-WRITE-REAL');
 
@@ -2417,6 +2447,47 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('loadStudentDashboard() 找不到 badge-incomplete，篇數不足時可能沒有正確顯示「未完成」狀態');
     if (!result.passesMapToOverdue)
       throw new Error('loadStudentDashboard() 呼叫 getOverdueMonths() 時未傳入共用的 deadlineDataMap，可能重複查詢 Firestore');
+  });
+
+  await test('S-SEC-46 學生首頁已繳累計排除篇數不足月記，並正確標示遲繳', async () => {
+    const result = await page.evaluate(() => {
+      if (typeof getCompletedJournals !== 'function' || typeof isStudentJournalLate !== 'function' || typeof renderSubmittedMonthsDetail !== 'function') {
+        return { skip: true };
+      }
+
+      const deadlineDataMap = {
+        '115-1-7': { minEntries: 2, closeDate: '2026-07-31' },
+        '115-1-8': { minEntries: 2, closeDate: '2026-08-31' },
+        '115-1-9': { minEntries: 2, closeDate: '2026-09-30' },
+      };
+      const onTime = { semester: '115-1', month: 7, entries: [{}, {}], entriesFirstCompleteAt: '2026-07-31T20:00:00' };
+      const incomplete = { semester: '115-1', month: 8, entries: [{}], entriesFirstCompleteAt: null };
+      const late = { semester: '115-1', month: 9, entries: [{}, {}], entriesFirstCompleteAt: '2026-10-01T09:00:00' };
+      const completed = getCompletedJournals([onTime, incomplete, late], deadlineDataMap);
+      const detailHtml = renderSubmittedMonthsDetail(completed, deadlineDataMap);
+      const dashboardCode = loadStudentDashboard.toString();
+
+      return {
+        skip: false,
+        onlyCompletedCounted: completed.length === 2 && !completed.includes(incomplete),
+        onTimeIsNotLate: !isStudentJournalLate(onTime, deadlineDataMap['115-1-7']),
+        lateIsLate: isStudentJournalLate(late, deadlineDataMap['115-1-9']),
+        detailMarksLate: detailHtml.includes('▲ 遲繳') && detailHtml.includes(semMonthToLabel('115-1', 9)),
+        dashboardUsesCompleted: /getCompletedJournals\s*\(\s*journals\s*,\s*deadlineDataMap\s*\)/.test(dashboardCode)
+          && /s-submitted-count[\s\S]{0,180}completedJournals\.length/.test(dashboardCode),
+        dashboardUsesLateBadge: /isStudentJournalLate\s*\(\s*currentJournal/.test(dashboardCode),
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.onlyCompletedCounted)
+      throw new Error('已繳交累計仍包含篇數不足的月記');
+    if (!result.onTimeIsNotLate || !result.lateIsLate)
+      throw new Error('學生端遲交判斷沒有和截止日正確比對');
+    if (!result.detailMarksLate)
+      throw new Error('已繳交明細沒有標示達標但遲繳的月記');
+    if (!result.dashboardUsesCompleted || !result.dashboardUsesLateBadge)
+      throw new Error('loadStudentDashboard() 未使用已繳交共用判斷或遲繳徽章邏輯');
   });
 
   await test('S-SEC-38 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門', async () => {
