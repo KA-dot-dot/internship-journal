@@ -167,6 +167,30 @@ service cloud.firestore {
       return request.resource.data.get('salaryPhotos', []) is list
         && request.resource.data.get('salaryPhotos', []).size() <= 5;
     }
+    // 2026-08-20 補修：月記的文件 ID 是 student.html saveJournal() 唯一的定位鍵，格式為
+    // {seatNo}-{semester}-{month}。老師端統計卻讀資料欄位的 semester/month 分組；若只在
+    // 前端組 ID、規則沒有同步驗證，技術使用者可直接呼叫 Firestore API，讓文件 ID 與欄位
+    // 不一致，進而把同一份月記算進錯誤月份或學期。月份逐一比對而非使用 string(month)，是
+    // 為了不依賴 Rules 語言的數字轉字串轉型，並同時把 month 限定為實際月份 1~12。
+    function hasMatchingJournalId(journalId) {
+      return request.resource.data.seatNo is string
+        && request.resource.data.semester is string
+        && request.resource.data.month is int
+        && (
+          (request.resource.data.month == 1 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-1')
+          || (request.resource.data.month == 2 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-2')
+          || (request.resource.data.month == 3 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-3')
+          || (request.resource.data.month == 4 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-4')
+          || (request.resource.data.month == 5 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-5')
+          || (request.resource.data.month == 6 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-6')
+          || (request.resource.data.month == 7 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-7')
+          || (request.resource.data.month == 8 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-8')
+          || (request.resource.data.month == 9 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-9')
+          || (request.resource.data.month == 10 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-10')
+          || (request.resource.data.month == 11 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-11')
+          || (request.resource.data.month == 12 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-12')
+        );
+    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -240,6 +264,7 @@ service cloud.firestore {
             // 2026-06-27 補修：seatNo 必須等於該學生在 studentBindings 裡記錄的座號，
             // 防止偽造 seatNo 把月記算到別的座號名下（污染老師端繳交/審閱/薪資統計）
             && request.resource.data.seatNo == get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo
+            && hasMatchingJournalId(journalId)
             // 學生不得在建立時寫入老師評語欄位（值必須為初始空值）
             && request.resource.data.get('teacherComment', null) == null
             && request.resource.data.get('teacherReviewed', false) == false
@@ -295,6 +320,7 @@ service cloud.firestore {
             // 2026-06-27 補修：一般編輯不可變更 seatNo（建立時已驗證過，編輯時維持不變即可，
             // 不重新查 studentBindings——避免老師重新分配座號這種正常操作意外鎖死舊月記的編輯權）
             && request.resource.data.seatNo == resource.data.seatNo
+            && hasMatchingJournalId(journalId)
             && request.resource.data.get('teacherComment', null) == null
             && request.resource.data.get('teacherReviewed', false) == false
             && request.resource.data.get('reviewedAt', null) == null

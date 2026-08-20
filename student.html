@@ -1542,10 +1542,14 @@ function toggleStatDetail(key) {
   syncStatCardHeights();
 }
 
-function renderSubmittedMonthsDetail(journals) {
+function renderSubmittedMonthsDetail(journals, deadlineDataMap) {
   if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
   const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
-  return sorted.map(j => `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">✅ ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`).join('');
+  return sorted.map(j => {
+    const deadlineDoc = deadlineDataMap[`${j.semester}-${j.month}`];
+    const status = isStudentJournalLate(j, deadlineDoc) ? '▲ 遲繳' : '✅';
+    return `<div class="stat-detail-row clickable" onclick="goToJournalCard(${jsArg(j.semester)},${Number(j.month)})" title="點擊跳到此月記">${status} ${escapeHtml(semMonthToLabel(j.semester, j.month))}</div>`;
+  }).join('');
 }
 
 // ── 評語狀態 badge 共用判斷（紅/橘/綠/藍 4 種狀態，與 teacher.html 對稱維護）──
@@ -1596,6 +1600,22 @@ function renderTeacherStatusDetail(list) {
 function resolveMinEntries(deadlineDoc) {
   const v = deadlineDoc && deadlineDoc.minEntries;
   return (Number.isInteger(v) && v >= 1) ? v : 1;
+}
+
+// 月記達標後仍須和老師端採用同一個遲交定義：優先取第一次達標時間，舊資料才退回
+// entriesCompleteAt／submittedAt。只比較日期是既有 teacher.html isJournalLate() 的做法，
+// 兩端保持一致，避免學生自己看到「已繳」但老師端顯示「遲繳」。
+function isStudentJournalLate(journal, deadlineDoc) {
+  const closeDate = deadlineDoc?.closeDate || '';
+  const referenceDate = (journal?.entriesFirstCompleteAt || journal?.entriesCompleteAt || journal?.submittedAt || '').slice(0, 10);
+  return !!(closeDate && referenceDate && referenceDate > closeDate);
+}
+
+function getCompletedJournals(journals, deadlineDataMap) {
+  return journals.filter(journal => {
+    const deadlineDoc = deadlineDataMap[`${journal.semester}-${journal.month}`];
+    return (journal.entries || []).length >= resolveMinEntries(deadlineDoc);
+  });
 }
 
 // 2026-07-25 新增：把 entriesCompleteAt（「篇數真正達到當月最少應繳篇數 minEntries 那一刻」
@@ -1821,14 +1841,18 @@ async function loadStudentDashboard() {
     // 兩個 span 直接顯示在同一行；.badge-incomplete 的 flex-wrap:wrap 只在極窄螢幕真的放不下
     // 時才當安全網换成兩行，不是強制 flex-direction:column 兩行顯示。
     document.getElementById('s-this-month-status').innerHTML = currentEntriesCount >= requiredThisMonth
-      ? '<span class="badge badge-green">✅ 本月已繳</span>'
+      ? isStudentJournalLate(currentJournal, deadlineDataMap[`${sem}-${thisMonth}`])
+        ? '<span class="badge badge-yellow">▲ 本月已繳（遲繳）</span>'
+        : '<span class="badge badge-green">✅ 本月已繳</span>'
       : currentJournal
         ? `<span class="badge badge-incomplete"><span class="entries-progress-main">🟣 本月未完成</span><span class="entries-progress-detail">（已交${currentEntriesCount}篇，尚差${Math.max(requiredThisMonth - currentEntriesCount, 0)}篇）</span></span>`
         : '<span class="badge badge-red">❌ 本月未繳</span>';
 
-    // 已繳交（累計）
-    document.getElementById('s-submitted-count').textContent = journals.length;
-    document.getElementById('stat-detail-submitted').innerHTML = renderSubmittedMonthsDetail(journals);
+    // 已繳交（累計）：只有篇數已達到該月 minEntries 的月記才算；遲繳但達標仍算已繳，
+    // 只是細節清單會標示 ▲ 遲繳，與老師端統計定義一致。
+    const completedJournals = getCompletedJournals(journals, deadlineDataMap);
+    document.getElementById('s-submitted-count').textContent = completedJournals.length;
+    document.getElementById('stat-detail-submitted').innerHTML = renderSubmittedMonthsDetail(completedJournals, deadlineDataMap);
 
     // 老師已審閱／有新評語（合併卡）
     const teacherList = getTeacherStatusJournals(journals);

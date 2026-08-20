@@ -124,13 +124,13 @@ function writeGithubStepSummary(passCount, failCount, failedNamesList) {
 // 語意上本來就應該通過驗證，所以在這裡統一補上，不需要逐一修改 64 個呼叫點。
 // 真正要測試「未驗證信箱」情境時，改用下面新增的 authCtxUnverified()。
 function authCtx(uid, email) {
-  return testEnv.authenticatedContext(uid, { email, email_verified: true });
+  return journalTestContext(testEnv.authenticatedContext(uid, { email, email_verified: true }));
 }
 
 // 2026-07-03 新增：模擬「拿到一個 email 對得上、但未經 Firebase 驗證」的 token——
 // 例如攻擊者透過 Email/Password 自助註冊時填入的信箱字串，尚未點擊驗證信。
 function authCtxUnverified(uid, email) {
-  return testEnv.authenticatedContext(uid, { email, email_verified: false });
+  return journalTestContext(testEnv.authenticatedContext(uid, { email, email_verified: false }));
 }
 
 // 2026-06-27 補修：rule.txt create/update 規則補上 seatNo 必須等於 studentBindings
@@ -143,13 +143,47 @@ function seatNoFor(uid) {
   return null;
 }
 
+// 月記規則自 2026-08-20 起要求文件 ID 與 seatNo/semester/month 完全一致。既有測試的
+// 文件名稱原本只為辨識測項而設，這個包裝器保留那些可讀名稱，同時把實際 emulator 路徑與
+// journalDoc() 的預設 semester/month 一起轉成合法格式。明確測試「ID 不一致必須被擋」的
+// 測項則刻意直接使用 testEnv.authenticatedContext()，不經此包裝器。
+const journalIdentityByUid = new Map();
+function journalTestFirestore(firestore) {
+  return new Proxy(firestore, {
+    get(target, property) {
+      if (property === 'doc') {
+        return (docPath) => {
+          const match = String(docPath).match(/^users\/([^/]+)\/journals\/([^/]+)$/);
+          if (!match) return target.doc(docPath);
+          const [, uid, testName] = match;
+          const existingSeatNo = seatNoFor(uid);
+          // 明確撰寫成正式格式的測項（例如 P1 的不一致 ID 測試）不改寫，讓測試真的
+          // 對規則傳入它宣稱的文件 ID；其餘歷史測項才轉成可讀的合法測試 ID。
+          if (existingSeatNo && testName.startsWith(`${existingSeatNo}-`)) return target.doc(docPath);
+          const semester = `test-${testName}`;
+          const month = 1;
+          const seatNo = existingSeatNo || 'unbound';
+          journalIdentityByUid.set(uid, { semester, month });
+          return target.doc(`users/${uid}/journals/${seatNo}-${semester}-${month}`);
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+function journalTestContext(context) {
+  return { firestore: () => journalTestFirestore(context.firestore()) };
+}
+
 function journalDoc(uid, email, overrides = {}) {
+  const identity = journalIdentityByUid.get(uid) || { semester: 'test-default', month: 1 };
   return {
     ownerUid: uid,
     ownerEmail: email,
     storagePath: 'user',
-    semester: 'test',
-    month: 0,
+    semester: identity.semester,
+    month: identity.month,
     seatNo: seatNoFor(uid),
     teacherComment: null,
     teacherReviewed: false,
@@ -171,7 +205,7 @@ async function main() {
 
   // ── 種子資料（繞過規則寫入）──────────────────────────────────
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    const db = ctx.firestore();
+    const db = journalTestFirestore(ctx.firestore());
     await db.doc(`admins/${ADMIN_UID}`).set({ email: ADMIN_EMAIL });
     await db.doc(`studentBindings/${STUDENT_BINDING_ID}`).set({ email: STUDENT_EMAIL, seatNo: STUDENT_SEAT, uid: STUDENT_UID });
     await db.doc(`studentBindings/${OTHER_BINDING_ID}`).set({ email: OTHER_EMAIL, seatNo: OTHER_SEAT, uid: OTHER_UID });
@@ -252,7 +286,31 @@ async function main() {
         .doc(`users/${STUDENT_UID}/journals/new-02`)
         // 2026-06-27 補修：補上 seatNo（不影響本測試「不帶 teacher 欄位」的測試意圖，
         // 這裡只是滿足新增的 seatNo 必填驗證，不是本測試要驗證的對象）
-        .set({ ownerUid: STUDENT_UID, ownerEmail: STUDENT_EMAIL, storagePath: 'user', seatNo: STUDENT_SEAT, content: '無 teacher 欄位' })
+        .set({ ownerUid: STUDENT_UID, ownerEmail: STUDENT_EMAIL, storagePath: 'user', semester: 'test-new-02', month: 1, seatNo: STUDENT_SEAT, content: '無 teacher 欄位' })
+    );
+  });
+
+  await test('【2026-08-20】學生 CREATE 月記：文件 ID 與 seatNo/semester/month 一致 → 應成功', async () => {
+    await assertSucceeds(
+      testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
+        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-7`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-1', month: 7 }))
+    );
+  });
+
+  await test('【2026-08-20】學生 CREATE 月記：文件 ID 與 semester 不一致 → 應被拒', async () => {
+    await assertFails(
+      testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
+        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-7`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-2', month: 7 }))
+    );
+  });
+
+  await test('【2026-08-20】學生 CREATE 月記：文件 ID 與 month 不一致 → 應被拒', async () => {
+    await assertFails(
+      testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
+        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-7`)
+        .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-1', month: 8 }))
     );
   });
 
@@ -427,6 +485,18 @@ async function main() {
   // ════════════════════════════════════════════════════════════
   // UPDATE
   // ════════════════════════════════════════════════════════════
+  await test('【2026-08-20】學生 UPDATE 月記：嘗試把 semester 改到與文件 ID 不一致 → 應被拒', async () => {
+    const identityPath = `users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-8`;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await journalTestFirestore(ctx.firestore()).doc(identityPath).set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-1', month: 8 }));
+    });
+    await assertFails(
+      testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
+        .doc(identityPath)
+        .update({ semester: '115-2' })
+    );
+  });
+
   await test('學生 UPDATE 自己月記：teacher 欄位歸零 → 應成功', async () => {
     await assertSucceeds(
       authCtx(STUDENT_UID, STUDENT_EMAIL).firestore()
@@ -480,7 +550,7 @@ async function main() {
   // 再用真正的 .set({...},{merge:true}) 模擬 saveJournal() 的實際寫法。
   await test('【2026-07-09（#12）】學生 UPDATE 自己月記（一般編輯，merge:true 模擬 saveJournal() 真實寫法）：payload 漏帶 teacherCommentContentAt → 應被拒（重現 2026-07-08 真實 bug：merge 省略此欄位會沿用舊的非 null 值）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
           teacherComment: '老師評語',
@@ -502,7 +572,7 @@ async function main() {
     // 重新種一次同樣的「已有老師評語」已知狀態，不依賴上一條測試失敗後文件沒被改動
     // 這個假設，保持每條測試各自獨立、可單獨執行。
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
           teacherComment: '老師評語',
@@ -548,7 +618,7 @@ async function main() {
     // 否則 teacher 欄位仍是初始值時，一般 UPDATE 分支本來就允許學生同時改其他欄位，
     // 根本測不到「已讀機制只能單獨改該欄位」這條限制真正要擋的情境。
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .update({ teacherComment: '老師評語（測試用）', teacherReviewed: true, teacherCommentUnread: true });
     });
@@ -571,7 +641,7 @@ async function main() {
   await test('【2026-06-27】學生 UPDATE 月記（一般編輯）：嘗試更改 seatNo → 應被拒', async () => {
     // 先把文件恢復成乾淨初始狀態（前面的測試可能改過 teacher 欄位）
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL));
     });
@@ -725,7 +795,7 @@ async function main() {
   // 設成明確的「已讀」已知狀態，才能真正測到「從 false 被誤翻回 true」這個轉變本身，
   // 而不是像最初版本那樣，前一條測試留下的狀態剛好已經是 true，測不出真正的迴歸情境。
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await ctx.firestore()
+    await journalTestFirestore(ctx.firestore())
       .doc(`users/${STUDENT_UID}/journals/existing-01`)
       .update({
         studentReply: '已讀回覆內容',
@@ -826,7 +896,7 @@ async function main() {
 
   await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true 模擬 saveJournal() 真實寫法）：payload 完全不提 journalSubmitNotifiedAt、既有值已是已推播的 ISO 字串 → 應成功（merge 天然保留舊值不動，對應真實一般編輯行為）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
           journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z', // 模擬「已經推播過」的既有狀態
@@ -842,7 +912,7 @@ async function main() {
 
   await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 明確嘗試把已推播的 journalSubmitNotifiedAt 打回 null → 應被拒（防止學生藉此逼 notify-service 每輪重新推播「有新月記」）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
           journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z',
@@ -857,7 +927,7 @@ async function main() {
 
   await test('【2026-07】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 嘗試把 journalSubmitNotifiedAt 竄改成另一個任意時間戳 → 應被拒（一般編輯必須維持原值不變，不只是不能改成 null）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, {
           journalSubmitNotifiedAt: '2026-07-15T03:00:00.000Z',
@@ -935,7 +1005,7 @@ async function main() {
 
   await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 從既有的 null 變成合法時間戳（這次編輯剛好補齊篇數）→ 應成功', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: null }));
     });
@@ -948,7 +1018,7 @@ async function main() {
 
   await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 從既有的合法時間戳變回 null（篇數又不足，或老師調高 minEntries）→ 應成功', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: '2026-07-24T11:00:00' }));
     });
@@ -961,7 +1031,7 @@ async function main() {
 
   await test('【2026-07-25】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesCompleteAt 塞入格式不合法的字串 → 應被拒', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesCompleteAt: null }));
     });
@@ -1081,7 +1151,7 @@ async function main() {
 
   await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：entriesFirstCompleteAt 從既有的 null 變成合法時間戳＋合法 count（系統第一次觀測到達標）→ 應成功', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: null, entriesFirstCompleteAtCount: null }));
     });
@@ -1094,7 +1164,7 @@ async function main() {
 
   await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值仍是 null 時，寫入格式不合法的字串 → 應被拒（格式驗證跟舊值是否為 null 是兩件獨立的事）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: null, entriesFirstCompleteAtCount: null }));
     });
@@ -1107,7 +1177,7 @@ async function main() {
 
   await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次寫入完全相同的值＋相同 count（真實 saveJournal() 寫法：每次存檔都重新算一次、算出同一個值）→ 應成功', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00', entriesFirstCompleteAtCount: 2 }));
     });
@@ -1120,7 +1190,7 @@ async function main() {
 
   await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：payload 完全不提 entriesFirstCompleteAt／entriesFirstCompleteAtCount、既有值已是合法配對 → 應成功（merge 天然保留舊值不動）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00', entriesFirstCompleteAtCount: 2 }));
     });
@@ -1133,7 +1203,7 @@ async function main() {
 
   await test('【2026-08-18】學生 UPDATE 自己月記（一般編輯，merge:true）：minEntries 被老師調高、舊凍結篇數撐不住新門檻，合法重新凍結成較晚的新時間戳＋較高的新 count → 應成功（本次修法要開放的核心情境：門檻調高後應該可以合法前進，不再永遠鎖死在較寬鬆舊門檻下的舊日期）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-05T09:00:00', entriesFirstCompleteAtCount: 1 }));
     });
@@ -1146,7 +1216,7 @@ async function main() {
 
   await test('【2026-08-18】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次嘗試竄改成更早的時間戳 → 應被拒（不可逆保留的核心測試：放寬後只允許不變或前進，倒退依然被擋，防止技術使用者直接呼叫 API 偽造更早的達標時間）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00', entriesFirstCompleteAtCount: 2 }));
     });
@@ -1159,7 +1229,7 @@ async function main() {
 
   await test('【2026-08-17】學生 UPDATE 自己月記（一般編輯，merge:true）：舊值已是時間戳，這次嘗試打回 null → 應被拒（防止學生直接呼叫 API 清空這個欄位讓自己重新有機會在逾期後偽造更早的達標時間）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore()
+      await journalTestFirestore(ctx.firestore())
         .doc(`users/${STUDENT_UID}/journals/existing-01`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { entriesFirstCompleteAt: '2026-07-24T11:00:00', entriesFirstCompleteAtCount: 2 }));
     });
@@ -1217,7 +1287,7 @@ async function main() {
 
   await test('學生可以刪除自己的月記', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`users/${STUDENT_UID}/journals/to-delete`).set(journalDoc(STUDENT_UID, STUDENT_EMAIL));
+      await journalTestFirestore(ctx.firestore()).doc(`users/${STUDENT_UID}/journals/to-delete`).set(journalDoc(STUDENT_UID, STUDENT_EMAIL));
     });
     await assertSucceeds(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`users/${STUDENT_UID}/journals/to-delete`).delete());
   });
@@ -1260,7 +1330,7 @@ async function main() {
 
   await test('【2026-07-07】學生不能 get 自己的 fcmTokens 文件（get 固定 false，前端本來就不該讀回自己的 token，讀取只透過 Admin SDK）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`users/${STUDENT_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+      await journalTestFirestore(ctx.firestore()).doc(`users/${STUDENT_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
     });
     await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`users/${STUDENT_UID}/fcmTokens/seed-token-get`).get());
   });
@@ -1309,7 +1379,7 @@ async function main() {
 
   await test('【2026-07-10】學生仍可以 delete 自己的 fcmTokens 文件（確認型別驗證改動未誤傷 delete，delete 時 request.resource 為 null）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`users/${STUDENT_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+      await journalTestFirestore(ctx.firestore()).doc(`users/${STUDENT_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
     });
     await assertSucceeds(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`users/${STUDENT_UID}/fcmTokens/to-delete-token`).delete());
   });
@@ -1343,7 +1413,7 @@ async function main() {
 
   await test('刪除 protected 管理員 → 應被拒', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc('admins/protected-admin').set({ email: ADMIN_EMAIL, protected: true });
+      await journalTestFirestore(ctx.firestore()).doc('admins/protected-admin').set({ email: ADMIN_EMAIL, protected: true });
     });
     await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc('admins/protected-admin').delete());
   });
@@ -1376,7 +1446,7 @@ async function main() {
 
   await test('【2026-07-07】admin 不能 get 自己的 fcmTokens 文件（get 固定 false）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`admins/${ADMIN_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+      await journalTestFirestore(ctx.firestore()).doc(`admins/${ADMIN_UID}/fcmTokens/seed-token-get`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
     });
     await assertFails(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc(`admins/${ADMIN_UID}/fcmTokens/seed-token-get`).get());
   });
@@ -1405,7 +1475,7 @@ async function main() {
 
   await test('【2026-07-10】admin 仍可以 delete 自己的 fcmTokens 文件（確認型別驗證改動未誤傷 delete）', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`admins/${ADMIN_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
+      await journalTestFirestore(ctx.firestore()).doc(`admins/${ADMIN_UID}/fcmTokens/to-delete-token`).set({ createdAt: new Date().toISOString(), userAgent: 'seed' });
     });
     await assertSucceeds(authCtx(ADMIN_UID, ADMIN_EMAIL).firestore().doc(`admins/${ADMIN_UID}/fcmTokens/to-delete-token`).delete());
   });

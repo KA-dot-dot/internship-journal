@@ -1,7 +1,15 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v31
+ * 學生端自動化測試 v32
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v32 修正（2026-08-20）：學生首頁的「已繳交」累計原本直接計所有月記文件，篇數未達
+ * minEntries 的草稿也會被誤算為已繳；本月狀態則只區分達標／未達標，達標後才補交的學生會
+ * 看見綠色✅，與老師端▲遲繳不一致。新增 getCompletedJournals() 統一累計判斷，並以
+ * isStudentJournalLate() 對齊 teacher.html 的優先時間欄位與日期比較邏輯；歷史清單也會
+ * 標記▲遲繳，不再把所有已達標月記一律渲染成✅。
+ *   S-SEC-46  直接餵入「準時達標／篇數不足／達標但遲繳」三份合成月記，驗證累計只保留
+ *             達標兩份、遲繳判斷與明細標記正確，且首頁確實使用共用結果。
  *
  * v31 修正（2026-08-18）：entriesFirstCompleteAt 第三輪修法——第二輪（v30）只在 rule.txt
  * 註解裡記錄「count 缺席的過渡期資料」這個殘留風險，沒有實際修掉；使用者確認這是真實
@@ -2417,6 +2425,47 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('loadStudentDashboard() 找不到 badge-incomplete，篇數不足時可能沒有正確顯示「未完成」狀態');
     if (!result.passesMapToOverdue)
       throw new Error('loadStudentDashboard() 呼叫 getOverdueMonths() 時未傳入共用的 deadlineDataMap，可能重複查詢 Firestore');
+  });
+
+  await test('S-SEC-46 學生首頁已繳累計排除篇數不足月記，並正確標示遲繳', async () => {
+    const result = await page.evaluate(() => {
+      if (typeof getCompletedJournals !== 'function' || typeof isStudentJournalLate !== 'function' || typeof renderSubmittedMonthsDetail !== 'function') {
+        return { skip: true };
+      }
+
+      const deadlineDataMap = {
+        '115-1-7': { minEntries: 2, closeDate: '2026-07-31' },
+        '115-1-8': { minEntries: 2, closeDate: '2026-08-31' },
+        '115-1-9': { minEntries: 2, closeDate: '2026-09-30' },
+      };
+      const onTime = { semester: '115-1', month: 7, entries: [{}, {}], entriesFirstCompleteAt: '2026-07-31T20:00:00' };
+      const incomplete = { semester: '115-1', month: 8, entries: [{}], entriesFirstCompleteAt: null };
+      const late = { semester: '115-1', month: 9, entries: [{}, {}], entriesFirstCompleteAt: '2026-10-01T09:00:00' };
+      const completed = getCompletedJournals([onTime, incomplete, late], deadlineDataMap);
+      const detailHtml = renderSubmittedMonthsDetail(completed, deadlineDataMap);
+      const dashboardCode = loadStudentDashboard.toString();
+
+      return {
+        skip: false,
+        onlyCompletedCounted: completed.length === 2 && !completed.includes(incomplete),
+        onTimeIsNotLate: !isStudentJournalLate(onTime, deadlineDataMap['115-1-7']),
+        lateIsLate: isStudentJournalLate(late, deadlineDataMap['115-1-9']),
+        detailMarksLate: detailHtml.includes('▲ 遲繳') && detailHtml.includes(semMonthToLabel('115-1', 9)),
+        dashboardUsesCompleted: /getCompletedJournals\s*\(\s*journals\s*,\s*deadlineDataMap\s*\)/.test(dashboardCode)
+          && /s-submitted-count[\s\S]{0,180}completedJournals\.length/.test(dashboardCode),
+        dashboardUsesLateBadge: /isStudentJournalLate\s*\(\s*currentJournal/.test(dashboardCode),
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.onlyCompletedCounted)
+      throw new Error('已繳交累計仍包含篇數不足的月記');
+    if (!result.onTimeIsNotLate || !result.lateIsLate)
+      throw new Error('學生端遲交判斷沒有和截止日正確比對');
+    if (!result.detailMarksLate)
+      throw new Error('已繳交明細沒有標示達標但遲繳的月記');
+    if (!result.dashboardUsesCompleted || !result.dashboardUsesLateBadge)
+      throw new Error('loadStudentDashboard() 未使用已繳交共用判斷或遲繳徽章邏輯');
   });
 
   await test('S-SEC-38 push-enable-modal 相關函式與 DOM 元素完整存在，maybeShowPushEnableModal() 有登入狀態守門', async () => {
