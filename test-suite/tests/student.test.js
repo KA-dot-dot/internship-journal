@@ -1,7 +1,24 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v34
+ * 學生端自動化測試 v35
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v35 修正（2026-08-25）：一輪「用 AI_CONTEXT_狀態.md 等三份狀態文件記載的邊界案例反例，
+ * 逐項對照 student.html／teacher.html 實際程式碼」的稽核中，額外檢查既有測試涵蓋範圍時
+ * 發現 journalSubmitNotifiedAt 這個推播用哨兵值——saveJournal() payload 裡
+ * `...(isFirstSubmit ? { journalSubmitNotifiedAt: null } : {})` 這行條件式寫法本身，全文
+ * 搜尋 student_test.js 只在 S-SEC-32 的背景說明註解裡被提到過，從未有任何測試斷言真的去
+ * 檢查這行程式碼；S-SEC-32 驗證的是「isFirstSubmit 賴以計算的快取夠不夠新鮮」，是這行
+ * 條件式的前置條件，不是條件式本身。另外原本一併規劃要補的「saveStudentReply() 是否用
+ * getDoc() 現查而非讀前端快取」，複查後確認已被 S-SEC-29 的 readsOldFromFreshDoc 檢查
+ * 涵蓋，不重複新增。
+ *   S-SEC-49  靜態驗證 saveJournal()：①isFirstSubmit 定義本身公式正確；②payload 確實用
+ *             `isFirstSubmit ? { journalSubmitNotifiedAt: null } : {}` 條件式 spread，
+ *             不是無條件寫入；③codeOnly() 過濾註解後，journalSubmitNotifiedAt 字串在函式
+ *             裡只出現這一次——防止有第二處遺漏過濾的無條件寫法或殘留的舊寫法（本函式的
+ *             說明性註解本身就會提到這個欄位名稱＋冒號＋null，跟 S-SEC-08／T-SEC-30／
+ *             S-SEC-29 等既有測試踩過的「regex 命中解釋性註解」是同一類陷阱，故沿用
+ *             S-SEC-39 已驗證過的 codeOnly() 過濾寫法，非字面比對整段程式碼字串）。
  *
  * v34 修正（2026-08-21）：修復「少數學生薪資單／工作照片存檔後變成整張黑色」問題（見
  * 修復報告_薪資單與工作照片壓縮後變黑圖問題_2026-08-21.md）。根本原因：<canvas> 預設全
@@ -3138,6 +3155,56 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('isLikelyBlankCanvas() 誤判正常顏色照片為黑圖失敗');
     if (!result.nearBlackNotFlagged)
       throw new Error('isLikelyBlankCanvas() 誤判超過閾值的深灰色照片為黑圖失敗（閾值判斷可能被改鬆或改嚴）');
+  });
+
+  await test('S-SEC-49 saveJournal() 的 journalSubmitNotifiedAt 只在 isFirstSubmit 為真時寫入 null，一般編輯完全不帶這個欄位', async () => {
+    // 2026-08-25 新增。背景：journalSubmitNotifiedAt 是 checkNewJournals()（見
+    // AI_推播系統說明_狀態.md 3.6節）用來判斷「這份月記是否已推播過『第一次繳交』通知」
+    // 的哨兵值，rule.txt 那一側（偽造非null應被拒／明確null應成功／一般編輯竄改應被拒）
+    // 已經被 Layer 1 完整測過，但那只驗證「client 端送來的 payload 符合這個形狀時，規則
+    // 會不會正確放行/拒絕」，不驗證「client 端本身在對的時機真的會算出對的 payload」。
+    // 全文搜尋這份測試檔，這行條件式本身此前從未被任何測試直接斷言過（S-SEC-32 驗證的是
+    // isFirstSubmit 賴以計算的快取新鮮度，是這行的前置條件，不是這行本身）。
+    //
+    // 驗證三項特徵（缺一即退化）：
+    //   1. isFirstSubmit 的定義公式本身正確：!(快取存在 && 快取有 submittedAt)
+    //   2. payload 用 `isFirstSubmit ? { journalSubmitNotifiedAt: null } : {}` 條件式
+    //      spread 寫入，第一次繳交才帶這個欄位、一般編輯完全省略（靠 merge:true 讓後端
+    //      已寫入的非null值天然維持不動，對應 rule.txt「一般編輯必須維持原值不變」的要求）
+    //   3. 過濾掉整行註解後，journalSubmitNotifiedAt 這個欄位名稱在函式裡只出現一次——
+    //      這個函式的說明性註解本身就會提到「journalSubmitNotifiedAt:null」這個字面組合
+    //      （解釋「不能這樣寫」的反面教材），naive 搜尋容易被註解文字本身騙過（陷阱19／
+    //      25 同一類），只在過濾後的程式碼行上找才準
+    const result = await page.evaluate(() => {
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!saveFnStr) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const saveCode = codeOnly(saveFnStr);
+
+      const isFirstSubmitDefCorrect =
+        /const\s+isFirstSubmit\s*=\s*!\(\s*window\._currentJournalCache\?\.exists\s*&&\s*window\._currentJournalCache\?\.submittedAt\s*\)/.test(saveCode);
+
+      const payloadIsConditional =
+        /\.\.\.\(\s*isFirstSubmit\s*\?\s*\{\s*journalSubmitNotifiedAt:\s*null\s*\}\s*:\s*\{\s*\}\s*\)/.test(saveCode);
+
+      const occurrenceCount = (saveCode.match(/journalSubmitNotifiedAt/g) || []).length;
+
+      return {
+        skip: false,
+        isFirstSubmitDefCorrect,
+        payloadIsConditional,
+        occurrenceCount,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.isFirstSubmitDefCorrect)
+      throw new Error('saveJournal() 找不到 isFirstSubmit 的定義，或公式不是 !(_currentJournalCache?.exists && _currentJournalCache?.submittedAt)——journalSubmitNotifiedAt 的寫入時機可能已改變，需重新確認');
+    if (!result.payloadIsConditional)
+      throw new Error('saveJournal() 的 payload 找不到 `...(isFirstSubmit ? { journalSubmitNotifiedAt: null } : {})` 這個條件式 spread 寫法，可能被改成無條件寫入——一般編輯若無條件帶上這個欄位，會撞上 rule.txt「一般編輯必須維持原值不變」被 403 拒絕；若無條件省略，真正第一次繳交也不會被 checkNewJournals() 查到，老師安靜收不到繳交通知');
+    if (result.occurrenceCount !== 1)
+      throw new Error(`過濾註解後，journalSubmitNotifiedAt 應該只在條件式 spread 那一行出現恰好 1 次，實際找到 ${result.occurrenceCount} 次——可能有第二處遺漏測到的無條件寫入或殘留舊寫法`);
   });
 
   return results;
