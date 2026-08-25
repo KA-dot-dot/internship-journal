@@ -299,17 +299,29 @@ async function main() {
   });
 
   await test('【2026-08-20】學生 CREATE 月記：文件 ID 與 semester 不一致 → 應被拒', async () => {
+    // 2026-08-25 補修：原本跟上一條「應成功」測試共用同一個文件路徑
+    // （${STUDENT_SEAT}-115-1-7），上一條測試執行後這個路徑已經真的建立了文件——
+    // Firestore Rules 判斷 create/update 只看「這個路徑先前是否已存在文件」，不看
+    // SDK 呼叫 .set() 還是 .update()，所以這條測試實際上會被判定成 UPDATE，不是它
+    // 名稱宣稱的 CREATE。因為 hasMatchingJournalId() 在 create/update 兩個分支邏輯
+    // 完全相同，這個誤判不會讓測試「錯誤地通過」，但代表 CREATE 分支這行檢查從未被
+    // 這條測試真正驗證過——若未來只從 create 分支誤刪這行、update 分支還留著，這條
+    // 測試依然會通過，完全抓不到迴歸。改用全新、從未被其他測試寫入過的路徑，確保這次
+    // .set() 一定落在真正的 create 分支。
     await assertFails(
       testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
-        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-7`)
+        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-journalid-semester-mismatch`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-2', month: 7 }))
     );
   });
 
   await test('【2026-08-20】學生 CREATE 月記：文件 ID 與 month 不一致 → 應被拒', async () => {
+    // 2026-08-25 補修：理由同上一條「semester 不一致」測試——原本共用
+    // ${STUDENT_SEAT}-115-1-7 這個此時已被建立過的路徑，會被誤判成 UPDATE 而非
+    // CREATE。改用全新未使用過的路徑，確保真的驗證到 CREATE 分支的 hasMatchingJournalId()。
     await assertFails(
       testEnv.authenticatedContext(STUDENT_UID, { email: STUDENT_EMAIL, email_verified: true }).firestore()
-        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-115-1-7`)
+        .doc(`users/${STUDENT_UID}/journals/${STUDENT_SEAT}-journalid-month-mismatch`)
         .set(journalDoc(STUDENT_UID, STUDENT_EMAIL, { semester: '115-1', month: 8 }))
     );
   });
