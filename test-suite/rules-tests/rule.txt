@@ -191,6 +191,19 @@ service cloud.firestore {
           || (request.resource.data.month == 12 && journalId == request.resource.data.seatNo + '-' + request.resource.data.semester + '-12')
         );
     }
+    // 2026-08-26 新增：/students/{docId} 原本用 docId.matches('.*_' + seatNo) 把 seatNo
+    // 字串直接拼接進正則表達式（.matches() 的參數是 regex，見 rules.String 文件）。座號
+    // 目前固定是純數字（如 "01"~"45"），不含任何正則特殊字元，正常情況不會被觸發；但
+    // rule.txt 本身沒有在任何地方強制驗證座號格式必須是 [0-9]+，如果座號格式未來改版
+    // 不慎引入正則特殊字元（例如 "." "*" "(" 等），.matches() 就會把它當成正則語法而非
+    // 字面字元解讀，導致比對範圍意外放寬（例如座號 "0.1" 會連座號 "0A1" 都比對成功，因為
+    // 正則的 "." 代表任意字元）。改用 split('_') 取最後一段做精確字串相等比較，完全避開
+    // 把使用者資料當成正則語法解讀的風險，不需要仰賴「座號格式永遠是純數字」這個假設。
+    function matchesOwnSeatNo(docId) {
+      let seatNo = get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo;
+      let parts = docId.split('_');
+      return docId == seatNo || parts[parts.size() - 1] == seatNo;
+    }
     match /admins/{adminId} {
       allow get: if schoolUser() && (adminId == request.auth.uid || adminId == emailKey() || isAdmin());
       allow list: if isAdmin();
@@ -225,8 +238,17 @@ service cloud.firestore {
       // 才會進一步比對 bindingId，其餘條件（bindingId 對應 emailKey()）不變。
       allow get: if (schoolUser() && bindingId == emailKey()) || isAdmin();
       allow list, create, delete: if isAdmin();
+      // 2026-08-26 補修：原本 UPDATE 只比對 resource.data.email == request.auth.token.email，
+      // 沒有像 get 規則一樣同時要求 bindingId == emailKey()——等於完全信任「這筆文件的
+      // email 欄位是對的」，而不是獨立確認「這筆文件本來就是這個人的」。若曾經有任兩筆
+      // studentBindings 文件的 email 欄位因為老師端輸入疏失（複製貼上沒改、跨學期名冊
+      // migration 誤植）變成同一個值，該真人就能把自己的 uid 綁到「bindingId 根本不是
+      // 自己 emailKey()」的另一筆文件上，等同劫持不屬於自己的座號綁定。補回跟 get 規則
+      // 一致的 bindingId == emailKey() 檢查後，即使 email 欄位重複，也只有 bindingId 本身
+      // 真的等於目前登入者 emailKey() 的那一筆才能被更新，不再單獨信任 email 欄位。
       allow update: if (
           schoolUser()
+          && bindingId == emailKey()
           && resource.data.email == request.auth.token.email
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
         ) || isAdmin();
@@ -234,10 +256,9 @@ service cloud.firestore {
     match /students/{docId} {
       // docId 格式為 {semester}_{seatNo}（新）或 {seatNo}（舊）
       // 學生可讀取自己座號的任何學期文件
-      allow get: if (schoolUser() && (
-          docId == get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo
-          || docId.matches('.*_' + get(/databases/$(database)/documents/studentBindings/$(emailKey())).data.seatNo)
-        )) || isAdmin();
+      // 2026-08-26 修正：改呼叫 matchesOwnSeatNo()（split('_') 精確比對，非正則拼接），
+      // 理由見該函式上方註解。
+      allow get: if (schoolUser() && matchesOwnSeatNo(docId)) || isAdmin();
       allow list, create, update, delete: if isAdmin();
     }
     match /journals/{journalId} {

@@ -67,6 +67,27 @@ const UNCLAIMED_BINDING_ID = emailKey(UNCLAIMED_EMAIL);
 const ATTACKER_UID = 'attacker-uid'; // 攻擊者自己的 Firebase 帳號 uid，不等於任何真實學生
 const UNCLAIMED_UID_LEGIT = 'unclaimed-legit-uid'; // 對照組：該生本人第一次登入的 uid
 
+// 2026-08-26 新增：驗證 rule.txt 同日補上的兩項修法——
+// ①studentBindings UPDATE 補回 bindingId==emailKey() 交叉驗證
+// ②/students/{docId} 改用 matchesOwnSeatNo()（split('_') 精確比對，取代正則字串拼接）
+//
+// ①情境：模擬「兩筆 studentBindings 文件的 email 欄位被老師端誤設成同一個值」的資料
+// 完整性事故（複製貼上沒改／跨學期名冊 migration 誤植）。STRAY_BINDING_ID 刻意不是
+// STUDENT_EMAIL 的 emailKey()，但 email 欄位故意跟 STUDENT_EMAIL 一樣，修法前
+// STUDENT_UID 能靠這筆孤兒 binding 的 email 欄位通過驗證、把自己的 uid 綁到座號
+// STRAY_SEAT（不屬於自己的座號）上；修法後應被 bindingId==emailKey() 這道交叉驗證擋下。
+const STRAY_BINDING_ID = 'stray-binding-from-last-semester';
+const STRAY_SEAT = '99';
+
+// ②情境：座號字面上含正則特殊字元「.」，修法前 docId.matches('.*_' + seatNo) 會把
+// 「.」當成正則的「任意字元」，導致座號「0.1」誤配對到座號「0X1」（X 代表任意單一
+// 字元）的別人的 students 文件。REGEX_SEAT_UID 是這位「座號含特殊字元」的學生本人，
+// students/115-1_0X1 是另一位座號恰好長得像「0.1」正則展開結果的學生。
+const REGEX_SEAT_EMAIL = 'regexseat@tcivs.tc.edu.tw';
+const REGEX_SEAT_UID = 'regex-seat-uid';
+const REGEX_SEAT = '0.1';
+const REGEX_SEAT_BINDING_ID = emailKey(REGEX_SEAT_EMAIL);
+
 let testEnv;
 let pass = 0;
 let fail = 0;
@@ -211,6 +232,11 @@ async function main() {
     await db.doc(`studentBindings/${OTHER_BINDING_ID}`).set({ email: OTHER_EMAIL, seatNo: OTHER_SEAT, uid: OTHER_UID });
     // 2026-07-03 新增：刻意不設 uid 欄位，模擬老師建好名冊但學生本人還沒登入過
     await db.doc(`studentBindings/${UNCLAIMED_BINDING_ID}`).set({ email: UNCLAIMED_EMAIL, seatNo: UNCLAIMED_SEAT });
+    // 2026-08-26 新增：見上方常數註解——email欄位重複的孤兒binding + 座號含正則特殊字元
+    await db.doc(`studentBindings/${STRAY_BINDING_ID}`).set({ email: STUDENT_EMAIL, seatNo: STRAY_SEAT });
+    await db.doc(`studentBindings/${REGEX_SEAT_BINDING_ID}`).set({ email: REGEX_SEAT_EMAIL, seatNo: REGEX_SEAT, uid: REGEX_SEAT_UID });
+    await db.doc('students/115-1_0.1').set({ seatNo: REGEX_SEAT, semester: '115-1', name: '座號含特殊字元的學生本人' });
+    await db.doc('students/115-1_0X1').set({ seatNo: '0X1', semester: '115-1', name: '座號0X1的另一位學生（修法前會被正則.誤配對到）' });
     await db.doc('students/115-1_01').set({ seatNo: STUDENT_SEAT, semester: '115-1', name: '新格式學生' });
     await db.doc('students/01').set({ seatNo: STUDENT_SEAT, name: '舊格式學生' });
     await db.doc('students/115-1_02').set({ seatNo: OTHER_SEAT, semester: '115-1', name: '另一位學生' });
@@ -239,6 +265,17 @@ async function main() {
 
   await test('學生不能讀取別人座號的 students 文件', async () => {
     await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc('students/115-1_02').get());
+  });
+
+  // 2026-08-26 新增：/students/{docId} 從 docId.matches('.*_' + seatNo) 改成
+  // matchesOwnSeatNo()（split('_') 精確比對）的回歸測試——理由見 rule.txt
+  // matchesOwnSeatNo() 上方註解。
+  await test('【2026-08-26】座號含正則特殊字元"."的學生，讀取別人座號"0X1"的students文件 → 應被拒（防止正則注入把"."當成任意字元誤配對）', async () => {
+    await assertFails(authCtx(REGEX_SEAT_UID, REGEX_SEAT_EMAIL).firestore().doc('students/115-1_0X1').get());
+  });
+
+  await test('【2026-08-26】對照組：座號含正則特殊字元的學生仍可正常讀到自己真正的students文件（確認split()修法沒有誤傷合法情境）', async () => {
+    await assertSucceeds(authCtx(REGEX_SEAT_UID, REGEX_SEAT_EMAIL).firestore().doc('students/115-1_0.1').get());
   });
 
   await test('學生不能 list /students/ 整個集合', async () => {
@@ -1513,6 +1550,13 @@ async function main() {
 
   await test('學生不能 create 新的 studentBindings 文件', async () => {
     await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc('studentBindings/new-binding').set({ email: STUDENT_EMAIL, seatNo: '50' }));
+  });
+
+  // 2026-08-26 新增：UPDATE 補回 bindingId==emailKey() 交叉驗證的回歸測試——理由見
+  // rule.txt studentBindings/{bindingId} allow update 上方註解。修法前，這條測試
+  // 會 assertSucceeds（因為只看 email 欄位相符，bindingId 本身對不對沒被檢查）。
+  await test('【2026-08-26】學生 update 一筆「bindingId 不是自己 emailKey()，但 email 欄位被誤設成跟自己一樣」的孤兒binding → 應被拒（防止 email 欄位重複時跨綁定劫持別的座號）', async () => {
+    await assertFails(authCtx(STUDENT_UID, STUDENT_EMAIL).firestore().doc(`studentBindings/${STRAY_BINDING_ID}`).update({ uid: STUDENT_UID }));
   });
 
   // ════════════════════════════════════════════════════════════
