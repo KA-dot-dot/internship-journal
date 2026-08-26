@@ -1,7 +1,35 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v32
+ * 老師端自動化測試 v33
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v33 修正（2026-08-26）：修復三項稽核發現的問題（皆純前端修法，未異動 rule.txt）：
+ * ①resolveImgSrc()——entries[].photos／salaryPhotos 是學生自己月記文件的一部分，
+ * rule.txt 只驗證陣列長度／型別，沒有逐元素驗證網址格式，技術使用者可繞過正常上傳流程
+ * 直接呼叫 Firestore API 塞入任意外部網址；這個網址之後會在老師審閱畫面被當成
+ * <img src> 自動載入，或在 PDF 匯出時被 imageToDataUrl() 真的用 fetch() 抓下來——任何
+ * 日後打開這份月記審閱、或匯出PDF的老師，瀏覽器都會對外發出請求（IP/瀏覽器資訊外洩
+ * 風險），是會波及第三人（老師）的問題，不只是攻擊者自己的資料被錯誤處理。修法：改成
+ * 網域白名單，只允許 CLOUDINARY_CLOUD_NAME 對應的 Cloudinary 帳號，其餘 http(s) 網址
+ * 一律回傳空字串（student_test.js v36 同步修正姊妹檔 student.html 的同名獨立函式）。
+ * ②loadStudentsTable() 大頭照 onclick——全站唯一一處手動用單引號包字串、只靠
+ * escapeHtml() 而非 jsArg() 的 onclick 組裝方式；escapeHtml() 把 ' 轉成 &#39;，但瀏覽器
+ * 解析 HTML 屬性時會先解碼回真正的單引號才當成 JS 程式碼，姓名或大頭照網址剛好含一個
+ * 單引號就會提早結束字串、讓後面內容變成可執行語法（同時也是真實功能性 bug：姓名含
+ * 撇號時這顆按鈕會直接壞掉）。已改用當場就有算好的 safeNameArg，photoUrl 也包一層
+ * jsArg()。③三處指向 Cloudinary/Firebase 主控台的 target="_blank" 連結補上
+ * rel="noopener"（皆為寫死網址、非使用者資料，可利用性趨近零，純粹零成本順手修正）。
+ *   T-SEC-56  同 S-SEC-50，這裡驗證的是 teacher.html 獨立一份的同邏輯 resolveImgSrc()。
+ *   T-SEC-57  真的呼叫 loadStudentsTable()：暫時覆寫其依賴的三個 Firestore 函式
+ *             （initStudentTermControls／getRosterForSelectedTerm／
+ *             updateStudentTermStatus）注入合成名冊資料（一筆正常、一筆姓名與網址皆含
+ *             單引號），讓真正的 roster.map() 渲染邏輯寫入真實 DOM，再對渲染出來的
+ *             <img> 觸發真實 click 事件，驗證 openPhotoModal() 收到正確、未被截斷的
+ *             參數。是真執行（會真的重現修復前「含單引號那列點擊時拋出
+ *             SyntaxError、openPhotoModal() 完全不會被呼叫」的失敗模式），不是讀
+ *             loadStudentsTable.toString() 做字面比對。
+ *   T-SEC-58  實際查詢 DOM，確認三個指向 Cloudinary/Firebase 主控台的
+ *             target="_blank" 連結皆有 rel="noopener"。
  *
  * v32 修正（2026-08-21）：修復「少數學生薪資單／工作照片存檔後變成整張黑色」問題（見
  * 修復報告_薪資單與工作照片壓縮後變黑圖問題_2026-08-21.md）。該報告與姊妹檔
@@ -3225,6 +3253,150 @@ async function runTeacherTests(page, log) {
       throw new Error('isLikelyBlankCanvas() 誤判正常顏色照片為黑圖失敗');
     if (!result.nearBlackNotFlagged)
       throw new Error('isLikelyBlankCanvas() 誤判超過閾值的深灰色照片為黑圖失敗（閾值判斷可能被改鬆或改嚴）');
+  });
+
+  await test('T-SEC-56 resolveImgSrc() 只允許本專案 Cloudinary 網域，其餘外部網址一律視為無效來源', async () => {
+    // 2026-08-26 新增。背景見本檔案 v33 header。entries[].photos／salaryPhotos 是學生
+    // 自己月記文件的一部分，rule.txt 只驗證陣列長度／型別，沒有逐元素驗證網址格式，
+    // 技術使用者可繞過正常上傳流程直接呼叫 Firestore API 塞入任意外部網址，之後會被
+    // 老師端當成 <img src> 或被 imageToDataUrl() 的 fetch() 真的抓下來，讓「日後打開
+    // 這份月記的老師」瀏覽器對外發出請求，是會波及第三人的問題。這裡直接呼叫函式本體
+    // 帶各種輸入驗證行為，不是字串比對——比照專案一貫的「Actual execution over
+    // reasoning」標準（同 T-SEC-55），寫法比照姊妹檔 student_test.js 的 S-SEC-50（這裡
+    // 是 teacher.html 獨立一份的同邏輯函式）。
+    const result = await page.evaluate(() => {
+      if (typeof resolveImgSrc !== 'function') return { skip: true };
+      const cloudPrefix = (typeof CLOUDINARY_CLOUD_NAME === 'string' && CLOUDINARY_CLOUD_NAME)
+        ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/` : null;
+      if (!cloudPrefix) return { skip: true };
+
+      const validCloudUrl = cloudPrefix + 'image/upload/v1/tcivs/test.jpg';
+      const maliciousUrl = 'https://evil-tracker.example.com/pixel.png';
+      // 只鎖網域字面是不夠的——必須鎖到本專案的 cloud name，否則任何人自己的 Cloudinary
+      // 帳號網址一樣會被放行，一樣能達成同樣的追蹤/外洩效果。
+      const otherCloudinaryAccount = 'https://res.cloudinary.com/someone-elses-account/image/upload/x.jpg';
+      const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+      const legacyRawBase64 = '/9j/4AAQSkZJRgABAQEA';
+
+      return {
+        skip: false,
+        allowsOwnCloudinary: resolveImgSrc(validCloudUrl) === validCloudUrl,
+        blocksExternalUrl: resolveImgSrc(maliciousUrl) === '',
+        blocksOtherCloudinaryAccount: resolveImgSrc(otherCloudinaryAccount) === '',
+        passesThroughDataUri: resolveImgSrc(dataUri) === dataUri,
+        prefixesLegacyRawBase64: resolveImgSrc(legacyRawBase64) === ('data:image/jpeg;base64,' + legacyRawBase64),
+        handlesEmpty: resolveImgSrc('') === '' && resolveImgSrc(null) === '' && resolveImgSrc(undefined) === '',
+      };
+    });
+    if (result.skip) return;
+    if (!result.allowsOwnCloudinary) throw new Error('resolveImgSrc() 誤擋了本專案自己 Cloudinary 帳號的正常網址，可能白名單字串拼錯或 CLOUDINARY_CLOUD_NAME 讀取失敗');
+    if (!result.blocksExternalUrl) throw new Error('resolveImgSrc() 沒有擋下非白名單的外部網址，可能被改回 startsWith(\'http\') 就放行的舊寫法——任何日後打開月記/匯出PDF的老師會對外發出請求');
+    if (!result.blocksOtherCloudinaryAccount) throw new Error('resolveImgSrc() 只檢查了 res.cloudinary.com 這個網域本身，沒有進一步限定到本專案的 cloud name，其他任何人的 Cloudinary 帳號網址仍會被放行');
+    if (!result.passesThroughDataUri) throw new Error('resolveImgSrc() 不再正確處理既有的 data: URI（薪資單/一般照片目前的正常存檔格式），會造成既有照片全部無法顯示');
+    if (!result.prefixesLegacyRawBase64) throw new Error('resolveImgSrc() 不再正確處理沒有前綴的舊格式純 base64 字串');
+    if (!result.handlesEmpty) throw new Error('resolveImgSrc() 對空值/null/undefined 的處理被改壞');
+  });
+
+  await test('T-SEC-57 loadStudentsTable() 真實渲染含撇號姓名/網址的合成名冊資料，實際點擊大頭照確認 openPhotoModal() 收到正確參數', async () => {
+    // 2026-08-26 新增，同日修正：初版只做靜態字面比對（讀 loadStudentsTable.toString()
+    // 找 openPhotoModal(${jsArg( 字樣），跟 AI_測試架構說明_狀態.md 陷阱19 提醒過的
+    // regex/字串搜尋風險是同一類、也抓不到「jsArg() 本身被改壞、但呼叫端字面還在」這種
+    // 情境，經協作者複查指出後改寫成真執行版本。loadStudentsTable() 本身依賴
+    // getRosterForSelectedTerm()／initStudentTermControls()／updateStudentTermStatus()
+    // 三個 Firestore 依賴的函式，測試環境沒有真實連線；改用「在資料邊界注入合成資料」
+    // 的 mock 模式——只暫時覆寫這三個外圍函式（不是覆寫要驗證的 loadStudentsTable()
+    // 本身，也不是覆寫 jsArg()／escapeHtml()／openPhotoModal()），讓 loadStudentsTable()
+    // 內部真正的 roster.map() 渲染邏輯用合成資料完整跑一次、真的寫入
+    // #students-table-body 的 DOM，再對真正渲染出來的 <img> 元素觸發真實 click 事件——
+    // 這會觸發瀏覽器解析並執行 onclick 屬性字串，不是模擬。合成資料刻意放兩筆：一筆
+    // 正常姓名/網址（基準情境），一筆姓名與網址皆含單引號（原始 bug 的觸發條件）。
+    // openPhotoModal() 暫時覆寫成記錄呼叫參數而非真的開燈箱，用來斷言「onclick 是否
+    // 真的把正確、完整、未被截斷的姓名/網址傳進來」——這件事字面比對測不出來，因為
+    // jsArg() 若未來被改壞、但呼叫端寫法字面上仍是 jsArg(...)，字面比對仍會判定通過，
+    // 只有真執行才抓得到。修復前的舊程式碼（手動單引號拼接）在這個測試下的實際失敗
+    // 現象：第一筆（無特殊字元）正常呼叫，第二筆（含單引號）onclick 屬性字串在瀏覽器
+    // 解析執行時會拋出 Uncaught SyntaxError（missing ) after argument list），
+    // openPhotoModal() 完全不會被呼叫到——這是實際重現過的失敗模式，不是推論。
+    // finally 一律還原三個覆寫函式與 tbody 原始內容，避免汙染後續測試。
+    const result = await page.evaluate(async () => {
+      if (typeof loadStudentsTable !== 'function' || typeof openPhotoModal !== 'function') return { skip: true };
+      const tbody = document.getElementById('students-table-body');
+      if (!tbody) return { skip: true };
+
+      const origInit = window.initStudentTermControls;
+      const origRoster = window.getRosterForSelectedTerm;
+      const origStatus = window.updateStudentTermStatus;
+      const origOpenPhotoModal = window.openPhotoModal;
+      const savedTbodyHtml = tbody.innerHTML;
+
+      const captured = [];
+      const jsErrors = [];
+      const onWindowError = e => jsErrors.push(e.message);
+      window.addEventListener('error', onWindowError);
+
+      try {
+        window.initStudentTermControls = async () => {};
+        window.updateStudentTermStatus = async () => {};
+        window.getRosterForSelectedTerm = async () => ([
+          { seatNo: '05', name: '陳小明', company: 'A公司', email: '', photoUrl: 'https://res.cloudinary.com/dthv3z2q8/image/upload/v1/tcivs/normal.jpg' },
+          { seatNo: '09', name: "O'Brien", company: 'B公司', email: '', photoUrl: "https://res.cloudinary.com/dthv3z2q8/image/upload/v1/tcivs/o's.jpg" },
+        ]);
+        window.openPhotoModal = (src, name) => { captured.push({ src, name }); };
+
+        await loadStudentsTable();
+
+        const imgs = Array.from(tbody.querySelectorAll('.student-photo-cell img'));
+        imgs.forEach(img => img.click());
+
+        return {
+          skip: false,
+          rowCount: tbody.querySelectorAll('tr').length,
+          imgCount: imgs.length,
+          captured,
+          jsErrors,
+        };
+      } finally {
+        window.initStudentTermControls = origInit;
+        window.getRosterForSelectedTerm = origRoster;
+        window.updateStudentTermStatus = origStatus;
+        window.openPhotoModal = origOpenPhotoModal;
+        window.removeEventListener('error', onWindowError);
+        tbody.innerHTML = savedTbodyHtml;
+      }
+    });
+    if (result.skip) return;
+    if (result.imgCount !== 2) throw new Error(`預期渲染出 2 張大頭照 <img>（合成名冊 2 筆皆有 photoUrl），實際找到 ${result.imgCount} 張，DOM 結構可能已改變`);
+    if (result.rowCount !== 2) throw new Error(`預期渲染出 2 列 <tr>，實際找到 ${result.rowCount} 列`);
+    if (result.captured.length !== 2)
+      throw new Error(`點擊 2 張大頭照後，openPhotoModal() 應該被呼叫 2 次，實際只被呼叫 ${result.captured.length} 次——這正是修復前的實際失敗模式：姓名/網址含單引號那一列的 onclick 在瀏覽器解析執行時拋出例外（實測訊息：${JSON.stringify(result.jsErrors)}），該次點擊完全不會呼叫到 openPhotoModal()`);
+    const normal = result.captured[0];
+    const apostrophe = result.captured[1];
+    if (!normal || normal.name !== '陳小明' || normal.src !== 'https://res.cloudinary.com/dthv3z2q8/image/upload/v1/tcivs/normal.jpg')
+      throw new Error(`第一筆（無特殊字元）合成資料點擊後 openPhotoModal() 收到的參數不正確：${JSON.stringify(normal)}`);
+    if (!apostrophe || apostrophe.name !== "O'Brien" || apostrophe.src !== "https://res.cloudinary.com/dthv3z2q8/image/upload/v1/tcivs/o's.jpg")
+      throw new Error(`第二筆（姓名/網址含單引號）點擊後 openPhotoModal() 收到的參數不正確或被截斷：${JSON.stringify(apostrophe)}——單引號可能在傳遞過程中破壞了 JS 字串邊界`);
+  });
+
+  await test('T-SEC-58 系統設定頁三個外部主控台連結（Cloudinary／Firestore）皆有 rel="noopener"', async () => {
+    // 2026-08-26 新增。這三個 target="_blank" 連結（Cloudinary 資料夾刪除／Firestore
+    // 用量／Cloudinary 用量報表）原本缺少 rel="noopener"，開啟的分頁能透過 window.opener
+    // 存取回原分頁（reverse tabnabbing）。網址本身是寫死的 Cloudinary/Firebase 主控台
+    // 連結、非使用者資料，可利用性趨近零，但修法零成本，順手補上。這幾個連結是
+    // #page-t-settings 靜態 HTML 的一部分（不是 JS 動態產生），不需要老師 session 或
+    // 導覽到該頁，頁面載入時就存在於 DOM。
+    const result = await page.evaluate(() => {
+      const consoleHosts = ['console.cloudinary.com', 'console.firebase.google.com'];
+      const links = Array.from(document.querySelectorAll('a[target="_blank"]'))
+        .filter(a => consoleHosts.some(h => (a.getAttribute('href') || '').includes(h)));
+      return {
+        found: links.length,
+        missing: links
+          .filter(a => !(a.getAttribute('rel') || '').split(/\s+/).includes('noopener'))
+          .map(a => a.getAttribute('href')),
+      };
+    });
+    if (result.found < 3) throw new Error(`預期至少找到 3 個指向 Cloudinary/Firebase 主控台的 target="_blank" 連結，實際找到 ${result.found} 個——連結可能被搬移、刪除或改了網址，需要重新確認`);
+    if (result.missing.length > 0) throw new Error(`以下連結缺少 rel="noopener"：${result.missing.join('；')}`);
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

@@ -4398,11 +4398,23 @@ function toDateVal(str) {
 // ===== 共用工具 ==============================================
 // ============================================================
 
+// 2026-08-26 補修：entries[].photos／salaryPhotos 是學生自己月記文件的一部分，rule.txt
+// 對這兩個欄位只驗證陣列長度／型別（見 validSalaryPhotos()），沒有逐元素驗證網址格式——
+// 技術使用者可繞過正常上傳流程，直接呼叫 Firestore API 塞入任意外部網址。這個網址之後
+// 會被當成 <img src> 自動載入，或被 imageToDataUrl()（PDF匯出）真的用 fetch() 抓下來，
+// 等於學生能讓「日後打開這份月記的人」瀏覽器對外發出請求（IP/瀏覽器資訊外洩風險）——
+// 老師端影響更大（見 teacher.html 同名函式），這裡一併同步修正保持一致。改成網域白名單：
+// 只允許本專案實際使用的 Cloudinary 帳號（CLOUDINARY_CLOUD_NAME），其餘 http(s) 網址一律
+// 視為無效來源回傳空字串，不再無條件放行任何 http 開頭字串。刻意不對 rule.txt 做逐元素
+// 正則驗證：Firestore Rules 對變動長度陣列逐項驗證本來就吃力（見 validSalaryPhotos() 註
+// 解），在前端把關成本更低、更直接有效——不論 Firestore 裡實際塞了什麼網址，不符合白
+// 名單就永遠不會被拿去 <img src> 或 fetch()。
 function resolveImgSrc(src) {
   src = String(src || '');
   if (!src) return '';
-  if (src.startsWith('http')) return src;
   if (src.startsWith('data:')) return src;
+  if (src.startsWith(`https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/`)) return src;
+  if (src.startsWith('http')) return '';
   return 'data:image/jpeg;base64,' + src;
 }
 

@@ -1393,7 +1393,7 @@ tr:last-child td { border-bottom: none; }
               <tr>
                 <td style="padding:8px 10px;border:1px solid var(--border)">🖼️ 圖片檔案</td>
                 <td style="padding:8px 10px;border:1px solid var(--border)">Cloudinary<br><span style="font-size:11px;color:var(--text2)">25 GB 免費</span></td>
-                <td style="padding:8px 10px;border:1px solid var(--border)">至 Cloudinary → tcivs 資料夾刪除<br><a href="https://console.cloudinary.com/console/media_library/folders/tcivs" target="_blank" style="font-size:11px;color:var(--accent)">🔗 前往資料夾刪除</a></td>
+                <td style="padding:8px 10px;border:1px solid var(--border)">至 Cloudinary → tcivs 資料夾刪除<br><a href="https://console.cloudinary.com/console/media_library/folders/tcivs" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">🔗 前往資料夾刪除</a></td>
               </tr>
               <tr style="background:var(--bg3)">
                 <td style="padding:8px 10px;border:1px solid var(--border)">🔗 圖片網址</td>
@@ -1403,7 +1403,7 @@ tr:last-child td { border-bottom: none; }
               <tr>
                 <td style="padding:8px 10px;border:1px solid var(--border)">📝 文字資料</td>
                 <td style="padding:8px 10px;border:1px solid var(--border)">Firestore<br><span style="font-size:11px;color:var(--text2)">1 GB 免費</span></td>
-                <td style="padding:8px 10px;border:1px solid var(--border)">程式內刪除<br><a href="https://console.firebase.google.com/u/0/project/project-4256549712592005708/firestore/databases/-default-/usage/prev-24h" target="_blank" style="font-size:11px;color:var(--accent)">🔗 前往 Firestore</a><br><span style="font-size:11px;color:var(--text2)">⚠️ 免費方案無法查看精確容量，僅能參考讀寫次數間接評估</span></td>
+                <td style="padding:8px 10px;border:1px solid var(--border)">程式內刪除<br><a href="https://console.firebase.google.com/u/0/project/project-4256549712592005708/firestore/databases/-default-/usage/prev-24h" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">🔗 前往 Firestore</a><br><span style="font-size:11px;color:var(--text2)">⚠️ 免費方案無法查看精確容量，僅能參考讀寫次數間接評估</span></td>
               </tr>
             </tbody>
           </table>
@@ -1439,7 +1439,7 @@ tr:last-child td { border-bottom: none; }
               <button class="btn btn-secondary" onclick="saveStorageThreshold()" style="white-space:nowrap">儲存</button>
             </div>
           </div>
-          <a href="https://console.cloudinary.com/app/c-7ace2a5c244cfd5237360ecfcbe309/home/usage-reports" target="_blank" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:var(--bg3);color:var(--text1);border:1px solid var(--border)">🔗 前往 Cloudinary 查看用量</a>
+          <a href="https://console.cloudinary.com/app/c-7ace2a5c244cfd5237360ecfcbe309/home/usage-reports" target="_blank" rel="noopener" class="btn" style="display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:var(--bg3);color:var(--text1);border:1px solid var(--border)">🔗 前往 Cloudinary 查看用量</a>
         </div>
 
         </div>
@@ -3514,9 +3514,16 @@ async function loadStudentsTable() {
       const safeSeat = jsArg(seatNo);
       const safeNameArg = jsArg(s.name || '');
       const thumbUrl = s.photoUrl ? escapeHtml(cloudinaryThumb(s.photoUrl, 48)) : '';
-      const origUrl  = s.photoUrl ? escapeHtml(s.photoUrl) : '';
+      // 2026-08-26 補修：這裡原本是全站唯一一處手動用單引號包字串、只靠 escapeHtml()
+      // 而非 jsArg() 的 onclick 組裝方式（onclick="openPhotoModal('${origUrl}','${...}')"）。
+      // escapeHtml() 把 ' 轉成 &#39;，但瀏覽器解析 HTML 屬性時會先把 &#39; 解碼回真正的
+      // 單引號，才把整段文字當成 onclick 的 JS 程式碼——若 s.name（老師匯入的學生姓名）
+      // 或 s.photoUrl 剛好含一個單引號，就會提早結束 JS 字串，讓後面內容變成可執行語法。
+      // 這同時也是真實功能性 bug：姓名含撇號（如某些外文譯名）時這顆按鈕會直接壞掉
+      // （JS 語法錯誤，onclick 整個失效），不需要任何人刻意注入什麼惡意內容。改用已經
+      // 算好的 safeNameArg，photoUrl 也包一層 jsArg()，跟全站其餘 onclick 一致。
       const photoCell = s.photoUrl
-        ? `<img src="${thumbUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;cursor:pointer;border:2px solid var(--border);display:block" onclick="openPhotoModal('${origUrl}','${escapeHtml(s.name)}')" title="${escapeHtml(s.name)}">`
+        ? `<img src="${thumbUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;cursor:pointer;border:2px solid var(--border);display:block" onclick="openPhotoModal(${jsArg(s.photoUrl)},${safeNameArg})" title="${escapeHtml(s.name)}">`
         : `<div style="width:44px;height:44px;border-radius:50%;background:var(--bg3);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text3)" title="未上傳">👤</div>`;
       const googleCell = s.email
         ? `<span style="background:rgba(34,197,94,0.15);color:var(--accent-green);padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.email)}">✅ ${escapeHtml(s.email)}</span>`
@@ -6049,11 +6056,25 @@ function renderJournalListUI(journals) {
 }
 // ======================================================
 
+// 2026-08-26 補修：entries[].photos／salaryPhotos 是學生自己月記文件的一部分，rule.txt
+// 對這兩個欄位只驗證陣列長度／型別（見 validSalaryPhotos()），沒有逐元素驗證網址格式——
+// 技術使用者可繞過正常上傳流程，直接呼叫 Firestore API 塞入任意外部網址。這個網址之後
+// 會在老師審閱畫面被當成 <img src> 自動載入，或在 PDF 匯出時被 imageToDataUrl() 真的用
+// fetch() 抓下來（第 6282 行附近）——影響對象是「日後打開這份月記審閱、或匯出PDF的
+// 老師」：老師完全不需要做錯任何事、不需要有任何異常操作，單純點開審閱畫面就會讓瀏覽器
+// 對外發出請求（IP/瀏覽器資訊外洩風險），是會波及第三人的問題，不只是攻擊者自己的資料
+// 被錯誤處理。改成網域白名單：只允許本專案實際使用的 Cloudinary 帳號
+// （CLOUDINARY_CLOUD_NAME），其餘 http(s) 網址一律視為無效來源回傳空字串，不再無條件
+// 放行任何 http 開頭字串。刻意不對 rule.txt 做逐元素正則驗證：Firestore Rules 對變動
+// 長度陣列逐項驗證本來就吃力（見 validSalaryPhotos() 註解），在瀏覽器端把關成本更低、
+// 更直接有效——不論 Firestore 裡實際塞了什麼網址，不符合白名單就永遠不會被拿去
+// <img src> 或 fetch()。
 function resolveImgSrc(src) {
   src = String(src || '');
   if (!src) return '';
-  if (src.startsWith('http')) return src;
   if (src.startsWith('data:')) return src;
+  if (src.startsWith(`https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/`)) return src;
+  if (src.startsWith('http')) return '';
   return 'data:image/jpeg;base64,' + src;
 }
 

@@ -184,6 +184,14 @@ const RISK_TARGETS = [
   // 若被弱化，技術使用者就能用不一致的欄位污染老師端按欄位分組的統計，因此和其他
   // 頂層規則輔助函式一樣必須獨立納入高風險變更偵測。
   { name: 'function hasMatchingJournalId()', regex: /function\s+hasMatchingJournalId\s*\(/ },
+  // 2026-08-26 新增：matchesOwnSeatNo() 是跟 hasMatchingJournalId() 同層級的頂層輔助
+  // 函式，取代原本 /students/{docId} 的 docId.matches('.*_' + seatNo) 正則字串拼接
+  // 寫法（座號若含正則特殊字元會被誤判成萬用字元，導致比對範圍意外放寬，見
+  // AI_CONTEXT_狀態.md 第二十節）。呼叫端（/students/{docId} 的 allow get）巢狀在已被
+  // 監控的 match /students/{docId} 區塊裡會連帶抓到，但函式定義本體是獨立寫在區塊外面
+  // 的頂層函式，需要獨立一條——否則弱化這個函式內部邏輯（例如把 split('_') 改回正則
+  // 字串拼接）不會被標記為高風險變更。新增當下就同步補上，不是事後稽核才發現。
+  { name: 'function matchesOwnSeatNo()', regex: /function\s+matchesOwnSeatNo\s*\(/ },
   { name: 'match /admins/{adminId}', regex: /match\s+\/admins\/\{adminId\}/ },
   { name: 'match /students/{docId}', regex: /match\s+\/students\/\{docId\}/ },
   { name: 'match /studentBindings/{bindingId}', regex: /match\s+\/studentBindings\/\{bindingId\}/ },

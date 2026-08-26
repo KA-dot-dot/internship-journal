@@ -1,7 +1,24 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v35
+ * 學生端自動化測試 v36
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v36 修正（2026-08-26）：稽核發現 resolveImgSrc()（student.html／teacher.html 各自
+ * 獨立一份）原本任何 `http` 開頭字串一律直接放行——entries[].photos／salaryPhotos 是
+ * 學生自己月記文件的一部分，rule.txt 對這兩個欄位只驗證陣列長度／型別（見
+ * validSalaryPhotos()），沒有逐元素驗證網址格式，技術使用者可繞過正常上傳流程直接呼叫
+ * Firestore API 塞入任意外部網址。這個網址之後會被當成 <img src> 自動載入，或被
+ * imageToDataUrl()（PDF匯出）真的用 fetch() 抓下來——teacher.html 端影響更大（任何日後
+ * 打開這份月記審閱、或匯出PDF的老師，瀏覽器都會對外發出請求，是會波及第三人的問題），
+ * 這裡的 student.html 副本一併同步修正保持一致。修法：改成網域白名單，只允許
+ * CLOUDINARY_CLOUD_NAME 對應的 Cloudinary 帳號，其餘 http(s) 網址一律回傳空字串。純
+ * 前端邏輯修正，未異動 rule.txt（Firestore Rules 對變動長度陣列逐項驗證本來就吃力，見
+ * validSalaryPhotos() 既有取捨，在前端把關成本更低更有效）。
+ *   S-SEC-50  直接呼叫 resolveImgSrc() 本體驗證：本專案 Cloudinary 網址放行、任意外部
+ *             網址與「其他 Cloudinary 帳號」網址皆回傳空字串（後者確認白名單真的鎖到
+ *             cloud name、不是只鎖 res.cloudinary.com 這個網域本身）、既有 data: URI
+ *             與無前綴舊格式純 base64 字串兩種既有合法格式不受影響、空值/null/undefined
+ *             處理不變。是真執行不是字串比對。
  *
  * v35 修正（2026-08-25）：一輪「用 AI_CONTEXT_狀態.md 等三份狀態文件記載的邊界案例反例，
  * 逐項對照 student.html／teacher.html 實際程式碼」的稽核中，額外檢查既有測試涵蓋範圍時
@@ -3205,6 +3222,46 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('saveJournal() 的 payload 找不到 `...(isFirstSubmit ? { journalSubmitNotifiedAt: null } : {})` 這個條件式 spread 寫法，可能被改成無條件寫入——一般編輯若無條件帶上這個欄位，會撞上 rule.txt「一般編輯必須維持原值不變」被 403 拒絕；若無條件省略，真正第一次繳交也不會被 checkNewJournals() 查到，老師安靜收不到繳交通知');
     if (result.occurrenceCount !== 1)
       throw new Error(`過濾註解後，journalSubmitNotifiedAt 應該只在條件式 spread 那一行出現恰好 1 次，實際找到 ${result.occurrenceCount} 次——可能有第二處遺漏測到的無條件寫入或殘留舊寫法`);
+  });
+
+  await test('S-SEC-50 resolveImgSrc() 只允許本專案 Cloudinary 網域，其餘外部網址一律視為無效來源', async () => {
+    // 2026-08-26 新增。背景見本檔案 v36 header：entries[].photos／salaryPhotos 是學生
+    // 自己月記文件的一部分，rule.txt 只驗證陣列長度／型別，沒有逐元素驗證網址格式，
+    // 技術使用者可繞過正常上傳流程直接呼叫 Firestore API 塞入任意外部網址，之後會被
+    // 當成 <img src> 或被 imageToDataUrl() 的 fetch() 真的抓下來。這裡直接呼叫函式本體
+    // 帶各種輸入驗證行為，不是字串比對——比照專案一貫的「Actual execution over
+    // reasoning」標準（同 S-SEC-48）。
+    const result = await page.evaluate(() => {
+      if (typeof resolveImgSrc !== 'function') return { skip: true };
+      const cloudPrefix = (typeof CLOUDINARY_CLOUD_NAME === 'string' && CLOUDINARY_CLOUD_NAME)
+        ? `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/` : null;
+      if (!cloudPrefix) return { skip: true };
+
+      const validCloudUrl = cloudPrefix + 'image/upload/v1/tcivs/test.jpg';
+      const maliciousUrl = 'https://evil-tracker.example.com/pixel.png';
+      // 只鎖網域字面是不夠的——必須鎖到本專案的 cloud name，否則任何人自己的 Cloudinary
+      // 帳號網址一樣會被放行，一樣能達成同樣的追蹤/外洩效果。
+      const otherCloudinaryAccount = 'https://res.cloudinary.com/someone-elses-account/image/upload/x.jpg';
+      const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+      const legacyRawBase64 = '/9j/4AAQSkZJRgABAQEA';
+
+      return {
+        skip: false,
+        allowsOwnCloudinary: resolveImgSrc(validCloudUrl) === validCloudUrl,
+        blocksExternalUrl: resolveImgSrc(maliciousUrl) === '',
+        blocksOtherCloudinaryAccount: resolveImgSrc(otherCloudinaryAccount) === '',
+        passesThroughDataUri: resolveImgSrc(dataUri) === dataUri,
+        prefixesLegacyRawBase64: resolveImgSrc(legacyRawBase64) === ('data:image/jpeg;base64,' + legacyRawBase64),
+        handlesEmpty: resolveImgSrc('') === '' && resolveImgSrc(null) === '' && resolveImgSrc(undefined) === '',
+      };
+    });
+    if (result.skip) return;
+    if (!result.allowsOwnCloudinary) throw new Error('resolveImgSrc() 誤擋了本專案自己 Cloudinary 帳號的正常網址，可能白名單字串拼錯或 CLOUDINARY_CLOUD_NAME 讀取失敗');
+    if (!result.blocksExternalUrl) throw new Error('resolveImgSrc() 沒有擋下非白名單的外部網址，可能被改回 startsWith(\'http\') 就放行的舊寫法，SSRF/第三方追蹤風險重新出現');
+    if (!result.blocksOtherCloudinaryAccount) throw new Error('resolveImgSrc() 只檢查了 res.cloudinary.com 這個網域本身，沒有進一步限定到本專案的 cloud name，其他任何人的 Cloudinary 帳號網址仍會被放行');
+    if (!result.passesThroughDataUri) throw new Error('resolveImgSrc() 不再正確處理既有的 data: URI（薪資單/一般照片目前的正常存檔格式），會造成既有照片全部無法顯示');
+    if (!result.prefixesLegacyRawBase64) throw new Error('resolveImgSrc() 不再正確處理沒有前綴的舊格式純 base64 字串');
+    if (!result.handlesEmpty) throw new Error('resolveImgSrc() 對空值/null/undefined 的處理被改壞');
   });
 
   return results;
