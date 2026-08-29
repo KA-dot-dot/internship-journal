@@ -49,6 +49,23 @@
  *             semester 比對、companyAggMap 的 studentSet.add() 用複合 key、座號欄位
  *             改呼叫 seatDisplayWithSemester()。
  *
+ * v34 首次本機 Step2_RunTests.bat 實測（2026-08-29 下午6:25:38）：84/85 通過，唯一失敗
+ * 是 T-SEC-59（誤報「有薪資記錄學生」顯示0人）。查證後確認是**測試本身的隔離缺口**，
+ * 不是 renderSalaryStatsFromCache() 邏輯壞掉（同一輪 T-SEC-60/61/62 皆通過，複合 key
+ * 合併/撞號偵測邏輯本身正確）：renderSalaryStatsFromCache() 內部會自己呼叫
+ * getSelectedCompanies()（讀真正頁面上的 .company-cb 核取方塊），測試帳號在這之前的
+ * 頁面操作已經讓畫面載入過真實公司資料，這些核取方塊代表的是真正報名的公司名稱，不
+ * 包含合成測試資料用的「A公司」／「B公司」，導致兩筆合成月記全部被篩掉。
+ * renderWorkTypeStats() 沒有這個問題，因為它把 selectedCompanies 當一般參數直接傳入
+ * （呼叫端直接傳 null），有從外部注入的管道；renderSalaryStatsFromCache() 完全沒有，
+ * 只能比照已經在覆寫的 5 個下游渲染函式，一併暫時覆寫 getSelectedCompanies() 為固定
+ * 回傳 null，呼叫結束後立即還原。修正前已用 Node vm 模組（非一般 CommonJS eval，避免
+ * Node 模組包裝造成的函式作用域誤判，確保跟瀏覽器裡真正的全域腳本作用域行為一致）
+ * 個別重現「不覆寫時真的會誤判成 0 人」與「覆寫後正確顯示 3 人」兩種情境，才落地這個
+ * 修正，不是憑臆測直接改。測項數量不變（仍是 T-SEC-59～62 四條新增測試），故版本號
+ * 沿用 v34、不獨立升版——這一版本身還沒有拿到過「全部通過」的實測結果，屬於同一輪
+ * 修正的一部分。
+ *
  * v33 修正（2026-08-26）：修復三項稽核發現的問題（皆純前端修法，未異動 rule.txt）：
  * ①resolveImgSrc()——entries[].photos／salaryPhotos 是學生自己月記文件的一部分，
  * rule.txt 只驗證陣列長度／型別，沒有逐元素驗證網址格式，技術使用者可繞過正常上傳流程
@@ -3457,6 +3474,17 @@ async function runTeacherTests(page, log) {
     // 還原。座號01橫跨114-2（學生甲）／115-1（學生乙）兩個學期、同屬A公司（真正撞號
     // 情境）；座號02只在115-1（學生丙）、屬B公司，當作「無撞號」對照組，確認修復後
     // 沒有撞號的座號完全不受影響、不會被誤加上學期標註。
+    // 2026-08-29 修正（首次實測發現）：renderSalaryStatsFromCache() 內部會自己呼叫
+    // getSelectedCompanies()（第5328行），這個函式讀的是真正頁面上目前存在的
+    // .company-cb 核取方塊——測試帳號在這之前的頁面操作已經讓畫面載入過真實公司資料，
+    // 這些核取方塊代表的是「真正報名的公司名稱」，不包含這裡合成的「A公司」／「B公司」。
+    // 若不一併覆寫，isCompanySelected() 會把兩筆合成月記全部濾掉（因為合成公司名不在
+    // 真實核取方塊清單裡），studentMap 變空、「有薪資記錄學生」顯示 0 人，而不是真的
+    // 因為複合 key 合併邏輯壞掉。renderWorkTypeStats() 不受這個問題影響，因為它把
+    // selectedCompanies 當一般參數直接傳入（呼叫端直接傳 null），不像
+    // renderSalaryStatsFromCache() 完全沒有從外部注入這個依賴的管道，只能覆寫全域函式
+    // 本身。覆寫成固定回傳 null（等同「畫面上沒有勾選任何公司篩選」的預設狀態），呼叫
+    // 結束後立即還原，避免影響同一個瀏覽器分頁後續其他測試。
     const result = await page.evaluate(() => {
       if (typeof renderSalaryStatsFromCache !== 'function') return { skip: true };
       const origFocus = window.renderSalaryFocus;
@@ -3464,12 +3492,14 @@ async function runTeacherTests(page, log) {
       const origLine = window.renderSalaryLineChart;
       const origBar = window.renderSalaryBarChart;
       const origSwitch = window.switchSalaryDetailTab;
+      const origGetSelectedCompanies = window.getSelectedCompanies;
       try {
         window.renderSalaryFocus = () => {};
         window.renderSalaryAlerts = () => {};
         window.renderSalaryLineChart = () => {};
         window.renderSalaryBarChart = () => {};
         window.switchSalaryDetailTab = () => {};
+        window.getSelectedCompanies = () => null;
 
         const journals = [
           { seatNo: '01', semester: '114-2', studentName: '學生甲', company: 'A公司', salary: 30000 },
@@ -3492,6 +3522,7 @@ async function runTeacherTests(page, log) {
         window.renderSalaryLineChart = origLine;
         window.renderSalaryBarChart = origBar;
         window.switchSalaryDetailTab = origSwitch;
+        window.getSelectedCompanies = origGetSelectedCompanies;
       }
     });
     if (result.skip) return;
