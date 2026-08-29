@@ -4649,11 +4649,21 @@ async function exportAllStatsExcel() {
 
   // ── 工作表 1：繳交狀況 ──
   // ── 工作表 2：學生薪資總覽 ──
+  // 2026-08-29 修正：sJournals 篩選原本只比對 j.seatNo === s.id，沒有同時比對
+  // semester——students 陣列本身可能橫跨多個學期（monthSlots 涵蓋的日期範圍常常
+  // 跨學期／跨學年），座號每學期重新分配，只比對裸座號會把兩位不同學期、剛好座號
+  // 重複的不同學生的薪資紀錄一併算給同一列，「月數」「平均薪資」都會被錯誤加總。
+  // 補上 j.semester === s.semester 後，跟這份 Excel 其他四處（studentMap／
+  // journalMap／submitAoA／locationRows）已經在用的「學期＋座號」判斷標準一致。
+  // 撞號時「座號」欄位加註學期（見 computeCollidingSeatNos()／seatDisplayWithSemester()
+  // 上方註解），用的是這份 Excel 專用的 students 名冊、獨立判斷，不跟畫面上的薪資統計
+  // 共用結果。
+  const stuSalaryCollidingSeatNos = computeCollidingSeatNos(students);
   const stuSalaryRows = students.map(s => {
-    const sJournals = journals.filter(j => j.seatNo === s.id && j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)));
+    const sJournals = journals.filter(j => j.seatNo === s.id && j.semester === s.semester && j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)));
     const salaries = sJournals.map(j => Number(j.salary));
     const avg = salaryAvg(salaries) || '';
-    return { 座號: s.seatNo || s.id, 姓名: sanitizeExcelCell(s.name || ''), 公司: sanitizeExcelCell(s.company || ''), 月數: sJournals.length, '平均薪資(元)': avg };
+    return { 座號: seatDisplayWithSemester(s.seatNo || s.id, s.semester, stuSalaryCollidingSeatNos), 姓名: sanitizeExcelCell(s.name || ''), 公司: sanitizeExcelCell(s.company || ''), 月數: sJournals.length, '平均薪資(元)': avg };
   });
   // ── 工作表 3：各公司薪資 ──
   const companyAggMap = {};
@@ -4661,7 +4671,10 @@ async function exportAllStatsExcel() {
     // 2026-07-22 修正：公司分組改為月記優先、名冊備援，理由同上方 locationRows
     const c = sanitizeExcelCell(j.company || (studentMap[`${j.semester}-${j.seatNo}`]?.company) || '未填寫');
     if (!companyAggMap[c]) companyAggMap[c] = { studentSet: new Set(), salaries: [] };
-    companyAggMap[c].studentSet.add(j.seatNo);
+    // 2026-08-29 修正：studentSet 原本存裸座號，會把跨學期同座號的不同學生當成
+    // 同一人，低估這張工作表「學生數」欄位——跟上方 stuSalaryRows 是同一輪稽核
+    // 發現的同一種問題。改存「學期＋座號」複合 key。
+    companyAggMap[c].studentSet.add(`${j.semester}-${j.seatNo}`);
     companyAggMap[c].salaries.push(Number(j.salary));
   });
   const companyRows2 = Object.entries(companyAggMap).sort((a,b) => b[1].salaries.reduce((x,y)=>x+y,0)/b[1].salaries.length - a[1].salaries.reduce((x,y)=>x+y,0)/a[1].salaries.length)
@@ -5056,8 +5069,8 @@ function renderSalaryFocus(studentList, companyList) {
   const lowStudent = [...studentList].sort((a,b)=>a.avg-b.avg)[0];
   const topCompany = [...companyList].sort((a,b)=>b.avg-a.avg)[0];
   const lowCompany = [...companyList].sort((a,b)=>a.avg-b.avg)[0];
-  setSalaryFocusCard('salary-top-student', topStudent ? `${topStudent.seatNo} ${topStudent.name || '-'}` : '-', topStudent ? `${formatMoney(topStudent.avg)}｜${topStudent.company || '-'}` : '尚無薪資資料');
-  setSalaryFocusCard('salary-low-student', lowStudent ? `${lowStudent.seatNo} ${lowStudent.name || '-'}` : '-', lowStudent ? `${formatMoney(lowStudent.avg)}｜${lowStudent.company || '-'}` : '尚無薪資資料');
+  setSalaryFocusCard('salary-top-student', topStudent ? `${topStudent.seatDisplay || topStudent.seatNo} ${topStudent.name || '-'}` : '-', topStudent ? `${formatMoney(topStudent.avg)}｜${topStudent.company || '-'}` : '尚無薪資資料');
+  setSalaryFocusCard('salary-low-student', lowStudent ? `${lowStudent.seatDisplay || lowStudent.seatNo} ${lowStudent.name || '-'}` : '-', lowStudent ? `${formatMoney(lowStudent.avg)}｜${lowStudent.company || '-'}` : '尚無薪資資料');
   setSalaryFocusCard('salary-top-company', topCompany ? topCompany.name : '-', topCompany ? `${formatMoney(topCompany.avg)}｜${topCompany.studentCount} 人` : '尚無薪資資料');
   setSalaryFocusCard('salary-low-company', lowCompany ? lowCompany.name : '-', lowCompany ? `${formatMoney(lowCompany.avg)}｜${lowCompany.studentCount} 人` : '尚無薪資資料');
 }
@@ -5183,7 +5196,7 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
     return items.map(s => {
       const pct = classAvg ? Math.round((s.avg - classAvg) / classAvg * 100) : 0;
       const note = type === 'low' ? `低於平均 ${Math.abs(pct)}%` : `高於平均 ${pct}%`;
-      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.seatNo)} ${escapeHtml(s.name || '-')}</div><div class="salary-alert-note">${escapeHtml(s.company || '-')}｜${note}</div></div><strong>${formatMoney(s.avg)}</strong></div>`;
+      return `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.seatDisplay || s.seatNo)} ${escapeHtml(s.name || '-')}</div><div class="salary-alert-note">${escapeHtml(s.company || '-')}｜${note}</div></div><strong>${formatMoney(s.avg)}</strong></div>`;
     }).join('');
   }
 
@@ -5283,6 +5296,32 @@ function getJournalCompany(j, stuCompanyMap = {}) {
   return normalizeCompanyName(j.company || stuCompanyMap[`${j.semester}-${j.seatNo}`]);
 }
 
+// 2026-08-29 新增：跨學期座號合併問題（見上方 studentMap／typeMap／stuSalaryRows 三處
+// 修正）修好之後，同一份清單/表格裡可能出現兩列座號相同、姓名不同的資料——這是正確的
+// （兩個不同學期、剛好座號重複的不同學生），但座號欄位本身沒有學期資訊，容易讓老師
+// 一時看不出這是兩個人還是同一筆資料重複顯示。這裡只在「真的撞號」時才在座號後面加註
+// 精簡學期代碼（例如「01（115-1）」），沒有撞號的座號完全不受影響、顯示格式跟修這個
+// 問題以前一模一樣。三個呼叫端（renderSalaryStatsFromCache()／renderWorkTypeStats()／
+// exportAllStatsExcel() 的 stuSalaryRows）各自用自己那份查詢範圍內的資料獨立判斷撞號、
+// 不共用同一份結果——三處資料來源本來就不同（薪資月記／工作類型月記／匯出用學生名冊），
+// 沒有共用的意義，也不需要為了共用而耦合在一起。
+function computeCollidingSeatNos(items) {
+  const semsBySeat = {};
+  items.forEach(it => {
+    const seat = it.seatNo;
+    const sem = it.semester;
+    if (!seat || !sem) return;
+    if (!semsBySeat[seat]) semsBySeat[seat] = new Set();
+    semsBySeat[seat].add(sem);
+  });
+  const colliding = new Set();
+  Object.keys(semsBySeat).forEach(seat => { if (semsBySeat[seat].size > 1) colliding.add(seat); });
+  return colliding;
+}
+function seatDisplayWithSemester(seatNo, semester, collidingSeatNos) {
+  return (collidingSeatNos.has(seatNo) && semester) ? `${seatNo}（${semester}）` : seatNo;
+}
+
 function renderSalaryStatsFromCache(cache) {
   if (!cache) return;
   const { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap } = cache;
@@ -5291,20 +5330,34 @@ function renderSalaryStatsFromCache(cache) {
   const journals = salaryJournals.filter(j => isCompanySelected(getJournalCompany(j, stuCompanyMap), selectedCompanies));
 
   const studentMap = {};
+  // 2026-08-29 修正：改用「學期＋座號」複合 key（比照 loadSalaryStats()／
+  // loadLocationStats()／loadWorkTypeStats()／fetchJournalsFromServer()／
+  // exportAllStatsExcel() 既有的四處已修正寫法），不再用裸座號合併。這裡的
+  // journals 來源是 salaryJournals，只有起訖日期都有值時才會依日期篩選（見
+  // loadSalaryStats()），畫面預設「全部資料」（兩個日期欄位留空）時天生橫跨所有
+  // 學期——座號每學期重新分配，裸座號會把兩位剛好座號重複的不同學期學生的薪資
+  // 紀錄錯誤合併成一筆，導致「平均薪資」「月數」被錯誤加總，兩人在畫面上會顯示
+  // 成同一個（且錯誤的）數字。
   journals.forEach(j => {
     const currentCompany = getJournalCompany(j, stuCompanyMap);
-    if (!studentMap[j.seatNo]) {
-      studentMap[j.seatNo] = {
+    const studentKey = `${j.semester}-${j.seatNo}`;
+    if (!studentMap[studentKey]) {
+      studentMap[studentKey] = {
         seatNo: j.seatNo,
+        semester: j.semester,
         name: j.studentName || stuInfoMap[`${j.semester}-${j.seatNo}`]?.name || '',
         company: currentCompany,
         salaries: []
       };
     }
-    studentMap[j.seatNo].salaries.push(j.salary);
+    studentMap[studentKey].salaries.push(j.salary);
   });
 
-  const studentList = Object.values(studentMap).map(s => ({ ...s, avg: salaryAvg(s.salaries) })).sort((a,b) => String(a.seatNo || '').localeCompare(String(b.seatNo || '')));
+  // 2026-08-29 新增：撞號偵測只在這裡算一次，算完後把 seatDisplay 附在每個學生物件上，
+  // 下游 renderSalaryFocus()／renderSalaryAlerts()（peopleItems()）直接讀這個欄位即可，
+  // 不需要各自重新掃描一次 studentList 判斷撞號（避免同一份判斷邏輯被複製三份）。
+  const collidingSeatNos = computeCollidingSeatNos(Object.values(studentMap));
+  const studentList = Object.values(studentMap).map(s => ({ ...s, avg: salaryAvg(s.salaries), seatDisplay: seatDisplayWithSemester(s.seatNo, s.semester, collidingSeatNos) })).sort((a,b) => String(a.seatNo || '').localeCompare(String(b.seatNo || '')));
   const allSalaries = studentList.flatMap(s => s.salaries);
   const classAvg = salaryAvg(allSalaries);
   document.getElementById('salary-student-count').textContent = studentList.length;
@@ -5314,14 +5367,17 @@ function renderSalaryStatsFromCache(cache) {
 
   document.getElementById('salary-student-table').innerHTML = studentList.map(s => {
     const avg = s.avg;
-    return `<tr><td style="white-space:nowrap">${escapeHtml(s.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td style="white-space:nowrap">${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${avg.toLocaleString()}</td></tr>`;
+    return `<tr><td style="white-space:nowrap">${escapeHtml(s.seatDisplay)}</td><td style="white-space:nowrap">${escapeHtml(s.name || '-')}</td><td>${escapeHtml(s.company || '-')}</td><td style="white-space:nowrap">${s.salaries.length}</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無薪資資料</td></tr>';
 
   const companyMap = {};
   journals.forEach(j => {
     const c = getJournalCompany(j, stuCompanyMap);
     if (!companyMap[c]) companyMap[c] = { studentSet: new Set(), salaries: [] };
-    companyMap[c].studentSet.add(j.seatNo);
+    // 2026-08-29 修正：同上，studentSet 改存「學期＋座號」複合 key 再取 .size 當
+    // 學生數，避免跨學期同座號的兩位不同學生被當成同一人，低估「各公司薪資」表格
+    // 的學生數欄位。
+    companyMap[c].studentSet.add(`${j.semester}-${j.seatNo}`);
     companyMap[c].salaries.push(j.salary);
   });
   const companyList = Object.entries(companyMap).map(([name, d]) => {
@@ -5401,7 +5457,17 @@ function renderWorkTypeStats(journals, selectedCompanies) {
   if (!chartEl) return;
   if (detailPanel) detailPanel.style.display = 'none';
 
-  // 統計：typeMap[typeName] = { count(人次), students: Set(seatNo), studentList: [{seatNo,name}] }
+  // 統計：typeMap[typeName] = { count(人次), students: Set(學期-座號), studentList: [{seatNo,name,seatDisplay}] }
+  // 2026-08-29 修正：students 原本用裸座號 Set 判斷「這個人算過了沒」，
+  // loadWorkTypeStats() 只有起訖日期都有值才會依日期篩選，畫面預設「全部資料」時
+  // journals 天生橫跨所有學期。座號每學期重新分配，裸座號會把兩位不同學期、剛好
+  // 座號重複的學生當成同一人：不只「X人」的人數被低估，先處理到的那位學生會佔住
+  // 這個座號的名額，另一位學生的紀錄在 studentList（點擊展開的學生名單）裡完全
+  // 不會出現。改用「學期＋座號」複合 key 判斷是否已經算過。這裡的撞號偵測（見
+  // computeCollidingSeatNos() 上方註解）用的是這次呼叫的 journals，跟
+  // renderSalaryStatsFromCache() 各自獨立判斷，不共用結果——兩邊的資料範圍本來就
+  // 不同（薪資月記 vs 工作類型月記）。
+  const collidingSeatNos = computeCollidingSeatNos(journals);
   const typeMap = {};
   journals.forEach(j => {
     if (!isCompanySelected(j.company, selectedCompanies)) return;
@@ -5409,9 +5475,10 @@ function renderWorkTypeStats(journals, selectedCompanies) {
       const type = normalizeWorkType(e.type);
       if (!typeMap[type]) typeMap[type] = { count: 0, students: new Set(), studentList: [] };
       typeMap[type].count++;
-      if (!typeMap[type].students.has(j.seatNo)) {
-        typeMap[type].students.add(j.seatNo);
-        typeMap[type].studentList.push({ seatNo: j.seatNo, name: j.studentName || j.seatNo });
+      const studentKey = `${j.semester}-${j.seatNo}`;
+      if (!typeMap[type].students.has(studentKey)) {
+        typeMap[type].students.add(studentKey);
+        typeMap[type].studentList.push({ seatNo: j.seatNo, name: j.studentName || j.seatNo, seatDisplay: seatDisplayWithSemester(j.seatNo, j.semester, collidingSeatNos) });
       }
     });
   });
@@ -5461,7 +5528,7 @@ window.toggleWorktypeDetail = function(typeName) {
   if (names) {
     names.innerHTML = d.studentList
       .sort((a, b) => a.seatNo.localeCompare(b.seatNo))
-      .map(s => `<span style="background:rgba(0,0,0,0.08);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml(s.seatNo + ' ' + s.name)}</span>`)
+      .map(s => `<span style="background:rgba(0,0,0,0.08);color:var(--text);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${escapeHtml((s.seatDisplay || s.seatNo) + ' ' + s.name)}</span>`)
       .join('');
   }
   panel.style.display = 'block';

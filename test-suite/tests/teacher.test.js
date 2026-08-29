@@ -1,7 +1,53 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v33
+ * 老師端自動化測試 v34
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v34 修正（2026-08-29）：修復「統計總覽」跨學期座號合併問題——座號每學期重新分配，
+ * 「薪資統計」／「工作類型」兩個分頁預設不選日期（畫面兩個日期欄位留空）時，查詢的
+ * 是橫跨所有學期的完整 collectionGroup 結果，但下列 3 處原本用裸座號當合併／去重 key，
+ * 若同一座號在不同學期被分給不同學生，會把兩人的資料誤合併成一筆（且其中一人的資料
+ * 從畫面/Excel上完全消失）：
+ * ①renderSalaryStatsFromCache() 的 studentMap（「學生薪資總覽」表格＋其下游
+ *   renderSalaryFocus()／renderSalaryAlerts() 的「最高/最低薪資」卡片與「低於平均/高於
+ *   平均」清單，這兩個下游函式都是直接吃這裡組出來的 studentList，沒有各自獨立的合併
+ *   邏輯）與 companyMap.studentSet（「各公司薪資」表格「學生數」欄位）。
+ * ②renderWorkTypeStats() 的 typeMap[type].students／studentList（「工作類型」橫條圖
+ *   「X人」計數與點擊展開的學生名單）。
+ * ③exportAllStatsExcel() 的 stuSalaryRows（Excel「學生薪資總覽」工作表，篩選條件原本
+ *   完全沒比對 semester）與 companyAggMap.studentSet（同一份 Excel「各公司薪資」工作表
+ *   「學生數」欄位）。
+ * 皆改用「學期＋座號」複合 key，比照這幾個函式裡其他早就已經這樣修過的既有寫法（例如
+ * exportAllStatsExcel() 的 studentMap／journalMap／submitAoA／locationRows）統一標準。
+ * 地點統計（loadLocationStats()）稽核後確認不受影響——它從不依座號聚合，只算縣市/距離
+ * 次數；唯一逐筆列出學生的 renderLocationDetailTable() 是每筆工作記錄各自一行，不合併。
+ * 薪資缺漏／薪資單尚未上傳清單（computeSalaryMissingGroups()）依「西元年＋月」分組，
+ * 同一組內不可能有兩個不同學期的人共用同一座號，也不受影響。
+ *
+ * 修好合併問題後，同一份清單/表格可能出現「座號相同、姓名不同」的兩列（正確資料，但
+ * 座號欄位本身沒有學期資訊，容易讓人誤以為是重複資料）——新增共用函式
+ * computeCollidingSeatNos()／seatDisplayWithSemester()，只在「這批資料裡同一座號真的
+ * 對應到兩個以上不同學期」時，才在座號後面加註精簡學期代碼（例如「01（115-1）」）；
+ * 沒有撞號的座號（絕大多數的單一學期查詢情境）完全不受影響，顯示格式跟修這個問題以前
+ * 一模一樣。①②③三處各自用自己那份查詢範圍內的資料獨立判斷撞號，不共用同一份結果。
+ *   T-SEC-59  真的呼叫 renderSalaryStatsFromCache()：暫時覆寫其下游會呼叫的
+ *             renderSalaryFocus()／renderSalaryAlerts()／renderSalaryLineChart()／
+ *             renderSalaryBarChart()／switchSalaryDetailTab() 為 no-op（隔離掉這次不
+ *             需要驗證的下游 DOM 需求，做法比照 T-SEC-57），餵入座號01橫跨兩個學期
+ *             （分屬不同學生、同公司）＋座號02對照組（無撞號）的合成資料，驗證：學生數
+ *             正確算成3人（不是誤合併成2人）、兩筆撞號列座號都正確加註學期、對照組
+ *             座號02維持裸座號、公司學生數複合key去重正確。
+ *   T-SEC-60  真的呼叫 renderWorkTypeStats()，驗證 typeMap 的 students.size／
+ *             studentList（含點擊展開用的 seatDisplay 欄位）在座號撞號情境下正確，且
+ *             無撞號座號維持裸座號。
+ *   T-SEC-61  computeCollidingSeatNos()／seatDisplayWithSemester() 兩個共用函式本身的
+ *             純函式測試（不需要 DOM）。
+ *   T-SEC-62  exportAllStatsExcel() 因為內部直接呼叫真正的 Firestore
+ *             collectionGroup/getDocs，無法像①②一樣單純注入合成資料呼叫，改用
+ *             codeOnly() 過濾註解後對原始碼字串做靜態比對（比照 T-SEC-53 對
+ *             saveAllDeadlines() 的既有做法）：確認 stuSalaryRows 的篩選條件包含
+ *             semester 比對、companyAggMap 的 studentSet.add() 用複合 key、座號欄位
+ *             改呼叫 seatDisplayWithSemester()。
  *
  * v33 修正（2026-08-26）：修復三項稽核發現的問題（皆純前端修法，未異動 rule.txt）：
  * ①resolveImgSrc()——entries[].photos／salaryPhotos 是學生自己月記文件的一部分，
@@ -3397,6 +3443,156 @@ async function runTeacherTests(page, log) {
     });
     if (result.found < 3) throw new Error(`預期至少找到 3 個指向 Cloudinary/Firebase 主控台的 target="_blank" 連結，實際找到 ${result.found} 個——連結可能被搬移、刪除或改了網址，需要重新確認`);
     if (result.missing.length > 0) throw new Error(`以下連結缺少 rel="noopener"：${result.missing.join('；')}`);
+  });
+
+  await test('T-SEC-59 renderSalaryStatsFromCache() 改用「學期＋座號」複合 key，跨學期同座號的兩位不同學生不再被誤合併；真的撞號時座號欄位正確加註學期，無撞號時維持裸座號', async () => {
+    // 背景：座號每學期重新分配，「統計總覽→薪資統計」畫面預設不選日期（起訖日期兩個
+    // 欄位皆留空）時，撈的是整個 collectionGroup 查詢、橫跨所有學期的月記。
+    // renderSalaryStatsFromCache() 原本用裸座號當 studentMap／companyMap 的 key，若
+    // 同一座號在不同學期被分給不同學生，會把兩人的薪資紀錄誤合併成一筆（平均薪資／
+    // 月數被錯誤加總，其中一人從表格上完全消失）。這裡直接呼叫真正部署的
+    // renderSalaryStatsFromCache()（不是重寫一份簡化版邏輯驗證），暫時覆寫它下游會
+    // 呼叫的 5 個渲染函式為 no-op（隔離掉這次不需要驗證的下游 DOM 需求，做法比照
+    // T-SEC-57 暫時覆寫 loadStudentsTable() 依賴的 Firestore 函式），呼叫結束後即時
+    // 還原。座號01橫跨114-2（學生甲）／115-1（學生乙）兩個學期、同屬A公司（真正撞號
+    // 情境）；座號02只在115-1（學生丙）、屬B公司，當作「無撞號」對照組，確認修復後
+    // 沒有撞號的座號完全不受影響、不會被誤加上學期標註。
+    const result = await page.evaluate(() => {
+      if (typeof renderSalaryStatsFromCache !== 'function') return { skip: true };
+      const origFocus = window.renderSalaryFocus;
+      const origAlerts = window.renderSalaryAlerts;
+      const origLine = window.renderSalaryLineChart;
+      const origBar = window.renderSalaryBarChart;
+      const origSwitch = window.switchSalaryDetailTab;
+      try {
+        window.renderSalaryFocus = () => {};
+        window.renderSalaryAlerts = () => {};
+        window.renderSalaryLineChart = () => {};
+        window.renderSalaryBarChart = () => {};
+        window.switchSalaryDetailTab = () => {};
+
+        const journals = [
+          { seatNo: '01', semester: '114-2', studentName: '學生甲', company: 'A公司', salary: 30000 },
+          { seatNo: '01', semester: '114-2', studentName: '學生甲', company: 'A公司', salary: 32000 },
+          { seatNo: '01', semester: '115-1', studentName: '學生乙', company: 'A公司', salary: 50000 },
+          { seatNo: '02', semester: '115-1', studentName: '學生丙', company: 'B公司', salary: 40000 },
+        ];
+        const cache = { allActiveJournals: journals, salaryJournals: journals, stuCompanyMap: {}, stuInfoMap: {} };
+        renderSalaryStatsFromCache(cache);
+
+        return {
+          skip: false,
+          studentCount: document.getElementById('salary-student-count').textContent,
+          studentTableHtml: document.getElementById('salary-student-table').innerHTML,
+          companyTableHtml: document.getElementById('salary-company-table').innerHTML,
+        };
+      } finally {
+        window.renderSalaryFocus = origFocus;
+        window.renderSalaryAlerts = origAlerts;
+        window.renderSalaryLineChart = origLine;
+        window.renderSalaryBarChart = origBar;
+        window.switchSalaryDetailTab = origSwitch;
+      }
+    });
+    if (result.skip) return;
+    if (String(result.studentCount) !== '3')
+      throw new Error(`「有薪資記錄學生」應顯示 3 人（學生甲/乙/丙各自獨立），實際顯示 ${result.studentCount}——跨學期同座號的兩位學生可能又被誤合併成一人`);
+    if (!result.studentTableHtml.includes('學生甲') || !result.studentTableHtml.includes('學生乙') || !result.studentTableHtml.includes('學生丙'))
+      throw new Error(`表格內容應同時包含學生甲／學生乙／學生丙三個姓名，實際：${result.studentTableHtml}——其中一位可能因為跟另一位共用座號而在合併時消失`);
+    if (!result.studentTableHtml.includes('01（114-2）') || !result.studentTableHtml.includes('01（115-1）'))
+      throw new Error(`座號01在兩個學期真的撞號，兩列都應該加註學期（格式「01（學期）」），實際：${result.studentTableHtml}`);
+    if (!/>02</.test(result.studentTableHtml) || result.studentTableHtml.includes('02（'))
+      throw new Error(`座號02沒有跨學期撞號，應維持裸座號「02」、不應被加註學期，實際：${result.studentTableHtml}——可能誤觸發了所有座號都加註學期`);
+    if (!/<td>A公司<\/td><td>2<\/td>/.test(result.companyTableHtml))
+      throw new Error(`「各公司薪資」A公司學生數應為 2（學生甲＋學生乙，複合key去重），實際：${result.companyTableHtml}`);
+    if (!/<td>B公司<\/td><td>1<\/td>/.test(result.companyTableHtml))
+      throw new Error(`「各公司薪資」B公司學生數應為 1（對照組，不受本次修復影響），實際：${result.companyTableHtml}`);
+  });
+
+  await test('T-SEC-60 renderWorkTypeStats() 的學生去重改用「學期＋座號」複合 key，展開的學生名單撞號時正確加註學期', async () => {
+    // 同上一條的背景，這裡是另一個獨立的資料結構（typeMap[type].students/studentList）,
+    // 原本也是用裸座號 Set 判斷「這個人算過了沒」，會讓跨學期撞號的第二位學生從「X人」
+    // 計數與展開名單裡完全消失。這裡座號01橫跨114-2（學生甲）／115-1（學生乙）兩個學期、
+    // 都做「生產製造」；座號02只在115-1（學生丙）、做「品管」，當無撞號對照組。
+    const result = await page.evaluate(() => {
+      if (typeof renderWorkTypeStats !== 'function') return { skip: true };
+      const journals = [
+        { seatNo: '01', semester: '114-2', studentName: '學生甲', company: 'A公司', entries: [{ type: '生產製造' }] },
+        { seatNo: '01', semester: '115-1', studentName: '學生乙', company: 'B公司', entries: [{ type: '生產製造' }] },
+        { seatNo: '02', semester: '115-1', studentName: '學生丙', company: 'A公司', entries: [{ type: '品管' }] },
+      ];
+      renderWorkTypeStats(journals, null);
+      const typeMap = window._worktypeMap || {};
+      const production = typeMap['生產製造'];
+      const qc = typeMap['品管'];
+      if (!production || !qc) return { skip: true };
+      return {
+        skip: false,
+        productionSize: production.students.size,
+        productionList: production.studentList,
+        qcList: qc.studentList,
+      };
+    });
+    if (result.skip) return;
+    if (result.productionSize !== 2)
+      throw new Error(`「生產製造」students.size 應為 2（學生甲/乙各自獨立），實際 ${result.productionSize}——跨學期撞號可能又把兩人合併成一人`);
+    const seatDisplays = (result.productionList || []).map(s => s.seatDisplay).sort();
+    if (JSON.stringify(seatDisplays) !== JSON.stringify(['01（114-2）', '01（115-1）']))
+      throw new Error(`「生產製造」展開名單兩筆座號01都應加註學期，實際 seatDisplay：${JSON.stringify(seatDisplays)}`);
+    const qcEntry = (result.qcList || [])[0];
+    if (!qcEntry || qcEntry.seatDisplay !== '02')
+      throw new Error(`「品管」座號02沒有跨學期撞號，seatDisplay 應維持裸座號「02」，實際：${JSON.stringify(result.qcList)}`);
+  });
+
+  await test('T-SEC-61 computeCollidingSeatNos()／seatDisplayWithSemester() 共用函式：正確偵測撞號、格式正確、無撞號時原樣回傳', async () => {
+    const result = await page.evaluate(() => {
+      if (typeof computeCollidingSeatNos !== 'function' || typeof seatDisplayWithSemester !== 'function') return { skip: true };
+      const colliding = computeCollidingSeatNos([
+        { seatNo: '01', semester: '114-2' },
+        { seatNo: '01', semester: '115-1' },
+        { seatNo: '02', semester: '115-1' },
+      ]);
+      return {
+        skip: false,
+        has01: colliding.has('01'),
+        has02: colliding.has('02'),
+        collidingFormatted: seatDisplayWithSemester('01', '114-2', colliding),
+        nonCollidingFormatted: seatDisplayWithSemester('02', '115-1', colliding),
+      };
+    });
+    if (result.skip) return;
+    if (!result.has01) throw new Error('座號01對應到兩個不同學期，computeCollidingSeatNos() 應判定為撞號');
+    if (result.has02) throw new Error('座號02只對應到一個學期，computeCollidingSeatNos() 不應判定為撞號');
+    if (result.collidingFormatted !== '01（114-2）')
+      throw new Error(`撞號座號應格式化為「01（114-2）」，實際：${result.collidingFormatted}`);
+    if (result.nonCollidingFormatted !== '02')
+      throw new Error(`無撞號座號應原樣回傳裸座號「02」，實際：${result.nonCollidingFormatted}——加註學期的邏輯可能誤套用到所有座號`);
+  });
+
+  await test('T-SEC-62 exportAllStatsExcel() 的 stuSalaryRows／companyAggMap 改用「學期＋座號」複合 key（靜態原始碼比對）', async () => {
+    // exportAllStatsExcel() 內部直接呼叫真正的 Firestore collectionGroup/getDocs，
+    // 無法像 T-SEC-59/60 那樣單純注入合成資料執行，改用 codeOnly() 過濾註解後對原始碼
+    // 字串做靜態比對（比照 T-SEC-53 對 saveAllDeadlines() 的既有做法）。這個函式內部
+    // 有大段中文說明性註解夾在程式碼中間，比對前務必先過濾掉整行都是註解的行，避免像
+    // S-SEC-08／T-SEC-30／T-SEC-34 那樣命中註解文字本身而誤判。
+    const result = await page.evaluate(() => {
+      if (typeof exportAllStatsExcel !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(exportAllStatsExcel.toString());
+      return {
+        skip: false,
+        stuSalaryComparesSemester: /j\.seatNo\s*===\s*s\.id\s*&&\s*j\.semester\s*===\s*s\.semester/.test(fnStr),
+        stuSalaryUsesSeatDisplay: /seatDisplayWithSemester\s*\(\s*s\.seatNo\s*\|\|\s*s\.id/.test(fnStr),
+        companyAggUsesCompositeKey: /companyAggMap\[c\]\.studentSet\.add\s*\(\s*`\$\{j\.semester\}-\$\{j\.seatNo\}`\s*\)/.test(fnStr),
+      };
+    });
+    if (result.skip) return;
+    if (!result.stuSalaryComparesSemester)
+      throw new Error('exportAllStatsExcel() 的 stuSalaryRows 篩選條件（濾掉註解行後）找不到 j.semester === s.semester 比對，可能又跟裸座號比對脫鉤，Excel 匯出會把跨學期同座號的不同學生薪資紀錄合併成一列');
+    if (!result.stuSalaryUsesSeatDisplay)
+      throw new Error('exportAllStatsExcel() 的 stuSalaryRows 座號欄位（濾掉註解行後）找不到 seatDisplayWithSemester() 呼叫，撞號時可能不會加註學期');
+    if (!result.companyAggUsesCompositeKey)
+      throw new Error('exportAllStatsExcel() 的 companyAggMap.studentSet.add()（濾掉註解行後）沒有使用「學期＋座號」複合 key，Excel「各公司薪資」工作表的學生數欄位可能又低估跨學期同座號的學生數');
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {
