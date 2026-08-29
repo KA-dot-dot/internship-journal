@@ -1,7 +1,50 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v34
+ * 老師端自動化測試 v35
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v35 修正（2026-08-30）：修復兩處統計/管理功能的資料正確性問題（AI 協助稽核發現，皆純
+ * 前端修法，未異動 rule.txt）：
+ * ①loadWorkTypeStats() 的 company fallback 原本是 `j.company ||
+ * studentMap[...]?.company || ''`（fallback 到空字串），跟同檔案 loadLocationStats()
+ * （fallback 到 '未填寫'）／loadSalaryStats()（透過 getJournalCompany()／
+ * normalizeCompanyName() 同樣 fallback 到 '未填寫'）不一致。連鎖效應：
+ * `journals.map(j => j.company).filter(Boolean)` 建立公司篩選清單前會把空字串濾掉，
+ * 導致「未填寫」這個選項永遠不會出現在「工作類型」頁籤的公司篩選清單裡；
+ * renderWorkTypeStats() 的 isCompanySelected() 雖然會把空字串正規化成 '未填寫' 去查
+ * selectedCompanies 這個 Set，但 Set 裡從未有過這個 key，比對必然失敗——公司尚未填寫
+ * （月記自己沒填、名冊也沒填）的學生，其工作類型紀錄從「統計總覽→工作類型」的圖表/筆數/
+ * 學生名單裡完全消失（不是顯示成「未填寫」分類，是整筆連同 entries 一起被跳過），但同一批
+ * 資料在「地點統計」／「薪資統計」會正常顯示在「未填寫」分類下，兩邊筆數對不起來。修法：
+ * fallback 改成跟 loadLocationStats() 一致的 '未填寫'。
+ * ②confirmTeacherBatchDelete()（批次刪除確認視窗）的「受影響學生清單」原本用裸座號
+ * j.seatNo 當 key 去重——「月記總覽」未套用日期篩選時天生橫跨所有學期（跟
+ * renderSalaryStatsFromCache() 等處同一種情境），若批次刪除的勾選範圍剛好包含兩個不同
+ * 學期、座號重複的學生，裸座號會把後面那位的姓名蓋掉、算出的人數也少算一人，讓確認視窗
+ * 顯示的「👥 學生：」清單與人數不準確。**只影響刪除前的確認文字，不影響實際刪除範圍**
+ * ——executeTeacherBatchDelete() 本來就逐筆用 ownerUid+seatNo+semester+month 精確定位，
+ * 不經過這裡的 studentSet。修法：改用「學期＋座號」複合 key 去重，比照
+ * renderSalaryStatsFromCache() 等處既有標準。student_test.js 本輪未異動（兩處問題都只
+ * 存在於 teacher.html）。
+ *   T-SEC-63  靜態比對 loadWorkTypeStats()（濾掉註解行）確認 company fallback 字面值為
+ *             '未填寫'、不是舊版的 ''；並真的呼叫 populateCompanyFilter()／
+ *             getSelectedCompanies()／renderWorkTypeStats() 三個真正部署的函式（不是重寫
+ *             簡化版邏輯），用 company='未填寫' 的合成月記重現「公司清單建立→畫面勾選→
+ *             讀回選取狀態→套用篩選→統計」完整鏈路，驗證這類月記的工作類型不再被公司篩選
+ *             靜默排除。loadWorkTypeStats() 本身因為內部直接呼叫真正的 Firestore
+ *             collectionGroup/getDocs，無法像上述真執行部分一樣單純注入合成資料（同
+ *             T-SEC-62 對 exportAllStatsExcel() 的既有處理方式）。
+ *   T-SEC-64  真的呼叫 confirmTeacherBatchDelete()：暫時在 #t-journals-list 注入兩個座號
+ *             同為01、分屬不同學期（114-2／115-1）的合成 checkbox（data-seat／data-sem／
+ *             data-month／data-uid／data-name 比照既有 t-journal-select-cb 屬性格式），
+ *             驗證確認視窗「👥 學生：」內容同時列出兩位學生的姓名，不會被裸座號去重誤合併
+ *             成一人；測試結束後移除注入的 checkbox、還原 #t-batch-delete-confirm-btn 的
+ *             onclick、關閉彈出的確認 modal，避免影響後續測試。**環境依賴防禦**（使用者
+ *             review 時指出）：斷言（尤其「共 2 筆」）隱含假設執行當下 #t-journals-list
+ *             裡沒有其他已勾選的 checkbox——目前全檔只有這一處操作 .t-journal-select-cb，
+ *             理論上安全，但這是共用 DOM，未來若有別的測試也勾選這個列表卻忘記還原，會讓
+ *             這裡的計數失準。改成執行前先記錄並暫時取消任何既有已勾選項、結束後逐一還原，
+ *             不再依賴「當下沒有其他勾選」這個外部假設。
  *
  * v34 修正（2026-08-29）：修復「統計總覽」跨學期座號合併問題——座號每學期重新分配，
  * 「薪資統計」／「工作類型」兩個分頁預設不選日期（畫面兩個日期欄位留空）時，查詢的
@@ -3624,6 +3667,130 @@ async function runTeacherTests(page, log) {
       throw new Error('exportAllStatsExcel() 的 stuSalaryRows 座號欄位（濾掉註解行後）找不到 seatDisplayWithSemester() 呼叫，撞號時可能不會加註學期');
     if (!result.companyAggUsesCompositeKey)
       throw new Error('exportAllStatsExcel() 的 companyAggMap.studentSet.add()（濾掉註解行後）沒有使用「學期＋座號」複合 key，Excel「各公司薪資」工作表的學生數欄位可能又低估跨學期同座號的學生數');
+  });
+
+  await test('T-SEC-63 loadWorkTypeStats() 公司欄位 fallback 改為「未填寫」而非空字串，公司未填的學生工作類型紀錄不再被篩選清單靜默排除', async () => {
+    // 背景：loadWorkTypeStats() 原本 company: j.company || studentMap[...]?.company || ''
+    // （fallback 到空字串），跟同一份檔案的 loadLocationStats()（company: data.company ||
+    // s.company || '未填寫'）與 loadSalaryStats()（透過 getJournalCompany()／
+    // normalizeCompanyName() 同樣 fallback 到 '未填寫'）不一致。連鎖效應：
+    // ①populateCompanyFilter() 呼叫前的 `journals.map(j => j.company).filter(Boolean)`
+    // 會把空字串濾掉，公司篩選清單永遠不會出現「未填寫」這個選項；②renderWorkTypeStats()
+    // 的 isCompanySelected() 內部雖然會把空字串正規化成 '未填寫' 去查 selectedCompanies
+    // 這個 Set，但 Set 裡從未有過這個 key，比對必然失敗，該筆月記連同底下所有 entries 被
+    // 整個跳過（不是顯示成「未填寫」分類，是完全從統計消失）。
+    // loadWorkTypeStats() 本身因為內部直接呼叫真正的 Firestore collectionGroup/getDocs，
+    // 無法單純注入合成資料（同 T-SEC-62 對 exportAllStatsExcel() 的既有處理方式），這裡
+    // 分兩部分驗證：①靜態比對函式本體（濾掉註解行，避免命中函式內解釋性註解裡也會出現的
+    // '未填寫' 字樣，同陷阱19／T-SEC-62 既有做法）確認 fallback 字面值確實是 '未填寫'、
+    // 不是舊版的 ''；②真的呼叫 populateCompanyFilter()／getSelectedCompanies()／
+    // renderWorkTypeStats() 三個真正部署的函式（不是重寫簡化版邏輯判斷），用「company
+    // 已套用 loadWorkTypeStats() fallback 後」的合成月記重現公司篩選清單建立→畫面勾選→
+    // 讀回選取狀態→套用篩選→統計這條完整鏈路，確認 company='未填寫' 的月記不會被靜默
+    // 排除在工作類型統計之外。
+    const result = await page.evaluate(() => {
+      if (typeof renderWorkTypeStats !== 'function'
+        || typeof populateCompanyFilter !== 'function'
+        || typeof getSelectedCompanies !== 'function'
+        || typeof loadWorkTypeStats !== 'function') return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(loadWorkTypeStats.toString());
+      const hasFilledFallback = /\?\.company\s*\|\|\s*'未填寫'/.test(fnStr);
+      const hasOldEmptyFallback = /\?\.company\s*\|\|\s*''/.test(fnStr);
+
+      const cbList = document.getElementById('company-checkbox-list');
+      if (!cbList) return { skip: true };
+      const origHtml = cbList.innerHTML;
+      let typeMap = {};
+      try {
+        // 強制視為「第一次建立清單」（hadOldOptions=false），讓新公司名單全部預設
+        // checked，不受先前測試/操作殘留的勾選狀態影響，確保測試結果可重現。
+        cbList.innerHTML = '';
+        const journals = [
+          { seatNo: '01', semester: '115-1', studentName: '學生甲', company: '未填寫', entries: [{ type: '生產製造' }] },
+          { seatNo: '02', semester: '115-1', studentName: '學生乙', company: 'A公司', entries: [{ type: '品管' }] },
+        ];
+        // 重現 loadWorkTypeStats() 同一段公司清單建立邏輯（journals.map(j => j.company).filter(Boolean)）
+        const companies = journals.map(j => j.company).filter(Boolean);
+        populateCompanyFilter(companies);
+        const selectedCompanies = getSelectedCompanies();
+        renderWorkTypeStats(journals, selectedCompanies);
+        typeMap = window._worktypeMap || {};
+      } finally {
+        cbList.innerHTML = origHtml;
+      }
+      return {
+        skip: false,
+        hasFilledFallback,
+        hasOldEmptyFallback,
+        productionCount: typeMap['生產製造']?.count ?? null,
+        qcCount: typeMap['品管']?.count ?? null,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasFilledFallback)
+      throw new Error("loadWorkTypeStats() 的 company fallback（濾掉註解行後）找不到 fallback 到字面值 '未填寫' 的寫法，可能又改回其他值，跟 loadLocationStats() 不一致");
+    if (result.hasOldEmptyFallback)
+      throw new Error("loadWorkTypeStats() 的 company fallback（濾掉註解行後）仍比對到舊版 fallback 到空字串 '' 的寫法，修復可能被還原");
+    if (result.productionCount !== 1)
+      throw new Error(`公司欄位為「未填寫」的月記，其工作類型紀錄應正常被統計（「生產製造」應有1筆），實際 ${result.productionCount}——可能又被公司篩選清單靜默排除`);
+    if (result.qcCount !== 1)
+      throw new Error(`對照組（公司='A公司'）的「品管」應正常統計為1筆，實際 ${result.qcCount}`);
+  });
+
+  await test('T-SEC-64 confirmTeacherBatchDelete() 學生清單摘要改用「學期＋座號」複合 key 去重，跨學期批次刪除時不再把座號重複的不同學生蓋掉', async () => {
+    // 背景：confirmTeacherBatchDelete()（批次刪除確認視窗）的「受影響學生清單」原本用
+    // 裸座號 j.seatNo 當 key 去重。「月記總覽」未套用日期篩選時天生橫跨所有學期（跟
+    // renderSalaryStatsFromCache() 等處同一種情境），若批次刪除的勾選範圍剛好包含兩個
+    // 不同學期、座號重複的學生，裸座號會把後面那位的姓名蓋掉、Object.keys(studentSet).length
+    // 算出的人數也少算一人，讓確認視窗顯示的「👥 學生：」清單與人數不準確。只影響刪除前的
+    // 確認文字，不影響實際刪除範圍——executeTeacherBatchDelete() 本來就逐筆用
+    // ownerUid+seatNo+semester+month 精確定位，不經過這裡的 studentSet，這裡不重複驗證。
+    // 這裡直接呼叫真正部署的 confirmTeacherBatchDelete()（不重寫簡化版邏輯），暫時在
+    // #t-journals-list 注入兩個座號同為01、分屬不同學期（114-2／115-1，月份都在各自
+    // 學期合法範圍內）的合成 checkbox（比照 t-journal-select-cb 既有 data-* 屬性格式），
+    // 驗證確認視窗內容同時列出兩位學生，不會被誤合併成一人；測試結束後移除注入的
+    // checkbox、還原按鈕 onclick、關閉彈出的 modal，避免影響後續測試。
+    const result = await page.evaluate(() => {
+      if (typeof confirmTeacherBatchDelete !== 'function') return { skip: true };
+      const list = document.getElementById('t-journals-list');
+      const infoEl = document.getElementById('t-batch-delete-info');
+      const btn = document.getElementById('t-batch-delete-confirm-btn');
+      if (!list || !infoEl || !btn) return { skip: true };
+      // 防禦性處理：這條測試的斷言（尤其「共 2 筆」）原本隱含假設「執行到這裡時
+      // #t-journals-list 裡沒有其他已勾選的 checkbox」。目前全檔只有這一處會操作
+      // .t-journal-select-cb，理論上安全，但這是共用 DOM，未來若有其他測試也去勾選
+      // 這個列表、忘記還原，會讓這條測試的計數失準。改成不依賴這個外部假設：先記錄
+      // 並暫時取消任何既有已勾選項，結束後逐一還原成執行前的狀態，讓斷言只反映這次
+      // 注入的兩筆合成資料。
+      const preExistingChecked = [...list.querySelectorAll('.t-journal-select-cb:checked')];
+      preExistingChecked.forEach(cb => { cb.checked = false; });
+      const injected = document.createElement('div');
+      injected.id = '__test_t_sec_64_cbs__';
+      injected.innerHTML = `
+        <input type="checkbox" class="t-journal-select-cb" checked data-seat="01" data-sem="114-2" data-month="3" data-uid="__test_uid_a__" data-name="學生甲">
+        <input type="checkbox" class="t-journal-select-cb" checked data-seat="01" data-sem="115-1" data-month="9" data-uid="__test_uid_b__" data-name="學生乙">
+      `;
+      list.appendChild(injected);
+      const origBtnOnclick = btn.onclick;
+      const origInfoHtml = infoEl.innerHTML;
+      try {
+        confirmTeacherBatchDelete();
+        return { skip: false, infoHtml: infoEl.innerHTML };
+      } finally {
+        injected.remove();
+        preExistingChecked.forEach(cb => { cb.checked = true; }); // 還原成執行前的勾選狀態
+        btn.onclick = origBtnOnclick; // 避免殘留指向這次合成資料（假 ownerUid）的刪除 handler
+        infoEl.innerHTML = origInfoHtml;
+        if (typeof closeModal === 'function') closeModal('t-batch-delete-modal');
+      }
+    });
+    if (result.skip) return;
+    if (!result.infoHtml.includes('學生甲') || !result.infoHtml.includes('學生乙'))
+      throw new Error(`兩個不同學期、座號同為01的學生應同時列在確認視窗裡，實際：${result.infoHtml}——可能又被裸座號去重蓋掉其中一位`);
+    if (!result.infoHtml.includes('2 筆'))
+      throw new Error(`確認視窗應顯示共 2 筆月記，實際：${result.infoHtml}`);
   });
 
   await test('T-19 無嚴重 JS 錯誤（ReferenceError / SyntaxError）', async () => {

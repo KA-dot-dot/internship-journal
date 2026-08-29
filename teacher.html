@@ -5424,7 +5424,18 @@ async function loadWorkTypeStats() {
     let journals = userJournalData(snap).map(j => ({
       ...j,
       studentName: j.studentName || studentMap[`${j.semester}-${j.seatNo}`]?.name || '',
-      company: j.company || studentMap[`${j.semester}-${j.seatNo}`]?.company || ''
+      // 2026-08-30 補修：原本 fallback 到空字串 ''，跟 loadLocationStats()／
+      // getJournalCompany() 一律 fallback 到 '未填寫' 不一致。空字串會被下面
+      // `.filter(Boolean)` 濾掉，導致公司篩選清單永遠不會出現「未填寫」這個選項；
+      // renderWorkTypeStats() 的 isCompanySelected() 內部雖然會把空字串正規化成
+      // '未填寫' 去查 selectedCompanies 這個 Set，但 Set 裡從未有過這個 key，比對
+      // 必然失敗，導致公司尚未填寫（月記自己沒填、名冊也沒填）的學生，其工作類型
+      // 紀錄從「統計總覽→工作類型」的圖表/筆數/學生名單裡完全消失（不是顯示成
+      // 「未填寫」，是整筆連同 entries 一起被跳過），但同一批資料在「地點統計」／
+      // 「薪資統計」會正常顯示在「未填寫」分類下，兩邊筆數對不起來。改成跟
+      // loadLocationStats()（第4854行）一致的 '未填寫'，此後這筆資料會正常出現在
+      // 「未填寫」這個可勾選/可取消的公司分類下，不再無聲消失。
+      company: j.company || studentMap[`${j.semester}-${j.seatNo}`]?.company || '未填寫'
     }));
     if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
     // 2026-07-22 新增：跟 loadLocationStats()／loadSalaryStats() 一致，補上公司篩選
@@ -5728,9 +5739,20 @@ function confirmTeacherBatchDelete() {
   const journals = cbs.map(cb => ({ seatNo: cb.dataset.seat, semester: cb.dataset.sem, month: parseInt(cb.dataset.month), ownerUid: cb.dataset.uid, studentName: cb.dataset.name }));
   const label = getTeacherJournalMonthRangeLabel(journals);
   // 整理學生清單摘要
+  // 2026-08-30 補修：原本用裸座號 j.seatNo 當 key 去重——「月記總覽」未套用日期篩選時
+  // 天生橫跨所有學期（跟 renderSalaryStatsFromCache() 等處同一種情境），若批次刪除的
+  // 勾選範圍剛好包含兩個不同學期、座號重複的學生，裸座號會把後面那位的姓名蓋掉、
+  // Object.keys(studentSet).length 算出的人數也少算一人，讓確認視窗的「👥 學生：」
+  // 清單與人數不準確。實際刪除範圍不受影響——executeTeacherBatchDelete() 本來就逐筆用
+  // ownerUid+seatNo+semester+month 精確定位（見該函式），這裡純粹是刪除前確認文字的
+  // 顯示問題。改用「學期＋座號」複合 key 去重；value 改存 {seatNo, name} 物件，讓下面
+  // 組字串時顯示的仍是原本的座號本身，不是複合 key 字串。
   const studentSet = {};
-  journals.forEach(j => { if (!studentSet[j.seatNo]) studentSet[j.seatNo] = j.studentName; });
-  const studentSummary = Object.entries(studentSet).slice(0, 5).map(([s, n]) => `${s} ${n}`).join('、');
+  journals.forEach(j => {
+    const key = `${j.semester}-${j.seatNo}`;
+    if (!studentSet[key]) studentSet[key] = { seatNo: j.seatNo, name: j.studentName };
+  });
+  const studentSummary = Object.values(studentSet).slice(0, 5).map(s => `${s.seatNo} ${s.name}`).join('、');
   const extraCount = Object.keys(studentSet).length > 5 ? `...等 ${Object.keys(studentSet).length} 位學生` : '';
   document.getElementById('t-batch-delete-info').innerHTML =
     `📆 範圍：<strong>${escapeHtml(label)}</strong><br>👥 學生：<strong>${escapeHtml(studentSummary)}${escapeHtml(extraCount)}</strong><br>🗑️ 共 <strong>${journals.length} 筆</strong>月記`;
