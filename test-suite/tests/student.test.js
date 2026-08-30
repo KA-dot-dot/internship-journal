@@ -1,7 +1,30 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v38
+ * 學生端自動化測試 v39
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v39 修正（2026-08-30）：接續 v38 同一輪登入流程稽核當時一併發現、稍後才補上測試的
+ * 第三項問題：new GoogleAuthProvider() 完全沒有網域限制——使用者按下「用 Google
+ * 登入」時，Google 自己跳出來的帳號選擇畫面會列出裝置上任何已登入過的帳號，不分校內外，
+ * 最常撞到這條路的不是入侵者，是裝置上同時登過個人 Gmail 跟學校帳號的合法使用者，選錯
+ * 很自然。選了非校網域帳號後，整趟「跳出 Google 頁面→選帳號→授權→跳回網站」都會白走
+ * 一次，才在終點被 handleLoginUser() 的 SCHOOL_DOMAIN 檢查打回票。修法：
+ * provider.setCustomParameters({ hd: 'tcivs.tc.edu.tw' })——hd（hosted domain）是 OAuth
+ * 標準參數，提前告訴 Google 自己的畫面「該選哪個網域的帳號」，把「選錯」盡量攔在起點。
+ * 這只是 UX 優化、不是安全邊界（官方文件寫明使用者仍可在 Google 畫面點「使用其他帳戶」
+ * 手動繞過），真正的資料安全邊界從頭到尾都是 rule.txt 的 schoolUser()，不受這個參數
+ * 影響、繼續照舊運作；app 端 SCHOOL_DOMAIN 檢查與 onAuthStateChanged 也都不動。與
+ * teacher_test.js 的 T-SEC-67 對稱。
+ *   S-SEC-55  provider 是 <script type="module"> 裡的區塊變數，不掛在 window 上，比照
+ *             S-SEC-53 對 onAuthStateChanged callback 的做法，對整份頁面 inline
+ *             <script> 原始碼文字定位 const provider = new GoogleAuthProvider(); 這行
+ *             呼叫語法本身的位置，往後取一段視窗，過濾註解後確認
+ *             provider.setCustomParameters({...}) 真的被呼叫、且 hd 值正確為
+ *             'tcivs.tc.edu.tw'。不驗證 Google 帳號選擇器實際行為是否真的優先顯示校內
+ *             帳號——那完全發生在 Google 自己的伺服器/畫面上，自動化測試接觸不到，這裡
+ *             只能防止這行程式碼未來重構時被悄悄拿掉或打錯字，跟 S-SEC-53／S-SEC-54
+ *             同一種「防止已知修法被悄悄回退」的定位，不是行為驗證；真正驗證 hd 是否
+ *             有效仍需實機用真實校內帳號登入一次。
  *
  * v38 修正（2026-08-30）：一輪針對兩端登入流程的稽核（popup/redirect fallback 本身
  * 維持不動，發現的是另外兩個共同存在於 student.html／teacher.html 的問題，皆純前端
@@ -3535,6 +3558,57 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.noFallbackAfterCall) throw new Error('googleStudentLogin() 呼叫 handleLoginUser() 之後仍看得到 startStudentRedirectLogin()，代表 handleLoginUser() 拋出的例外可能還是會被誤判成 popup 失敗、觸發一次不必要的 redirect');
     if (!result.hasOwnCatchAfterCall) throw new Error('googleStudentLogin() 呼叫 handleLoginUser() 之後找不到緊接的 catch(e)，驗證失敗的例外可能沒有獨立處理');
     if (!result.hasFinally || !result.finallyHasHideLoading) throw new Error('googleStudentLogin() 缺少 finally{ hideLoading() }，跟 teacher.html googleTeacherLogin() 不對稱，可能在某些例外路徑下 loading 遮罩卡住不會消失');
+  });
+
+
+  // ════════════════════════════════════════
+  // S-SEC-55　2026-08-30 新增：GoogleAuthProvider 的 hd（hosted domain）網域參數
+  // ════════════════════════════════════════
+  // 背景：跟 S-SEC-53／S-SEC-54 同一輪「兩端登入流程稽核」當時一併發現、稍後才補上
+  // 測試的第三項問題，與 teacher_test.js 的 T-SEC-67 對稱新增，完整背景見本檔案開頭
+  // v39 changelog 與 AI_CONTEXT_歷程.md 對應段落。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-55 GoogleAuthProvider 加上 hd（hosted domain）參數，Google 帳號選擇畫面優先顯示/導向校內帳號', async () => {
+    // 背景：new GoogleAuthProvider() 原本完全沒有網域限制——使用者按下「用 Google
+    // 登入」時，Google 自己跳出來的帳號選擇畫面會列出裝置上任何已登入過的帳號，不分
+    // 校內外。最常撞到這條路的不是入侵者，是裝置上同時登過個人 Gmail 跟學校帳號的
+    // 合法使用者，選錯很自然。選了非校網域帳號後，整趟「跳出 Google 頁面→選帳號→
+    // 授權→跳回網站」都會白走一次，才在終點被 handleLoginUser() 的 SCHOOL_DOMAIN
+    // 檢查打回票。hd（hosted domain）是 OAuth 標準參數，提前告訴 Google 自己的畫面
+    // 「該選哪個網域的帳號」，把「選錯」盡量攔在起點。
+    //
+    // 這只是 UX 優化、不是安全邊界——官方文件寫明使用者仍可在 Google 畫面點「使用
+    // 其他帳戶」手動輸入非校網域帳號硬是完成登入，hd 擋不住這條路；真正的資料安全
+    // 邊界從頭到尾都是 rule.txt 的 schoolUser()，不管 hd 有沒有設，就算真的用非校
+    // 網域帳號登入成功，也一筆資料讀不到。hd 的實際效果完全發生在 Google 自己的
+    // 伺服器/畫面上，不是這裡的程式碼能驗證的行為——這裡只能靜態確認
+    // setCustomParameters() 真的有被呼叫、且帶正確的網域值，防止未來重構時被悄悄拿掉
+    // 或打錯字，不是證明 Google 帳號選擇器真的優先顯示了校內帳號（後者需要實機登入
+    // 才能驗證，不在自動化測試涵蓋範圍內）。
+    //
+    // provider 是 <script type="module"> 裡的區塊變數，不會掛在 window 上，跟
+    // onAuthStateChanged 的 callback（S-SEC-53）一樣要對整份頁面 inline <script>
+    // 原始碼文字定位；module script 沒有 src 屬性，
+    // document.querySelectorAll('script:not([src])') 一樣抓得到它的 textContent。
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      const providerIdx = scripts.search(/const\s+provider\s*=\s*new\s+GoogleAuthProvider\s*\(\s*\)\s*;/);
+      if (providerIdx === -1) return { skip: true };
+      const windowText = scripts.slice(providerIdx, providerIdx + 1000);
+      const codeOnlyWindow = windowText.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+      const callsSetCustomParameters = /provider\.setCustomParameters\s*\(\s*\{[^}]*\}\s*\)/.test(codeOnlyWindow);
+      const hdMatch = codeOnlyWindow.match(/hd\s*:\s*'([^']*)'/);
+
+      return { skip: false, callsSetCustomParameters, hdValue: hdMatch ? hdMatch[1] : null };
+    });
+
+    if (result.skip) return;
+    if (!result.callsSetCustomParameters) throw new Error('provider.setCustomParameters(...) 呼叫消失了，Google 帳號選擇畫面可能不再優先顯示校內帳號');
+    if (result.hdValue !== 'tcivs.tc.edu.tw') throw new Error(`hd 參數的網域值不正確，實際為 ${JSON.stringify(result.hdValue)}，預期 'tcivs.tc.edu.tw'（須跟 SCHOOL_DOMAIN 保持同步）`);
   });
 
   return results;
