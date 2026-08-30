@@ -1969,6 +1969,10 @@ function renderStudentWorkTypeChart(journals) {
     </div>
     <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
   </div>`;
+  // 2026-08-30 修正：這裡原本漏了這行宣告，下面事件監聽器裡的 tipEl 全部是未宣告變數，
+  // 一互動就會丟 ReferenceError，tooltip完全不會顯示。renderStudentCityChart()／
+  // renderStudentSalaryLineChart() 這兩個結構相同的函式都有這行，唯獨這裡漏掉。
+  const tipEl = container.querySelector('#s-pie-tip');
   container.querySelectorAll('.s-pie-slice').forEach(path => {
     path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
     path.addEventListener('mousemove', function(e) {
@@ -3670,7 +3674,11 @@ async function saveJournal() {
     focusSaveField('write-reflection');
     return toast('心得至少需要20字', 'error');
   }
-  const salary = parseInt(document.getElementById('write-salary').value) || null;
+  // 2026-08-30 修正：原本 `parseInt(...) || null` 用 falsy 判斷，parseInt("0")===0 是
+  // falsy，會讓「填0元」跟「完全沒填」變成同一種資料（0 || null 結果是 null）。
+  // 改用 Number.isNaN() 明確判斷「有沒有解析出數字」，不靠 truthy/falsy 推斷。
+  const salaryParsed = parseInt(document.getElementById('write-salary').value);
+  const salary = Number.isNaN(salaryParsed) ? null : salaryParsed;
   if (salary !== null && (salary < 0 || salary > 200000)) return toast('薪資金額請填 0–200,000 元之間', 'error');
   // 薪資未填軟性提示（不強制，可繼續儲存）
   if (salary === null) {
@@ -4330,7 +4338,10 @@ async function editJournal(seatNo, sem, month) {
   document.getElementById('write-semester').value = sem;
   initWriteMonths();
   document.getElementById('write-month').value = month;
-  document.getElementById('write-salary').value = j.salary || '';
+  // 2026-08-30 修正：j.salary || '' 會把合法的 0 元也顯示成空白（同一個falsy問題，
+  // 理由同 saveJournal() 對應修正），改用 ?? 只在 null/undefined 時才顯示空白，
+  // 跟 checkMonthDeadline() 既有寫法（第2331行 j.salary ?? ''）保持一致。
+  document.getElementById('write-salary').value = j.salary ?? '';
   document.getElementById('write-mentor').value = j.mentor || '';
   document.getElementById('write-reflection').value = j.reflection || '';
   // 2026-07-22 修正：顯示這份月記當時實際記錄的公司，理由同 checkMonthDeadline() 對應註解

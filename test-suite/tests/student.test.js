@@ -1,7 +1,34 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v36
+ * 學生端自動化測試 v37
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v37 修正（2026-08-30）：一輪針對 student.html 的稽核發現並修復兩項真實bug（皆純前端
+ * 邏輯修正，未異動 rule.txt）：
+ * ①資料正確性：saveJournal() 原本 `parseInt(...) || null` 用 truthy/falsy 判斷有沒有
+ * 填薪資，但 parseInt("0")===0 是 falsy，導致「填0元」跟「完全沒填」變成同一筆資料——
+ * 輸入框 min="0"、範圍驗證訊息寫「請填0–200,000元」都證明0本該合法。同一個bug的另一半
+ * 在 editJournal()：`j.salary || ''` 讓已存檔的 salary:0 在編輯畫面被誤顯示成空白。
+ * checkMonthDeadline()（第2331行 j.salary ?? ''）原本就寫對，這兩處單純沒跟上。修法：
+ * saveJournal() 改用 Number.isNaN() 明確判斷，editJournal() 的 `||` 改 `??`。
+ * ②功能性bug：renderStudentWorkTypeChart()（首頁「工作類型」圓餅圖）的
+ * mouseenter/mousemove/mouseleave/click 監聽器全部在用變數 tipEl，但函式本身沒有宣告
+ * 它——結構幾乎相同的 renderStudentCityChart()／renderStudentSalaryLineChart() 都有
+ * `const tipEl = container.querySelector(...)` 這行，唯獨這裡漏掉，全檔也沒有全域
+ * tipEl。結果是學生點/滑過這個圖表色塊時執行到 tipEl 就丟 ReferenceError，tooltip
+ * 完全不會顯示。修法：補上這行宣告。
+ *   S-SEC-51  靜態比對 saveJournal()／editJournal() 真實原始碼（比照 S-SEC-49 對
+ *             saveJournal() 已建立的做法）：確認新的 Number.isNaN() 判斷式／`??` 寫法
+ *             存在，且舊的 `parseInt(...) || null`／`j.salary || ''` 寫法未殘留。不用
+ *             真執行——這兩個函式會動到 Firestore（getDoc／setDoc／getDocs／
+ *             updateDoc），這個共用測試頁面之後還有其他測試依賴 firebase_funcs／
+ *             currentUser 維持真實登入狀態，貿然暫時覆寫的風險不成比例，靜態比對已
+ *             足夠驗證且不需要登入 session。
+ *   S-SEC-52  真執行 renderStudentWorkTypeChart()：餵合成 journals 資料觸發真正渲染，
+ *             對渲染出來的色塊真的 dispatch mouseenter/mousemove/click 事件，驗證
+ *             tooltip 真的正確顯示、內容正確——這是純 DOM 渲染函式，不碰 Firestore，
+ *             可以安全真執行（比照 S-SEC-48／T-SEC-57 的「真執行優於推理」標準），比
+ *             字串/regex比對更能證明 ReferenceError 真的消失，不只是「程式碼長得對」。
  *
  * v36 修正（2026-08-26）：稽核發現 resolveImgSrc()（student.html／teacher.html 各自
  * 獨立一份）原本任何 `http` 開頭字串一律直接放行——entries[].photos／salaryPhotos 是
@@ -3262,6 +3289,108 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.passesThroughDataUri) throw new Error('resolveImgSrc() 不再正確處理既有的 data: URI（薪資單/一般照片目前的正常存檔格式），會造成既有照片全部無法顯示');
     if (!result.prefixesLegacyRawBase64) throw new Error('resolveImgSrc() 不再正確處理沒有前綴的舊格式純 base64 字串');
     if (!result.handlesEmpty) throw new Error('resolveImgSrc() 對空值/null/undefined 的處理被改壞');
+  });
+
+  await test('S-SEC-51 saveJournal()／editJournal() 薪資填0元不再被當成「沒填」', async () => {
+    // 2026-08-30 新增。背景：saveJournal() 原本 `parseInt(...) || null` 用 truthy/falsy
+    // 判斷有沒有填薪資，但 parseInt("0") === 0 是 falsy，導致「填0元」跟「完全沒填」變成
+    // 同一筆資料（0 || null 結果是 null）——輸入框 min="0"、下一行範圍驗證訊息也寫
+    // 「請填 0–200,000 元」，都證明 0 本來就該是合法值。同一個bug的另一半在
+    // editJournal()：`j.salary || ''` 會讓已經存進 Firestore 的 salary:0 在編輯畫面上
+    // 顯示成空白。對照組 checkMonthDeadline()（第2331行 j.salary ?? ''）原本就寫對，
+    // 這兩處是單純沒跟上，不是刻意設計。
+    //
+    // 這裡改用 saveJournal.toString()／editJournal.toString() 直接比對真實原始碼
+    // （比照 S-SEC-49 對 saveJournal() 已建立的做法），不在這個共用測試頁面即時呼叫
+    // 真正的 saveJournal()／editJournal()——這兩個函式會動到 Firestore（getDoc／
+    // setDoc／getDocs／updateDoc），若要用真執行驗證，需要暫時覆寫這些函式並在測試
+    // 結束後還原，而這個共用 page 之後還有其他測試依賴 firebase_funcs／currentUser
+    // 維持真實登入狀態，貿然覆寫風險不成比例；改為靜態比對已足夠驗證這行程式碼本身
+    // 是否符合預期寫法，且不需要登入 session 即可跑（不呼叫 requireStudentSession()）。
+    // codeOnly() 過濾整行註解，避免這裡的說明文字本身（提到了新舊兩種寫法的字面）
+    // 被 naive 搜尋誤判命中（陷阱19／25 同一類）。
+    const result = await page.evaluate(() => {
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
+      if (!saveFnStr || !editFnStr) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const saveCode = codeOnly(saveFnStr);
+      const editCode = codeOnly(editFnStr);
+
+      const saveUsesIsNaNCheck =
+        /const\s+salaryParsed\s*=\s*parseInt\(\s*document\.getElementById\(['"]write-salary['"]\)\.value\s*\)\s*;/.test(saveCode)
+        && /const\s+salary\s*=\s*Number\.isNaN\(\s*salaryParsed\s*\)\s*\?\s*null\s*:\s*salaryParsed\s*;/.test(saveCode);
+      const saveNoOldFalsyPattern =
+        !/const\s+salary\s*=\s*parseInt\([^;]*\)\s*\|\|\s*null/.test(saveCode);
+
+      const editUsesNullish =
+        /document\.getElementById\(['"]write-salary['"]\)\.value\s*=\s*j\.salary\s*\?\?\s*''/.test(editCode);
+      const editNoOldOrPattern =
+        !/document\.getElementById\(['"]write-salary['"]\)\.value\s*=\s*j\.salary\s*\|\|\s*''/.test(editCode);
+
+      return { skip: false, saveUsesIsNaNCheck, saveNoOldFalsyPattern, editUsesNullish, editNoOldOrPattern };
+    });
+
+    if (result.skip) return;
+    if (!result.saveUsesIsNaNCheck || !result.saveNoOldFalsyPattern)
+      throw new Error('saveJournal() 的薪資解析找不到 Number.isNaN() 判斷寫法（或仍殘留/退回 `parseInt(...) || null`）——填0元可能又會被誤判成「沒填」，觸發不必要的確認對話框，且存進 Firestore 的值會被錯誤存成 null');
+    if (!result.editUsesNullish || !result.editNoOldOrPattern)
+      throw new Error('editJournal() 的薪資欄位還原找不到 `j.salary ?? \'\'` 寫法（或仍殘留/退回 `j.salary || \'\'`）——已存檔的 salary:0 打開編輯畫面會被誤顯示成空白欄位');
+  });
+
+  await test('S-SEC-52 工作類型圓餅圖 tooltip 不再丟 ReferenceError（tipEl 未宣告）', async () => {
+    // 2026-08-30 新增。背景：renderStudentWorkTypeChart() 的 mouseenter/mousemove/
+    // mouseleave/click 監聽器全部在用變數 tipEl，但函式本身沒有宣告它——結構幾乎一樣的
+    // 另外兩個函式 renderStudentCityChart()／renderStudentSalaryLineChart() 都有
+    // `const tipEl = container.querySelector(...)` 這行，唯獨這裡漏掉，全檔也沒有全域
+    // tipEl。結果是學生點/滑過首頁「工作類型」圓餅圖色塊時，一執行到 tipEl 就丟
+    // ReferenceError，tooltip完全不會顯示（讀取未宣告變數一律拋錯，不受嚴不嚴格模式
+    // 影響）。
+    //
+    // 這是純 DOM 渲染函式，不碰 Firestore／currentUser，不需要學生登入 session，
+    // 直接在這個共用 page 上真執行：餵合成 journals 資料觸發真正渲染，對渲染出來的
+    // 色塊真的 dispatch mouseenter/mousemove/click 事件，比字串/regex比對更能證明
+    // ReferenceError 真的消失、tooltip 真的會顯示正確內容，不只是「程式碼長得對」
+    // （比照 S-SEC-48／T-SEC-57 已建立的「真執行優於推理」標準）。測試結束後呼叫真正
+    // 的 loadStudentStats()（若目前有真實登入狀態）讓圖表重新載入真實資料，盡量不留
+    // 合成測試資料在畫面上；此頁面本身沒有其他既有測試會斷言這個容器的內容，即使還原
+    // 失敗（例如目前尚未登入）也不影響其他測項。
+    const result = await page.evaluate(async () => {
+      const container = document.getElementById('s-work-type-chart');
+      if (typeof renderStudentWorkTypeChart !== 'function' || !container) return { skip: true };
+
+      const journals = [{ entries: [{ type: '搬運' }, { type: '搬運' }, { type: '包裝' }] }];
+      renderStudentWorkTypeChart(journals);
+      const slice = container.querySelector('.s-pie-slice');
+      if (!slice) return { skip: true };
+
+      let threw = null;
+      try {
+        slice.dispatchEvent(new MouseEvent('mouseenter'));
+        slice.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 10 }));
+        slice.dispatchEvent(new MouseEvent('click'));
+      } catch (e) {
+        threw = e.message;
+      }
+      const tipEl = container.querySelector('#s-pie-tip');
+      const tipVisible = tipEl ? tipEl.style.display === 'block' : false;
+      const tipText = tipEl ? tipEl.textContent : '';
+
+      // 盡量還原成真實資料（見上方註解），還原失敗不影響本測試判定
+      try { if (typeof currentUser !== 'undefined' && currentUser && typeof loadStudentStats === 'function') await loadStudentStats(); } catch (_) {}
+
+      return { skip: false, threw, tipVisible, tipText };
+    });
+    // 注意：dispatchEvent() 對監聽器內丟出的例外不會同步往外傳（DOM規範本身如此，
+    // 瀏覽器改成非同步回報到 console/pageerror），所以上面 try/catch 抓到的 threw
+    // 實務上幾乎總是 null，即使 tipEl 未宣告一樣如此——真正能分辨這個bug的是下面
+    // tipVisible／tipText 這兩項：ReferenceError 讓監聽器整個提前中斷，tooltip 永遠
+    // 不會被設成顯示，這才是这個bug真正、可觀察的症狀。
+    if (result.skip) return;
+    if (result.threw) throw new Error(`色塊事件監聽器同步丟出例外：${result.threw}`);
+    if (!result.tipVisible) throw new Error('tooltip 沒有正確顯示（style.display 不是 block）——可能 tipEl 仍未宣告或選取到錯誤元素，互動時被靜默吃掉例外');
+    if (!result.tipText || !result.tipText.includes('搬運')) throw new Error(`tooltip 內容不正確或為空：實際為 "${result.tipText}"`);
   });
 
   return results;
