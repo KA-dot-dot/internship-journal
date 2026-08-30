@@ -1,7 +1,41 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v37
+ * 學生端自動化測試 v38
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v38 修正（2026-08-30）：一輪針對兩端登入流程的稽核（popup/redirect fallback 本身
+ * 維持不動，發現的是另外兩個共同存在於 student.html／teacher.html 的問題，皆純前端
+ * 修法，未異動 rule.txt）：
+ * ①onAuthStateChanged 的 callback（自動恢復登入）原本另外重寫一份跟 handleLoginUser()
+ * 幾乎一樣的驗證邏輯（查 studentBindings／students、判斷老師帳號等），兩處已經各自
+ * 演化出落差——「非校內信箱」分支這裡原本只 signOut() 沒有 toast 說明原因，使用者會
+ * 被靜默登出；老師帳號未綁定座號時的提示文字也跟 handleLoginUser() 不同。修法：改為
+ * 直接呼叫 handleLoginUser()，單一事實來源，避免未來繼續分岔。
+ * ②googleStudentLogin() 把 signInWithPopup() 本身的失敗跟 handleLoginUser() 之後的
+ * 驗證失敗（例如 Firestore 讀取逾時，withTimeout() 拋出的是普通 Error、沒有 .code）
+ * 混在同一個 catch 處理，導致 Google 登入本身明明已經成功、只是接下來驗證階段網路
+ * 逾時，卻被誤判成「popup 失敗」而自動觸發一次 signInWithRedirect()——這正是
+ * 2026-07-12 那輪改版想避免的「跳出 App 到系統瀏覽器」情境，只是換了個觸發途徑。
+ * 修法：拆成兩層 try/catch，並補上跟 teacher.html 對稱的 finally{ hideLoading() }
+ * （原本只有 teacher.html 有這層保底，兩者不對稱）。與 teacher_test.js 的
+ * T-SEC-65／T-SEC-66 對稱。
+ *   S-SEC-53  onAuthStateChanged 的 callback 是匿名 inline arrow function，無法像具名
+ *             函式一樣直接 .toString()，改對整份頁面 inline <script> 原始碼文字定位
+ *             onAuthStateChanged(auth, async (user) => { 這個呼叫語法本身的位置，取
+ *             足夠涵蓋整個 callback 的視窗，用三重訊號交叉驗證：①視窗內確實呼叫
+ *             handleLoginUser(user)；②視窗內完全沒有 signOut( 字樣（最直接的證據，
+ *             若舊分支還殘留一定會在這裡看到）；③全域計算 handleLoginUser() 內部才有
+ *             的查詢語句只出現1次（不是2次，證明舊的重複實作真的被刪除，不是被新呼叫
+ *             繞過去但程式碼還留著沒清）。
+ *   S-SEC-54  直接呼叫 googleStudentLogin.toString()，找到 await handleLoginUser(...)
+ *             呼叫位置切成前後兩段：前段仍應看得到 startStudentRedirectLogin() fallback
+ *             （確認 popup 失敗機制沒被拿掉），後段不應再出現這個 fallback 呼叫（核心：
+ *             handleLoginUser() 拋出的例外不能再走到觸發 redirect 的那段程式碼）；並
+ *             確認呼叫後緊接著有獨立 catch(e)，以及函式本身有 finally{ hideLoading() }。
+ *             不真執行——這個函式會觸發真正的 Google OAuth popup，沒有安全的方式在無人
+ *             互動的自動化環境模擬，跟既有 S-SEC-33／S-SEC-34 對這個函式的既有測試作法
+ *             一致，皆為靜態比對。新增前已用 node 直接抽取兩份檔案修法前／後的函式原始碼
+ *             跑過同一套斷言，確認舊碼會正確觸發失敗、新碼會正確通過。
  *
  * v37 修正（2026-08-30）：一輪針對 student.html 的稽核發現並修復兩項真實bug（皆純前端
  * 邏輯修正，未異動 rule.txt）：
@@ -3391,6 +3425,116 @@ async function runStudentTests(page, browserContext, log) {
     if (result.threw) throw new Error(`色塊事件監聽器同步丟出例外：${result.threw}`);
     if (!result.tipVisible) throw new Error('tooltip 沒有正確顯示（style.display 不是 block）——可能 tipEl 仍未宣告或選取到錯誤元素，互動時被靜默吃掉例外');
     if (!result.tipText || !result.tipText.includes('搬運')) throw new Error(`tooltip 內容不正確或為空：實際為 "${result.tipText}"`);
+  });
+
+
+  // ════════════════════════════════════════
+  // S-SEC-53 / S-SEC-54　2026-08-30 新增：登入流程稽核（onAuthStateChanged 重複實作／
+  // googleStudentLogin() popup失敗與驗證失敗混用同一 catch）
+  // ════════════════════════════════════════
+  // 背景：一輪針對兩端登入流程的稽核（popup/redirect fallback 本身維持不動，發現的是
+  // 另外兩個共同存在於兩份檔案的問題）：
+  // ①onAuthStateChanged 的 callback 原本另外重寫一份跟 handleLoginUser() 幾乎一樣的
+  // 驗證邏輯，兩處已經各自演化出落差——「非校內信箱」分支這裡原本只 signOut() 沒有
+  // toast 說明原因，使用者會被靜默登出；老師帳號未綁定座號時的提示文字也跟
+  // handleLoginUser() 不同。改為直接呼叫 handleLoginUser()，單一事實來源。
+  // ②googleStudentLogin() 把 signInWithPopup() 本身的失敗跟 handleLoginUser() 之後的
+  // 驗證失敗（例如 Firestore 讀取逾時，withTimeout() 拋出的是普通 Error、沒有 .code）
+  // 混在同一個 catch 處理，導致 Google 登入本身明明已經成功、只是接下來驗證階段網路
+  // 逾時，卻被誤判成「popup 失敗」而自動觸發一次 signInWithRedirect()——這正是
+  // 2026-07-12 那輪改版想避免的「跳出 App 到系統瀏覽器」情境，只是換了個觸發途徑。
+  // 拆成兩層 try/catch，並補上跟 teacher.html 對稱的 finally{ hideLoading() }（原本
+  // 只有 teacher.html 有這層保底）。與 teacher_test.js 的 T-SEC-65／T-SEC-66 對稱。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-53 onAuthStateChanged 自動恢復登入改直接呼叫 handleLoginUser()，不再重複實作一份會靜默登出的驗證邏輯', async () => {
+    // onAuthStateChanged 的 callback 是匿名 inline arrow function，無法像具名函式一樣
+    // typeof xxx === 'function' 取得參照直接 .toString()，改對整份頁面 inline <script>
+    // 原始碼文字做定位：鎖定 onAuthStateChanged(auth, async (user) => { 這個呼叫語法
+    // 本身的位置，往後取一段足夠涵蓋整個 callback（實測約1300字元）的視窗。
+    // 用三種訊號交叉驗證，避免只看「有呼叫 handleLoginUser()」就誤判成已修好（呼叫
+    // 可能只是「加了一行」但舊邏輯其實還留著沒刪）：
+    //   ①視窗內確實呼叫 handleLoginUser(user)；
+    //   ②視窗內完全沒有 signOut( 字樣——這是最直接的證據，若舊的「非校內信箱→
+    //     signOut() 但不 toast」分支還殘留，一定會在這裡看到 signOut( 呼叫；
+    //   ③全域計算 getDoc(doc(db, 'studentBindings', emailKey)) 這句只有 handleLoginUser()
+    //     內部才有的查詢語句，在整份程式碼裡只出現1次（不是2次）——這比①②更直接，
+    //     證明舊的重複實作真的被刪除，不是被新呼叫繞過去但程式碼還留著沒清。
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      const callIdx = scripts.search(/onAuthStateChanged\s*\(\s*auth\s*,\s*async\s*\(user\)\s*=>\s*\{/);
+      if (callIdx === -1) return { skip: true };
+      const windowText = scripts.slice(callIdx, callIdx + 1800);
+      const codeOnlyWindow = windowText.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+      const callsSharedFn = /await\s+handleLoginUser\s*\(\s*user\s*\)/.test(codeOnlyWindow);
+      const noDirectSignOut = !/signOut\s*\(/.test(codeOnlyWindow);
+      const dupSignature = "getDoc(doc(db, 'studentBindings', emailKey))";
+      const dupCount = scripts.split(dupSignature).length - 1;
+
+      return { skip: false, callsSharedFn, noDirectSignOut, dupCount };
+    });
+
+    if (result.skip) return;
+    if (!result.callsSharedFn) throw new Error('onAuthStateChanged 的 callback 找不到直接呼叫 await handleLoginUser(user)，可能仍是另外重寫的一份邏輯');
+    if (!result.noDirectSignOut) throw new Error('onAuthStateChanged 的 callback 內仍直接呼叫 signOut(...)，疑似殘留舊的重複實作（「非校內信箱」分支曾經因此靜默登出、不顯示原因）');
+    if (result.dupCount !== 1) throw new Error(`getDoc(doc(db, 'studentBindings', emailKey)) 這個查詢語句在整份程式碼中出現 ${result.dupCount} 次（預期恰好1次，只在 handleLoginUser() 內部），代表 onAuthStateChanged 可能仍殘留一份重複實作的查詢邏輯，未真正改為委派`);
+  });
+
+  await test('S-SEC-54 googleStudentLogin() 的 handleLoginUser() 驗證失敗跟 signInWithPopup() 本身失敗分開處理，且補上 finally{ hideLoading() }', async () => {
+    // 背景：原本 `await handleLoginUser(result.user)` 跟 signInWithPopup() 寫在同一個
+    // try 裡，共用同一個 catch——handleLoginUser() 內部兩個 withTimeout(getDoc(...))
+    // 逾時或任何 Firestore 讀取錯誤丟出的是普通 Error（沒有 .code），會被「除了使用者
+    // 取消都當成 popup 失敗」的判斷誤傷，導致 Google 登入本身明明已經成功、只是接下來
+    // 驗證階段網路逾時，卻自動觸發一次 signInWithRedirect()。
+    //
+    // 直接呼叫 googleStudentLogin.toString()，用「找到 await handleLoginUser(...) 呼叫
+    // 位置，切成前後兩段」的方式驗證：前段（popup 處理階段）應該仍看得到
+    // startStudentRedirectLogin() 這個 fallback 呼叫（確認 popup 失敗的 fallback 機制
+    // 沒有被拿掉）；後段（handleLoginUser() 呼叫之後到函式結尾）不應該再出現
+    // startStudentRedirectLogin()——這才是這次要修的核心：handleLoginUser() 拋出例外
+    // 不能再走到觸發 redirect 的那段程式碼，因為呼叫時已經不在同一個 try/catch 範圍內。
+    // 另外確認 handleLoginUser() 呼叫之後很快就有自己的 catch(e)（有獨立錯誤處理，
+    // 不是被吃掉或裸露丟給外層），以及函式本身有 finally{ hideLoading() }（補齊跟
+    // teacher.html googleTeacherLogin() 對稱的保底，原本兩者不對稱，student.html
+    // 沒有這層）。不真執行——這個函式會觸發真正的 Google OAuth popup，沒有安全的方式
+    // 在無人互動的自動化環境模擬，跟既有 S-SEC-33／S-SEC-34 對這個函式的既有測試作法
+    // 一致，皆為靜態比對。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof googleStudentLogin === 'function') ? googleStudentLogin.toString() : '';
+      if (!fnStr) return { skip: true };
+      const codeOnly = fnStr.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+      const callIdx = codeOnly.search(/await\s+handleLoginUser\s*\(/);
+      if (callIdx === -1) return { skip: false, callFound: false };
+      const before = codeOnly.slice(0, callIdx);
+      const after = codeOnly.slice(callIdx);
+
+      const fallbackBeforeCall = /startStudentRedirectLogin\s*\(\s*\)/.test(before);
+      const noFallbackAfterCall = !/startStudentRedirectLogin\s*\(\s*\)/.test(after);
+      const hasOwnCatchAfterCall = /catch\s*\(\s*e\s*\)/.test(after.slice(0, 400));
+      const cancelGuardBeforeCall = /popup-closed-by-user/.test(before) && /cancelled-popup-request/.test(before);
+
+      const hasFinally = /finally\s*\{/.test(fnStr);
+      const fIdx = fnStr.search(/finally\s*\{/);
+      const finallyHasHideLoading = fIdx !== -1 && /hideLoading\s*\(\s*\)/.test(fnStr.slice(fIdx, fIdx + 400));
+
+      return {
+        skip: false, callFound: true,
+        fallbackBeforeCall, noFallbackAfterCall, hasOwnCatchAfterCall,
+        cancelGuardBeforeCall, hasFinally, finallyHasHideLoading,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.callFound) throw new Error('googleStudentLogin() 找不到 await handleLoginUser(...) 呼叫');
+    if (!result.cancelGuardBeforeCall) throw new Error('googleStudentLogin() 找不到「使用者主動取消不重試」的判斷，或它被移到 handleLoginUser() 呼叫之後（順序不對）');
+    if (!result.fallbackBeforeCall) throw new Error('googleStudentLogin() 的 startStudentRedirectLogin() fallback 呼叫消失了，popup 失敗時可能不會再自動改走 redirect');
+    if (!result.noFallbackAfterCall) throw new Error('googleStudentLogin() 呼叫 handleLoginUser() 之後仍看得到 startStudentRedirectLogin()，代表 handleLoginUser() 拋出的例外可能還是會被誤判成 popup 失敗、觸發一次不必要的 redirect');
+    if (!result.hasOwnCatchAfterCall) throw new Error('googleStudentLogin() 呼叫 handleLoginUser() 之後找不到緊接的 catch(e)，驗證失敗的例外可能沒有獨立處理');
+    if (!result.hasFinally || !result.finallyHasHideLoading) throw new Error('googleStudentLogin() 缺少 finally{ hideLoading() }，跟 teacher.html googleTeacherLogin() 不對稱，可能在某些例外路徑下 loading 遮罩卡住不會消失');
   });
 
   return results;

@@ -1,7 +1,38 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v35
+ * 老師端自動化測試 v36
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v36 修正（2026-08-30）：一輪針對兩端登入流程的稽核（popup/redirect fallback 本身
+ * 維持不動，發現的是另外兩個共同存在於 student.html／teacher.html 的問題，皆純前端
+ * 修法，未異動 rule.txt；與 student_test.js 的 v38 對稱新增）：
+ * ①onAuthStateChanged 的 callback（自動恢復登入）原本另外重寫一份跟
+ * handleTeacherLoginUser() 幾乎一樣的驗證邏輯（查 /admins/{uid}／emailKey、判斷是否
+ * 有老師權限等），兩處已經各自演化出落差——「非校內信箱」分支這裡原本只 signOut()
+ * 沒有 toast 說明原因，使用者會被靜默登出；「沒有老師權限」分支這裡原本只
+ * hideLoading() 也沒有 toast（對照 handleTeacherLoginUser() 會顯示「❌ 您沒有老師
+ * 權限，請聯絡系統管理員」）。修法：改為直接呼叫 handleTeacherLoginUser()，單一事實
+ * 來源。
+ * ②googleTeacherLogin() 把 signInWithPopup() 本身的失敗跟 handleTeacherLoginUser()
+ * 之後的驗證失敗（例如 Firestore 讀取逾時，withTimeout() 拋出的是普通 Error、沒有
+ * .code）混在同一個 catch 處理，導致 Google 登入本身明明已經成功、只是接下來驗證
+ * 階段網路逾時，卻被誤判成「popup 失敗」而自動觸發一次 signInWithRedirect()。修法：
+ * 拆成兩層 try/catch；teacher.html 原本就有 finally{ hideLoading() }（student.html
+ * 原本沒有，已同步補上），這裡確認拆開後這層 finally 仍然保留。
+ *   T-SEC-65  對稱於 S-SEC-53：onAuthStateChanged 的 callback 是匿名 inline arrow
+ *             function，改對整份頁面 inline <script> 原始碼文字定位呼叫語法本身的
+ *             位置，取足夠涵蓋整個 callback 的視窗，用四重訊號交叉驗證：①視窗內確實
+ *             呼叫 handleTeacherLoginUser(user)；②視窗內完全沒有 signOut( 字樣；
+ *             ③全域計算 handleTeacherLoginUser() 內部才有的查詢語句只出現1次；④視窗
+ *             內不再獨立宣告 `let isAdmin = false`（舊邏輯自己判斷權限的特徵變數，
+ *             這個判斷現在完全交給 handleTeacherLoginUser() 內部處理）。
+ *   T-SEC-66  對稱於 S-SEC-54：直接呼叫 googleTeacherLogin.toString()，找到
+ *             await handleTeacherLoginUser(...) 呼叫位置切成前後兩段，確認
+ *             startTeacherRedirectLogin() fallback 只出現在呼叫之前、呼叫之後找不到，
+ *             呼叫後緊接獨立 catch(e)，且 finally{ hideLoading() } 仍然存在（拆開兩層
+ *             try/catch 過程中沒有被誤刪）。不真執行，理由同 T-SEC-33／T-SEC-35 對這個
+ *             函式的既有測試作法。新增前已用 node 直接抽取兩份檔案修法前／後的函式
+ *             原始碼跑過同一套斷言，確認舊碼會正確觸發失敗、新碼會正確通過。
  *
  * v35 修正（2026-08-30）：修復兩處統計/管理功能的資料正確性問題（AI 協助稽核發現，皆純
  * 前端修法，未異動 rule.txt）：
@@ -3799,6 +3830,91 @@ async function runTeacherTests(page, log) {
       e.includes('ReferenceError') || e.includes('SyntaxError')
     );
     if (serious.length > 0) throw new Error(serious[0]);
+  });
+
+
+  // ════════════════════════════════════════
+  // T-SEC-65 / T-SEC-66　2026-08-30 新增：登入流程稽核（onAuthStateChanged 重複實作／
+  // googleTeacherLogin() popup失敗與驗證失敗混用同一 catch）。與 student_test.js 的
+  // S-SEC-53／S-SEC-54 對稱新增，背景見該處註解與 AI_CONTEXT_歷程.md 對應段落。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-65 onAuthStateChanged 自動恢復登入改直接呼叫 handleTeacherLoginUser()，不再重複實作一份會靜默處理的驗證邏輯', async () => {
+    // 對稱於 student_test.js 的 S-SEC-53。背景：onAuthStateChanged 的 callback 原本
+    // 另外重寫一份跟 handleTeacherLoginUser() 幾乎一樣的驗證邏輯（查 /admins/{uid}／
+    // emailKey、判斷是否有老師權限等），兩處已經各自演化出落差——「非校內信箱」分支
+    // 這裡原本只 signOut() 沒有 toast 說明原因，使用者會被靜默登出；「沒有老師權限」
+    // 分支這裡原本只 hideLoading() 也沒有 toast（對照 handleTeacherLoginUser() 會顯示
+    // 「❌ 您沒有老師權限，請聯絡系統管理員」）。改為直接呼叫 handleTeacherLoginUser()，
+    // 單一事實來源。
+    //
+    // 跟 S-SEC-53 同一套訊號交叉驗證，這裡額外多一項——④視窗內不應該再獨立宣告
+    // `let isAdmin = false`（舊邏輯自己判斷 isAdmin 的特徵變數），因為現在這個判斷完全
+    // 交給 handleTeacherLoginUser() 內部處理，onAuthStateChanged 不該再自己算一次。
+    const result = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script:not([src])'))
+        .map(s => s.textContent).join('\n');
+
+      const callIdx = scripts.search(/onAuthStateChanged\s*\(\s*auth\s*,\s*async\s*\(user\)\s*=>\s*\{/);
+      if (callIdx === -1) return { skip: true };
+      const windowText = scripts.slice(callIdx, callIdx + 3200);
+      const codeOnlyWindow = windowText.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+      const callsSharedFn = /await\s+handleTeacherLoginUser\s*\(\s*user\s*\)/.test(codeOnlyWindow);
+      const noDirectSignOut = !/signOut\s*\(/.test(codeOnlyWindow);
+      const dupSignature = "getDoc(doc(db, 'admins', user.uid))";
+      const dupCount = scripts.split(dupSignature).length - 1;
+      const noIndependentIsAdminVar = !/let\s+isAdmin\s*=\s*false/.test(codeOnlyWindow);
+
+      return { skip: false, callsSharedFn, noDirectSignOut, dupCount, noIndependentIsAdminVar };
+    });
+
+    if (result.skip) return;
+    if (!result.callsSharedFn) throw new Error('onAuthStateChanged 的 callback 找不到直接呼叫 await handleTeacherLoginUser(user)，可能仍是另外重寫的一份邏輯');
+    if (!result.noDirectSignOut) throw new Error('onAuthStateChanged 的 callback 內仍直接呼叫 signOut(...)，疑似殘留舊的重複實作（「非校內信箱」分支曾經因此靜默登出、不顯示原因）');
+    if (result.dupCount !== 1) throw new Error(`getDoc(doc(db, 'admins', user.uid)) 這個查詢語句在整份程式碼中出現 ${result.dupCount} 次（預期恰好1次，只在 handleTeacherLoginUser() 內部），代表 onAuthStateChanged 可能仍殘留一份重複實作的查詢邏輯，未真正改為委派`);
+    if (!result.noIndependentIsAdminVar) throw new Error('onAuthStateChanged 的 callback 內仍自己宣告 isAdmin 變數並判斷權限，疑似殘留舊邏輯（「沒有老師權限」分支曾經因此只 hideLoading() 沒有 toast 說明原因）');
+  });
+
+  await test('T-SEC-66 googleTeacherLogin() 的 handleTeacherLoginUser() 驗證失敗跟 signInWithPopup() 本身失敗分開處理', async () => {
+    // 對稱於 student_test.js 的 S-SEC-54。teacher.html 原本就有 finally{ hideLoading() }
+    // （student.html 原本沒有，已同步補上，見 S-SEC-54），這裡不用再檢查 finally 是否
+    // 存在本身這件事，但要確認拆開兩層 try/catch 之後這層 finally 仍然保留（沒有在
+    // 重構過程中被誤刪，變成跟 student.html 修好前一樣不對稱）。其餘檢查邏輯與
+    // S-SEC-54 相同。
+    const result = await page.evaluate(() => {
+      const fnStr = (typeof googleTeacherLogin === 'function') ? googleTeacherLogin.toString() : '';
+      if (!fnStr) return { skip: true };
+      const codeOnly = fnStr.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+      const callIdx = codeOnly.search(/await\s+handleTeacherLoginUser\s*\(/);
+      if (callIdx === -1) return { skip: false, callFound: false };
+      const before = codeOnly.slice(0, callIdx);
+      const after = codeOnly.slice(callIdx);
+
+      const fallbackBeforeCall = /startTeacherRedirectLogin\s*\(\s*\)/.test(before);
+      const noFallbackAfterCall = !/startTeacherRedirectLogin\s*\(\s*\)/.test(after);
+      const hasOwnCatchAfterCall = /catch\s*\(\s*e\s*\)/.test(after.slice(0, 400));
+      const cancelGuardBeforeCall = /popup-closed-by-user/.test(before) && /cancelled-popup-request/.test(before);
+
+      const hasFinally = /finally\s*\{/.test(fnStr);
+      const fIdx = fnStr.search(/finally\s*\{/);
+      const finallyHasHideLoading = fIdx !== -1 && /hideLoading\s*\(\s*\)/.test(fnStr.slice(fIdx, fIdx + 400));
+
+      return {
+        skip: false, callFound: true,
+        fallbackBeforeCall, noFallbackAfterCall, hasOwnCatchAfterCall,
+        cancelGuardBeforeCall, hasFinally, finallyHasHideLoading,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.callFound) throw new Error('googleTeacherLogin() 找不到 await handleTeacherLoginUser(...) 呼叫');
+    if (!result.cancelGuardBeforeCall) throw new Error('googleTeacherLogin() 找不到「使用者主動取消不重試」的判斷，或它被移到 handleTeacherLoginUser() 呼叫之後（順序不對）');
+    if (!result.fallbackBeforeCall) throw new Error('googleTeacherLogin() 的 startTeacherRedirectLogin() fallback 呼叫消失了，popup 失敗時可能不會再自動改走 redirect');
+    if (!result.noFallbackAfterCall) throw new Error('googleTeacherLogin() 呼叫 handleTeacherLoginUser() 之後仍看得到 startTeacherRedirectLogin()，代表 handleTeacherLoginUser() 拋出的例外可能還是會被誤判成 popup 失敗、觸發一次不必要的 redirect');
+    if (!result.hasOwnCatchAfterCall) throw new Error('googleTeacherLogin() 呼叫 handleTeacherLoginUser() 之後找不到緊接的 catch(e)，驗證失敗的例外可能沒有獨立處理');
+    if (!result.hasFinally || !result.finallyHasHideLoading) throw new Error('googleTeacherLogin() 的 finally{ hideLoading() } 不見了，拆開兩層 try/catch 時可能被誤刪');
   });
 
   return results;

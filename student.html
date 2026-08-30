@@ -31,6 +31,16 @@
   const db = initializeFirestore(app, { localCache: { kind: 'memory' } });
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
+  // 2026-08-30 新增：hd（hosted domain）OAuth 參數，讓 Google 帳號選擇畫面優先顯示/導向
+  // 這個網域的帳號，減少裝置上同時登過校內外帳號時選錯的機會。這只是 UX 優化，不是安全
+  // 邊界——使用者仍可在 Google 畫面點「使用其他帳戶」繞過，真正擋非校網域帳號的是後面
+  // handleLoginUser() 的 SCHOOL_DOMAIN 檢查與 rule.txt 的 schoolUser()，兩者都不受此參數
+  // 影響、繼續照舊運作。這裡是獨立字面值，不是 SCHOOL_DOMAIN 常數本身——SCHOOL_DOMAIN
+  // 定義在本檔案下方另一個非 module 的 <script>（約916行），ES module 有自己獨立的
+  // 頂層 scope 不共用一般 script 的 const，且這段 module script
+  // 執行時那段主程式 script 根本還沒載入。若未來校網域變更，這裡要跟 SCHOOL_DOMAIN 手動
+  // 同步（比照本專案既有「兩份需要人工同步的複本」慣例處理，非遺漏）。
+  provider.setCustomParameters({ hd: 'tcivs.tc.edu.tw' });
   // Auth token 存入 localStorage，PWA 重新開啟時不需重新向 Google 驗證，縮短登入等待時間
   setPersistence(auth, browserLocalPersistence).catch(e => console.warn('[Auth] setPersistence 失敗', e));
 
@@ -1213,7 +1223,6 @@ async function googleStudentLogin() {
   showLoading();
   try {
     if (!window._auth) {
-      hideLoading();
       toast('系統初始化中，請稍候 1 秒後再試', 'error');
       return;
     }
@@ -1223,40 +1232,62 @@ async function googleStudentLogin() {
     // 這次用真實 iOS 裝置測試後證實假設錯誤（popup 在 standalone 下正常成功），
     // 反而是 redirect 因 Firebase authDomain 跨網域限制在此環境下無法正確回傳登入結果。
     if (isStoragePartitionedEnv()) {
-      hideLoading();
       toast('⚠️ 此環境不支援 Google 登入，請改用 Safari 或 Chrome 開啟此網頁後再登入', 'error');
       return;
     }
-    const { auth, provider, signInWithPopup } = window._auth;
-    const popupPromise = signInWithPopup(auth, provider);
-    await waitForFirebaseAsync();
-    const result = await popupPromise;
-    await handleLoginUser(result.user);
-  } catch(e) {
-    // 使用者主動取消（自己關掉 popup／短時間內按了兩次登入）：不重試，安靜結束。
-    if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
-      hideLoading();
+    // 2026-08-30 修正：signInWithPopup() 本身的失敗（含使用者取消、popup 被瀏覽器擋）
+    // 跟接下來 handleLoginUser() 的驗證失敗，原本共用同一個 catch，改成分開兩層
+    // try/catch。handleLoginUser() 內部兩個 withTimeout(getDoc(...)) 逾時或任何
+    // Firestore 讀取錯誤丟出的是普通 Error（沒有 .code），會被下面判斷「除了使用者
+    // 取消都當成 popup 失敗」的邏輯誤判，導致 Google 登入本身明明已經成功、只是接下來
+    // 驗證階段網路逾時，卻被自動觸發一次 signInWithRedirect()——使用者會看到已經登入
+    // 成功後又莫名其妙跳出一次 Google 導向頁（standalone 模式下更等同又跳出 App 到
+    // 系統瀏覽器，正是這裡花兩輪修過想避免的情境），而不是看到設計好的「登入逾時，
+    // 請確認網路後再試」提示。分開後，handleLoginUser() 拋出的例外直接顯示錯誤 toast，
+    // 不再觸發 redirect fallback，比照 handleRedirectResult() 既有的處理方式。
+    let popupUser;
+    try {
+      const { auth, provider, signInWithPopup } = window._auth;
+      const popupPromise = signInWithPopup(auth, provider);
+      await waitForFirebaseAsync();
+      const result = await popupPromise;
+      popupUser = result.user;
+    } catch(e) {
+      // 使用者主動取消（自己關掉 popup／短時間內按了兩次登入）：不重試，安靜結束。
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+      // 2026-07-12 補修（第二輪）：原本只把 auth/popup-blocked／
+      // auth/operation-not-supported-in-this-environment 這兩種錯誤碼視為「popup 不可用，
+      // 改走 redirect」，但用老師自己的舊機（iOS 15.8.5／Safari 15.6.7）實測後發現，popup
+      // 在這台裝置的 standalone 模式下並不是立刻回報上述錯誤碼，而是卡住約 30 秒後才拋出
+      // auth/network-request-failed；同一台舊機上 redirect 反而完全正常。這跟學生那台新機
+      // （iOS 18.7／Safari 26.5）的狀況完全相反——popup 正常、redirect 讀不到結果。
+      // 兩種裝置各自的失敗模式無法用同一組錯誤碼窮舉，與其每次實測到新的錯誤碼就補一條
+      // if，改成「除了使用者主動取消以外，popup 失敗一律自動 fallback 到 redirect」，讓
+      // 新機直接 popup 成功、舊機 popup 失敗後自動改走 redirect 成功，兩種裝置都不需要
+      // 使用者自己重按登入或切換瀏覽器。（isStoragePartitionedEnv() 已在函式開頭 popup
+      // 執行前檢查過一次，執行到這裡代表當時判定不是受限環境，不需要重複檢查。）
+      console.warn('signInWithPopup() 失敗，改嘗試 signInWithRedirect() fallback：', e.code, e.message);
+      try {
+        await startStudentRedirectLogin();
+      } catch(re) {
+        console.error('signInWithRedirect() fallback 也失敗', re);
+        toast('登入失敗，請關閉 APP 後重新開啟再試一次（若持續失敗請改用 Safari/Chrome 開啟登入一次）', 'error');
+      }
       return;
     }
-    // 2026-07-12 補修（第二輪）：原本只把 auth/popup-blocked／
-    // auth/operation-not-supported-in-this-environment 這兩種錯誤碼視為「popup 不可用，
-    // 改走 redirect」，但用老師自己的舊機（iOS 15.8.5／Safari 15.6.7）實測後發現，popup
-    // 在這台裝置的 standalone 模式下並不是立刻回報上述錯誤碼，而是卡住約 30 秒後才拋出
-    // auth/network-request-failed；同一台舊機上 redirect 反而完全正常。這跟學生那台新機
-    // （iOS 18.7／Safari 26.5）的狀況完全相反——popup 正常、redirect 讀不到結果。
-    // 兩種裝置各自的失敗模式無法用同一組錯誤碼窮舉，與其每次實測到新的錯誤碼就補一條
-    // if，改成「除了使用者主動取消以外，popup 失敗一律自動 fallback 到 redirect」，讓
-    // 新機直接 popup 成功、舊機 popup 失敗後自動改走 redirect 成功，兩種裝置都不需要
-    // 使用者自己重按登入或切換瀏覽器。（isStoragePartitionedEnv() 已在函式開頭 popup
-    // 執行前檢查過一次，執行到這裡代表當時判定不是受限環境，不需要重複檢查。）
-    console.warn('signInWithPopup() 失敗，改嘗試 signInWithRedirect() fallback：', e.code, e.message);
     try {
-      await startStudentRedirectLogin();
-    } catch(re) {
-      hideLoading();
-      console.error('signInWithRedirect() fallback 也失敗', re);
-      toast('登入失敗，請關閉 APP 後重新開啟再試一次（若持續失敗請改用 Safari/Chrome 開啟登入一次）', 'error');
+      await handleLoginUser(popupUser);
+    } catch(e) {
+      console.error('登入後驗證失敗', e);
+      toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
     }
+  } finally {
+    // 2026-08-30 新增：補上跟 teacher.html googleTeacherLogin() 對稱的 finally 保底
+    // （先前兩者不對稱，teacher.html 有這層、student.html 沒有）。上面各分支原本
+    // 各自呼叫 hideLoading()，改由這裡統一保證恰好在函式結束前執行一次；
+    // hideLoading() 本身是疊冪等操作（只是加上 CSS class），重複呼叫（例如
+    // handleLoginUser() 成功時 enterApp() 內部已呼叫過一次）無副作用。
+    hideLoading();
   }
 }
 
@@ -5069,57 +5100,23 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           if (currentUser) return; // redirect 路徑已登入成功
         }
+        // 2026-08-30 修正：原本這裡另外重寫一份跟 handleLoginUser() 幾乎一樣的驗證
+        // 邏輯（查 studentBindings／students、判斷老師帳號等），兩處已經各自演化出
+        // 落差——「非校內信箱」分支這裡原本只 signOut() 沒有 toast 說明原因，使用者
+        // 會被靜默登出；老師帳號未綁定座號時的提示文字也跟 handleLoginUser() 不同。
+        // 改為直接呼叫 handleLoginUser()，單一事實來源，避免未來繼續分岔（同類問題
+        // 見 rule.txt validEntriesCompleteAt() 等函式為何抽成共用函式的理由）。
+        // handleLoginUser() 在每個出口都會重設 _loginHandling=false，這條路徑本來就
+        // 沒把它設為 true，屬安全的 no-op（跟 handleRedirectResult() 的呼叫方式一致）。
         clearLoginError();
         showLoading();
-        setLoadingText('驗證帳號中...');
-        const email = user.email || '';
-        if (!email.endsWith('@' + SCHOOL_DOMAIN)) { await window._auth.signOut(auth); hideLoading(); return; }
-        const { doc, getDoc } = firebase_funcs;
-        const emailKey = email.replace(/[@.]/g, '_');
         try {
-          const bindSnap = await withTimeout(getDoc(doc(db, 'studentBindings', emailKey)), 10000, '登入逾時，請確認網路後再試');
-          if (!bindSnap.exists()) {
-            if (await isTeacherAccount(user)) {
-              // 老師帳號：絕對不 signOut，只顯示提示，保護 teacher.html session
-              showTeacherStudentSetupHint('👨‍🏫 您是老師帳號。請先在老師端「學生管理」中綁定您的 email，再重新開啟此頁面');
-            } else {
-              hideLoading();
-              await window._auth.signOut(auth);
-              showLoginError(
-                '帳號尚未綁定，無法登入',
-                '請聯絡老師，請老師在「學生管理」→「帳號綁定」中輸入你的學校信箱完成設定'
-              );
-            }
-            return;
-          }
-          const binding = bindSnap.data();
-          const activeSem2 = getCurrentSemester();
-          setLoadingText('讀取學生資料...');
-          let stuSnap = await withTimeout(getDoc(doc(db, 'students', `${activeSem2}_${binding.seatNo}`)), 10000, '登入逾時，請確認網路後再試');
-          if (!stuSnap.exists()) {
-            // fallback：查舊格式（老師端尚未以新學期重新啟用名單時）
-            stuSnap = await withTimeout(getDoc(doc(db, 'students', binding.seatNo)), 10000, '登入逾時，請確認網路後再試');
-          }
-          if (!stuSnap.exists()) {
-            if (await isTeacherAccount(user)) {
-              showTeacherStudentSetupHint(`👨‍🏫 此老師帳號已綁定座號 ${binding.seatNo}，但學生資料不存在。請先在老師端「學生管理」新增該座號，再重新開啟此頁面`);
-            } else {
-              await window._auth.signOut(auth);
-              hideLoading();
-              showLoginError(
-                '找不到本學期學生名單',
-                '可能原因：老師尚未在「學生管理」中啟用本學期名單，或座號設定有誤。請聯絡老師確認後再試'
-              );
-            }
-            return;
-          }
-          const stuData = stuSnap.data();
-          currentUser = { role: 'student', uid: user.uid, email, seatNo: binding.seatNo, name: stuData.name, studentId: stuData.studentId || '', company: stuData.company || '', gender: stuData.gender || '', city: stuData.city || '' };
-          // 補寫 uid 到 studentBindings，供 Firestore Rules 使用
-          try { const { updateDoc } = firebase_funcs; await updateDoc(doc(db, 'studentBindings', emailKey), { uid: user.uid }); } catch(e) { console.warn('補寫 uid 失敗', e); }
-          setLoadingText('登入成功');
-          enterApp();
-        } catch(e) { console.error('自動登入失敗', e); hideLoading(); toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error'); }
+          await handleLoginUser(user);
+        } catch(e) {
+          console.error('自動登入失敗', e);
+          hideLoading();
+          toast('登入失敗：' + (e.message || '請重試') + '，若持續失敗請關閉頁面後重新開啟再試', 'error');
+        }
       }
     });
   });
