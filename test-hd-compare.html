@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hd 參數效果比較測試（僅供人工驗證，不寫入任何資料）</title>
+<style>
+  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #222; }
+  h1 { font-size: 20px; }
+  .box { border: 1px solid #ddd; border-radius: 10px; padding: 18px 20px; margin: 18px 0; }
+  .box h2 { margin-top: 0; font-size: 16px; }
+  button { font-size: 15px; padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer; color: #fff; }
+  #btnA { background: #6b7280; }
+  #btnB { background: #2563eb; }
+  .result { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: #f3f4f6; font-size: 14px; white-space: pre-wrap; word-break: break-all; min-height: 20px; }
+  .warn { background: #fff7ed; border: 1px solid #fdba74; padding: 12px 16px; border-radius: 8px; font-size: 14px; }
+  code { background: #eee; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🔍 hd 參數效果比較測試</h1>
+
+<div class="warn">
+  這是一次性的診斷用頁面，<b>只呼叫 Google 登入取得帳號資訊做比對，不會讀寫任何 Firestore 資料</b>，
+  跟正式的 teacher.html／student.html 完全無關、不會影響你的正式系統。測完可以直接關掉這個分頁，
+  不需要保留這個檔案在 repo 裡。
+</div>
+
+<p>兩個按鈕都會<b>強制跳出 Google 帳號選擇畫面</b>（不會被「單一活躍帳號自動跳過」影響，這樣才能真的比較出差異）。
+先點 <b>A</b>，看跳出來的清單有哪些帳號；把分頁關掉或按 Google 畫面左上角返回，再點 <b>B</b>，看清單有沒有不一樣。</p>
+
+<div class="box">
+  <h2>方式 A — 沒有 hd（模擬修改前的行為）</h2>
+  <button id="btnA">登入方式 A（沒有 hd）</button>
+  <div class="result" id="resultA">（尚未測試）</div>
+</div>
+
+<div class="box">
+  <h2>方式 B — 有 hd: 'tcivs.tc.edu.tw'（跟現在正式網站一樣）</h2>
+  <button id="btnB">登入方式 B（有 hd）</button>
+  <div class="result" id="resultB">（尚未測試）</div>
+</div>
+
+<div class="box">
+  <h2>怎麼判讀</h2>
+  <p>兩邊都點過一次之後比較：</p>
+  <ul>
+    <li>如果 <b>A</b> 的帳號選擇清單裡有出現非校內帳號（例如 <code>@gapps.ntust.edu.tw</code> 之類），
+      而 <b>B</b> 的清單只剩校內帳號、或非校內帳號被移到「使用其他帳戶」才找得到——代表 <b>hd 有效</b>。</li>
+    <li>如果 A、B 兩邊清單看起來完全一樣（一樣有列出所有帳號、順序也一樣）——代表這個瀏覽器/這個
+      Google 帳號設定下，<b>hd 沒有觀察到明顯效果</b>（不代表程式碼寫錯，可能是 Google 那邊的呈現
+      邏輯剛好沒有因為這個參數而改變清單內容，這是已知可能發生的情況）。</li>
+  </ul>
+  <p>下方文字框只會顯示「最後選到的帳號 email」，用來確認你點了哪個帳號、有沒有卡住，<b>真正該看的
+    是彈出視窗當下的畫面本身</b>，不是這個文字框。</p>
+</div>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+  // 跟正式網站完全相同的 firebaseConfig（本來就是前端公開資訊，正式網站的 view-source 也看得到）
+  const firebaseConfig = {
+    apiKey: "AIzaSyCuKnKaXNYAEU93rqQvfMsaJR6OuEIJMwI",
+    authDomain: "project-4256549712592005708.firebaseapp.com",
+    projectId: "project-4256549712592005708",
+    storageBucket: "project-4256549712592005708.firebasestorage.app",
+    messagingSenderId: "501835005211",
+    appId: "1:501835005211:web:4a415978a06b860d4727be"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+
+  async function runTest(withHd, resultEl) {
+    resultEl.textContent = '⏳ 正在跳出 Google 登入視窗，請在裡面選一個帳號…';
+    const provider = new GoogleAuthProvider();
+    // 強制每次都顯示帳號選擇畫面，避免「單一活躍 session 自動跳過」這個變因干擾比較
+    const params = { prompt: 'select_account' };
+    if (withHd) params.hd = 'tcivs.tc.edu.tw';
+    provider.setCustomParameters(params);
+
+    try {
+      const result = await signInWithPopup(auth, provider);
+      resultEl.textContent = '✅ 最後選到的帳號：' + (result.user.email || '(無法讀取 email)');
+      // 只是拿來看選了誰，測完立刻登出，不留下任何登入狀態
+      await signOut(auth);
+    } catch (e) {
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        resultEl.textContent = '（視窗被關閉或取消，沒有選擇帳號，可以重新點按鈕再測一次）';
+      } else {
+        resultEl.textContent = '❌ 發生錯誤：' + (e.code || e.message);
+      }
+    }
+  }
+
+  document.getElementById('btnA').addEventListener('click', () => {
+    runTest(false, document.getElementById('resultA'));
+  });
+  document.getElementById('btnB').addEventListener('click', () => {
+    runTest(true, document.getElementById('resultB'));
+  });
+</script>
+
+</body>
+</html>
