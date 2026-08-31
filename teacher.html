@@ -5803,12 +5803,17 @@ function confirmTeacherBatchDelete() {
 async function executeTeacherBatchDelete(journals) {
   const { deleteDoc } = firebase_funcs;
   let success = 0, fail = 0;
+  // 2026-08-31 修正：改逐筆追蹤真正刪除成功的項目，取代 journals.slice(0, success)——
+  // slice(0, success) 假設失敗一定發生在陣列尾端，若中間某一筆失敗（例如5筆刪2筆失敗），
+  // 會把失敗的項目誤標成已刪除、同時漏標真正刪除成功但排在後面的項目。
+  const deletedJournals = [];
   showLoading();
   try {
   for (const j of journals) {
     try {
       await deleteDoc(getTeacherJournalRef(j.seatNo, j.semester, j.month, j.ownerUid));
       success++;
+      deletedJournals.push(j);
     } catch(e) { fail++; console.error('批次刪除失敗', j, e); }
   }
   closeModal('t-batch-delete-modal');
@@ -5816,7 +5821,7 @@ async function executeTeacherBatchDelete(journals) {
   toast(fail ? `✅ 刪除 ${success} 筆，失敗 ${fail} 筆` : `✅ 已刪除 ${success} 筆月記`, fail ? 'error' : 'success');
   // 立即從本地快取移除已成功刪除的月記
   if (window._teacherJournalsCache && success > 0) {
-    const deletedKeys = new Set(journals.slice(0, success).map(j => teacherJournalKey(j.seatNo, j.semester, j.month)));
+    const deletedKeys = new Set(deletedJournals.map(j => teacherJournalKey(j.seatNo, j.semester, j.month)));
     window._teacherJournalsCache = window._teacherJournalsCache.filter(
       j => !deletedKeys.has(teacherJournalKey(j.seatNo, j.semester, j.month))
     );
@@ -6553,8 +6558,13 @@ function pdfWorkEntry(e, idx) {
 }
 
 function pdfJournalBlock(j, idx) {
-  const salaryNum = Number(j.salary);
-  const salaryText = Number.isFinite(salaryNum) ? `${salaryNum.toLocaleString()} 元` : '-';
+  // 2026-08-31 修正：改用 j.salary != null 判斷「有沒有填」，不用
+  // Number.isFinite(Number(j.salary))——Number(null)===0 且 isFinite(0)===true，會讓
+  // 「完全沒填薪資」被誤判成「已填0元」而顯示成「0 元」而非「-」。08-30 那次修法（見
+  // AI_CONTEXT_狀態.md 第二十四節）已讓 saveJournal() 正確區分 null／0 兩種存法，這裡
+  // 是唯一沒跟上的顯示端；改用跟本檔案 renderJournalCard()（6225行）／missingSalary
+  // 篩選條件一致的寫法。
+  const salaryText = j.salary != null ? `${Number(j.salary).toLocaleString()} 元` : '-';
   const content = [
     { text: `${pdfText(j.studentName || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
     pdfInfoTable(j),

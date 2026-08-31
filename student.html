@@ -4130,8 +4130,12 @@ function renderJournalCardSelectable(j) {
       ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
       ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos">${e.photos.map(p => `<img src="${escapeHtml(resolveImgSrc(p))}" class="entry-photo" onclick="openPhotoModal(this.src)">`).join('')}</div>` : ''}
     </div>`).join('');
-  const salaryNum = Number(j.salary);
-  const salaryHtml = Number.isFinite(salaryNum) ? `<span style="color:var(--accent-green);font-weight:600">💰 $${salaryNum.toLocaleString()} 元</span>` : '';
+  // 2026-08-31 修正：改用 j.salary != null 判斷「有沒有填」，不用 Number.isFinite(Number(j.salary))
+  // ——Number(null) === 0 且 isFinite(0) === true，會讓「完全沒填薪資」被誤判成「已填0元」。
+  // 08-30 那次修法（見 AI_CONTEXT_狀態.md 第二十四節）已讓 saveJournal() 正確區分 null／0
+  // 兩種存法，但這裡的顯示端沒跟上，改用跟 teacher.html renderJournalCard()（6225行）／
+  // missingSalary 篩選條件一致的寫法。
+  const salaryHtml = j.salary != null ? `<span style="color:var(--accent-green);font-weight:600">💰 $${Number(j.salary).toLocaleString()} 元</span>` : '';
   const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
   const salaryPhotoHtml = renderSalaryPhotosHtml(j);
   // 月份異常（0、NaN）：禁用編輯按鈕，只允許刪除，防止誤觸覆蓋正常月記
@@ -4947,8 +4951,9 @@ function pdfWorkEntry(e, idx) {
 }
 
 function pdfJournalBlock(j, idx) {
-  const salaryNum = Number(j.salary);
-  const salaryText = Number.isFinite(salaryNum) ? `${salaryNum.toLocaleString()} 元` : '-';
+  // 2026-08-31 修正：同 renderJournalCardSelectable() 的理由，改用 j.salary != null
+  // 判斷「有沒有填」，避免 Number(null)===0 讓沒填薪資的月記在PDF裡顯示成「0 元」。
+  const salaryText = j.salary != null ? `${Number(j.salary).toLocaleString()} 元` : '-';
   const content = [
     { text: `${pdfText(j.studentName || currentUser?.name || '')}　實習月記`, style: 'journalTitle', pageBreak: idx > 0 ? 'before' : undefined },
     pdfInfoTable(j),
