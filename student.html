@@ -316,6 +316,24 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 @media (max-width: 600px) {
   #s-city-chart > div svg, #s-work-type-chart > div svg { width:120px !important; height:120px !important; }
 }
+/* 2026-08-31 新增：「每月繳交狀況」橫向捲動晶片列——狀態配色跟老師端「統計→繳交狀況」
+   頁籤的四色圖例（✓已繳綠／▲遲繳黃／✗未繳紅／△篇數不足紫）共用同一套 --accent-* 變數，
+   視覺語言一致；橫向捲動而非固定表格，是因為這裡只需顯示單一學生、可能橫跨多學期的
+   時間軸，捲動晶片比多欄位表格更適合手機版單欄版面。 */
+.s-submit-strip { display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+.s-submit-chip { flex-shrink:0; min-width:50px; border-radius:10px; padding:8px 6px; text-align:center; cursor:pointer; transition:transform 0.15s; }
+.s-submit-chip:hover { transform:translateY(-2px); }
+.s-submit-chip-label { font-size:10px; color:var(--text2); margin-bottom:4px; font-family:'Space Mono', monospace; white-space:nowrap; }
+.s-submit-chip-icon { font-size:16px; font-weight:700; }
+.s-submit-chip-done { background:rgba(34,197,94,0.12); }
+.s-submit-chip-done .s-submit-chip-icon { color:var(--accent-green); }
+.s-submit-chip-late { background:rgba(245,158,11,0.14); }
+.s-submit-chip-late .s-submit-chip-icon { color:var(--accent-yellow); }
+.s-submit-chip-missed { background:rgba(239,68,68,0.12); }
+.s-submit-chip-missed .s-submit-chip-icon { color:var(--accent-red); }
+.s-submit-chip-incomplete { background:rgba(192,132,252,0.14); }
+.s-submit-chip-incomplete .s-submit-chip-icon { color:var(--accent-incomplete); }
+.s-submit-legend { font-size:11px; color:var(--text2); margin-top:10px; }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -664,7 +682,11 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
       <!-- ========== 學生：統計 ========== -->
       <div id="page-s-stats" class="hidden fade-in">
         <div class="page-title">📊 統計</div>
-        <div class="page-subtitle">薪資、工作地點與工作類型統計圖表</div>
+        <div class="page-subtitle">繳交狀況、薪資、工作地點與工作類型統計圖表</div>
+        <div class="s-chart-card">
+          <div class="s-chart-title">📅 每月繳交狀況</div>
+          <div id="s-submit-status-chart"><div class="s-chart-empty">載入中...</div></div>
+        </div>
         <div class="s-chart-card">
           <div class="s-chart-title">📈 每月薪資趨勢</div>
           <div id="s-salary-line-chart"><div class="s-chart-empty">載入中...</div></div>
@@ -1927,15 +1949,28 @@ async function loadStudentDashboard() {
 async function loadStudentStats() {
   if (!currentUser) return;
   try {
-    const snap = await getMyJournalDocs();
+    // 2026-08-31 起：新增「每月繳交狀況」圖表需要 deadlines（判斷截止日／minEntries），
+    // 跟 loadStudentDashboard() 一樣用 Promise.all 併發抓取，避免多一次序列等待。
+    const { collection, getDocs } = firebase_funcs;
+    const [snap, deadlinesSnap] = await Promise.all([
+      getMyJournalDocs(),
+      getDocs(collection(db, 'deadlines'))
+    ]);
     const journals = snap.docs.map(d => d.data());
     journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    const deadlineDataMap = {};
+    deadlinesSnap.docs.forEach(d => {
+      const dd = d.data();
+      if (dd.semester && dd.month) deadlineDataMap[`${dd.semester}-${dd.month}`] = dd;
+    });
+    renderStudentSubmitStatusChart(journals, deadlineDataMap);
     renderStudentSalaryLineChart(journals);
     renderStudentCityChart(journals);
     renderStudentWorkTypeChart(journals);
   } catch (e) {
     console.error('載入統計圖表失敗', e);
     const errHtml = '<div class="s-chart-empty">⚠️ 資料載入失敗，請重新整理</div>';
+    const ssc = document.getElementById('s-submit-status-chart'); if (ssc) ssc.innerHTML = errHtml;
     const wc = document.getElementById('s-work-type-chart'); if (wc) wc.innerHTML = errHtml;
     const cc = document.getElementById('s-city-chart'); if (cc) cc.innerHTML = errHtml;
     const sc = document.getElementById('s-salary-line-chart'); if (sc) sc.innerHTML = errHtml;
@@ -1943,6 +1978,100 @@ async function loadStudentStats() {
   }
 }
 
+
+// 2026-08-31 新增：「每月繳交狀況」圖表卡——跟老師端「統計→繳交狀況」頁籤的四種狀態
+// （✓已繳／▲遲繳／✗未繳／△篇數不足）定義一致，判斷邏輯共用既有的 resolveMinEntries()／
+// isStudentJournalLate()（跟 teacher.html 的 isJournalComplete()／isJournalLate() 對稱
+// 維護），只是視角從「全班多學生一張表」收斂成「這位學生自己一條時間軸」。
+//
+// 月份範圍刻意「不限定目前學期」：只要學生曾在某學期繳交過至少一份月記，就把該學期全部
+// 月份（getSemesterMonths()）都列入時間軸，不只列出「有寫的月份」——否則「✗ 未繳」這個
+// 狀態永遠不會出現在圖表上（沒寫的月份根本不會被納入）。至於「沒寫且無法判斷截止日」的
+// 月份（deadlines 文件不存在，或截止日尚未到期），一律略過不顯示：
+//   - 沒有 deadlines 文件：規則層本來就不限制這個集合的欄位，歷史上可能有些月份從未設定
+//     過期限，沒有基準可比對，顯示「未繳」等同臆測，寧可不顯示。
+//   - 截止日尚未到期：這代表是目前學期還沒輪到的未來月份，還沒開始倒數就先標紅「未繳」
+//     會不必要地讓學生緊張，跟 getOverdueMonths() 判斷「已逾期」時同樣要求
+//     close < now 的邏輯一致。
+// 這個設計無法排除「學期中途才轉入本校」的邊界案例（該學期入學前的月份仍可能被顯示為
+// 未繳，因為學生端沒有管道獨立查詢自己的「實際入學月份」）——這跟老師端 loadSubmitStats()
+// 本身也沒有處理這個邊界案例是同一種既有限制，非本次新增的缺口。
+function computeStudentSubmitTimeline(journals, deadlineDataMap) {
+  const semSet = new Set();
+  journals.forEach(j => { if (j.semester) semSet.add(j.semester); });
+  // 依「學年＋學期」數值排序（而非字串排序或裸月份排序），確保橫跨多學年時仍是正確的
+  // 時間先後順序；同一學期內的月份順序另外交給 getSemesterMonths() 負責（[7..12,1] 或
+  // [2..6]，不是單純數字遞增，1月份在第1學期裡排在最後才是正確的時序）。
+  const sems = Array.from(semSet).sort((a, b) => {
+    const [ay, ah] = String(a).split('-').map(Number);
+    const [by, bh] = String(b).split('-').map(Number);
+    return (ay - by) || (ah - bh);
+  });
+  const journalMap = {};
+  journals.forEach(j => { journalMap[`${j.semester}-${j.month}`] = j; });
+  const now = new Date();
+  const timeline = [];
+  sems.forEach(sem => {
+    getSemesterMonths(sem).forEach(month => {
+      const key = `${sem}-${month}`;
+      const deadlineDoc = deadlineDataMap[key];
+      const journal = journalMap[key];
+      // 標籤格式（西元年/兩位數月份）跟 renderStudentSalaryLineChart() 的 X 軸標籤算法
+      // 一致（該函式尚無共用函式可抽，這裡直接複製同一段算式，避免額外耦合）。
+      const [roc, half] = String(sem).split('-').map(Number);
+      let labelYear = (roc || 0) + 1911;
+      if (half === 1 && month === 1) labelYear += 1;
+      if (half === 2) labelYear += 1;
+      const label = `${labelYear}/${String(month).padStart(2, '0')}`;
+      if (journal) {
+        const entriesCount = (journal.entries || []).length;
+        const required = resolveMinEntries(deadlineDoc);
+        const status = entriesCount < required ? 'incomplete' : (isStudentJournalLate(journal, deadlineDoc) ? 'late' : 'done');
+        timeline.push({ sem, month, label, status, entriesCount, required });
+        return;
+      }
+      if (!deadlineDoc || !deadlineDoc.closeDate) return; // 無法判斷截止日，略過不臆測
+      const close = new Date(deadlineDoc.closeDate + 'T23:59:59+08:00');
+      if (close >= now) return; // 尚未到期的未來月份，不預先標示未繳
+      timeline.push({ sem, month, label, status: 'missed', entriesCount: 0, required: resolveMinEntries(deadlineDoc) });
+    });
+  });
+  return timeline;
+}
+
+function renderStudentSubmitStatusChart(journals, deadlineDataMap) {
+  const container = document.getElementById('s-submit-status-chart');
+  if (!container) return;
+  const timeline = computeStudentSubmitTimeline(journals, deadlineDataMap);
+  if (!timeline.length) {
+    container.innerHTML = '<div class="s-chart-empty">📅 尚無繳交紀錄</div>';
+    return;
+  }
+  const META = {
+    done: { icon: '✓', cls: 's-submit-chip-done', tip: '已繳' },
+    late: { icon: '▲', cls: 's-submit-chip-late', tip: '遲繳' },
+    missed: { icon: '✗', cls: 's-submit-chip-missed', tip: '未繳' },
+    incomplete: { icon: '△', cls: 's-submit-chip-incomplete', tip: '篇數不足' }
+  };
+  const chips = timeline.map(t => {
+    const m = META[t.status];
+    const detail = t.status === 'incomplete'
+      ? `（已交${t.entriesCount}篇，尚差${Math.max(t.required - t.entriesCount, 0)}篇）`
+      : '';
+    const tipText = `${t.label}：${m.tip}${detail}`;
+    // 已有月記（已繳／遲繳／篇數不足）點擊跳到歷史頁該筆月記；未繳點擊比照首頁「已逾期」
+    // 清單既有行為，直接跳到填寫頁並預選該學期／月份，讓學生可以直接補交。
+    const goFn = t.status === 'missed'
+      ? `goToWriteMonth(${jsArg(t.sem)},${t.month})`
+      : `goToJournalCard(${jsArg(t.sem)},${t.month})`;
+    return `<div class="s-submit-chip ${m.cls}" onclick="${goFn}" title="${escapeHtml(tipText)}">
+      <div class="s-submit-chip-label">${escapeHtml(t.label)}</div>
+      <div class="s-submit-chip-icon">${m.icon}</div>
+    </div>`;
+  }).join('');
+  container.innerHTML = `<div class="s-submit-strip">${chips}</div>
+    <div class="s-submit-legend">✓ 已繳　▲ 遲繳　✗ 未繳　△ 篇數不足</div>`;
+}
 
 // 圓餅圖弧形路徑共用函式：當某類別佔比達100%（ratio≈1）時，弧形的起點與終點座標會重合，
 // 依 SVG 規範瀏覽器會直接省略該弧形（視為沒有這段弧），導致整個圓形完全不顯示、只剩圖例文字。

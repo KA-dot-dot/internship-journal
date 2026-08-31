@@ -1,7 +1,37 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v37
+ * 老師端自動化測試 v38
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v38 修正（2026-08-31）：使用者提供的一輪程式碼稽核，確認並修復兩項問題（皆純前端
+ * 修法，未異動 rule.txt）：
+ * ①與 student_test.js 的 v40（S-SEC-56／S-SEC-57）對稱：pdfJournalBlock()（PDF匯出）
+ * 仍用 `Number.isFinite(Number(j.salary))` 判斷薪資「有沒有填」，Number(null)===0 且
+ * isFinite(0)===true，導致「完全沒填」的月記在PDF裡被誤判成「已填0元」，顯示成
+ * 「0 元」而非「-」。對照組：本檔案自己的 renderJournalCard()（6225行，
+ * `j.salary != null`）與所有薪資統計 filter 本來就寫對，純粹是這一處顯示函式沒跟上
+ * 08-30 那次修法（見 v35 changelog）。修法：改用跟 renderJournalCard() 一致的
+ * `j.salary != null` 判斷。
+ * ②executeTeacherBatchDelete()（批次刪除）原本用 `journals.slice(0, success)` 從本地
+ * 快取移除「已刪除」的項目，隱含假設「刪除失敗的項目一定排在陣列尾端」——只有每次失敗
+ * 都恰好發生在迴圈最後才成立。若中間某一筆失敗（例如5筆刪除、第2筆失敗、其餘4筆成功，
+ * success=4），slice(0,4) 會保留陣列前4筆：把「第2筆（失敗）」誤標成已刪除、同時漏標
+ * 「第5筆（真正刪除成功）」。實際影響有限（loadTeacherJournals() 緊接著會重新從
+ * Firestore 同步，快取狀態幾乎立即自動修正），短暫視窗內主要風險是
+ * loadSalaryPhotoOnDemand() 可能查不到實際仍存在的月記。修法：改用 deletedJournals
+ * 陣列逐筆追蹤真正刪除成功的項目，取代 slice(0, success) 的順序假設。
+ *   T-SEC-68  對稱於 S-SEC-57：真執行 pdfJournalBlock()，回傳 pdfmake 內容陣列，直接
+ *             呼叫並在陣列裡找「本月薪資」那一項文字比對。null 顯示「本月薪資：-」、
+ *             0 顯示「本月薪資：0 元」、500 顯示「本月薪資：500 元」（刻意選不需要
+ *             千分位逗號的數字，避免斷言依賴 toLocaleString() 的 locale 格式化細節）。
+ *   T-SEC-69  真執行 executeTeacherBatchDelete()：暫時覆寫 firebase_funcs.deleteDoc
+ *             （讓中間一筆依 docRef.path 判斷刻意失敗、其餘完全不轉發給真正的
+ *             deleteDoc）與 loadTeacherJournals()（no-op，避免函式結尾的真正重新整理
+ *             蓋掉這次要驗證的中間狀態），餵三筆假 seatNo/semester/ownerUid 的合成
+ *             資料＋一筆不在刪除範圍內的對照組，驗證：真正刪除成功的第1、3筆從快取
+ *             移除，模擬失敗的第2筆仍留在快取，範圍外的對照組不受影響——這组斷言直接
+ *             對應 slice(0, success) 那個bug會誤判的兩個方向（誤標失敗項目已刪除／
+ *             漏標排在後面的成功項目）。
  *
  * v37 修正（2026-08-30）：接續 v36 同一輪登入流程稽核當時一併發現、稍後才補上測試的
  * 第三項問題，與 student_test.js 的 v39 對稱新增：new GoogleAuthProvider() 完全沒有
@@ -3991,6 +4021,101 @@ async function runTeacherTests(page, log) {
     if (result.skip) return;
     if (!result.callsSetCustomParameters) throw new Error('provider.setCustomParameters(...) 呼叫消失了，Google 帳號選擇畫面可能不再優先顯示校內帳號');
     if (result.hdValue !== 'tcivs.tc.edu.tw') throw new Error(`hd 參數的網域值不正確，實際為 ${JSON.stringify(result.hdValue)}，預期 'tcivs.tc.edu.tw'（須跟 SCHOOL_DOMAIN 保持同步）`);
+  });
+
+
+  // ════════════════════════════════════════
+  // T-SEC-68 / T-SEC-69　2026-08-31 新增：pdfJournalBlock() 薪資顯示bug／
+  // executeTeacherBatchDelete() 快取修剪bug（使用者稽核發現）
+  // ════════════════════════════════════════
+  // 背景見本檔案開頭 v38 changelog。①與 student_test.js 的 S-SEC-57 對稱；
+  // ②執行順序假設（slice(0, success)）造成的快取誤標問題。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-68 pdfJournalBlock() 薪資「沒填」PDF匯出不再顯示成「0 元」，維持顯示「-」', async () => {
+    // 對稱於 student_test.js 的 S-SEC-57。pdfJournalBlock() 回傳 pdfmake 內容陣列
+    // （純資料結構，不碰 DOM／Firestore），直接呼叫並在回傳陣列裡找「本月薪資」那一項
+    // 文字比對，真執行而非靜態比對。
+    const result = await page.evaluate(() => {
+      if (typeof pdfJournalBlock !== 'function') return { skip: true };
+      const findSalaryLine = (content) => {
+        const item = (content || []).find(c => c && typeof c.text === 'string' && c.text.includes('本月薪資'));
+        return item ? item.text : null;
+      };
+      const notFilled = findSalaryLine(pdfJournalBlock({ salary: null, entries: [], _pdfEntries: [] }, 0));
+      const filledZero = findSalaryLine(pdfJournalBlock({ salary: 0, entries: [], _pdfEntries: [] }, 0));
+      const filledNormal = findSalaryLine(pdfJournalBlock({ salary: 500, entries: [], _pdfEntries: [] }, 0));
+      return { skip: false, notFilled, filledZero, filledNormal };
+    });
+    if (result.skip) return;
+    if (!result.notFilled || !result.notFilled.includes('-') || result.notFilled.includes('0 元'))
+      throw new Error(`salary=null（沒填）應顯示「本月薪資：-」，實際：${result.notFilled}`);
+    if (!result.filledZero || !result.filledZero.includes('0 元'))
+      throw new Error(`salary=0（填0元）應顯示「本月薪資：0 元」，實際：${result.filledZero}`);
+    if (!result.filledNormal || !result.filledNormal.includes('500 元'))
+      throw new Error(`salary=500 應顯示「本月薪資：500 元」，實際：${result.filledNormal}`);
+  });
+
+  await test('T-SEC-69 executeTeacherBatchDelete() 批次刪除中間一筆失敗時，快取正確保留失敗項目、移除所有真正刪除成功的項目（不受陣列順序影響）', async () => {
+    // 直接呼叫真正部署的 executeTeacherBatchDelete()（不重寫簡化版邏輯）。暫時覆寫
+    // firebase_funcs.deleteDoc，讓「中間那一筆」（依 docRef.path 判斷）刻意拋出模擬
+    // 錯誤、其餘完全不轉發給真正的 deleteDoc（合成資料用不存在的假 seatNo/semester/
+    // ownerUid，這裡索性連呼叫都不轉發，確保不發出任何真正的網路請求）；同時暫時覆寫
+    // loadTeacherJournals() 為 no-op，讓函式結尾「重新整理」發生之前，能讀到這次批次
+    // 刪除本身寫回快取的中間狀態——這正是這次要驗證的行為，若讓真正的
+    // loadTeacherJournals() 執行，快取會被立即整個覆蓋，測不到這行邏輯本身對不對。
+    const result = await page.evaluate(async () => {
+      if (typeof executeTeacherBatchDelete !== 'function' || typeof teacherJournalKey !== 'function') return { skip: true };
+      if (typeof firebase_funcs === 'undefined' || !firebase_funcs.deleteDoc || typeof db === 'undefined') return { skip: true };
+
+      const jA = { seatNo: '__t69a__', semester: '999-1', month: 1, ownerUid: '__t69uidA__', studentName: '測試甲' };
+      const jB = { seatNo: '__t69b__', semester: '999-1', month: 1, ownerUid: '__t69uidB__', studentName: '測試乙' };
+      const jC = { seatNo: '__t69c__', semester: '999-1', month: 1, ownerUid: '__t69uidC__', studentName: '測試丙' };
+      const ctrl = { seatNo: '__t69ctrl__', semester: '999-1', month: 1, ownerUid: '__t69uidCtrl__', studentName: '對照組' };
+
+      const origCache = window._teacherJournalsCache;
+      const origLoadTeacherJournals = window.loadTeacherJournals;
+      const origDeleteDoc = firebase_funcs.deleteDoc;
+
+      window._teacherJournalsCache = [jA, jB, jC, ctrl];
+      window.loadTeacherJournals = async () => {};
+      firebase_funcs.deleteDoc = async (ref) => {
+        if (ref && typeof ref.path === 'string' && ref.path.includes('__t69uidB__')) {
+          throw new Error('模擬刪除失敗（測試用，非真實錯誤）');
+        }
+      };
+
+      let cacheAfter = null, threw = null;
+      try {
+        await executeTeacherBatchDelete([jA, jB, jC]);
+        cacheAfter = window._teacherJournalsCache;
+      } catch (e) {
+        threw = e.message;
+      } finally {
+        firebase_funcs.deleteDoc = origDeleteDoc;
+        window.loadTeacherJournals = origLoadTeacherJournals;
+        window._teacherJournalsCache = origCache;
+        if (typeof closeModal === 'function') closeModal('t-batch-delete-modal');
+      }
+
+      if (!cacheAfter) return { skip: false, threw, cacheAfter: null };
+      const remainingKeys = cacheAfter.map(j => teacherJournalKey(j.seatNo, j.semester, j.month));
+      return {
+        skip: false,
+        threw,
+        aRemoved: !remainingKeys.includes(teacherJournalKey('__t69a__', '999-1', 1)),
+        bRemains: remainingKeys.includes(teacherJournalKey('__t69b__', '999-1', 1)),
+        cRemoved: !remainingKeys.includes(teacherJournalKey('__t69c__', '999-1', 1)),
+        ctrlRemains: remainingKeys.includes(teacherJournalKey('__t69ctrl__', '999-1', 1)),
+      };
+    });
+
+    if (result.skip) return;
+    if (result.threw) throw new Error(`executeTeacherBatchDelete() 執行時意外拋出例外：${result.threw}`);
+    if (!result.aRemoved) throw new Error('第1筆（真正刪除成功）沒有從快取移除');
+    if (!result.bRemains) throw new Error('第2筆（模擬刪除失敗）被錯誤地從快取移除——這正是 slice(0, success) 的bug：把失敗項目誤標成已刪除');
+    if (!result.cRemoved) throw new Error('第3筆（真正刪除成功，但排在失敗項目之後）沒有從快取移除——這正是 slice(0, success) 的bug：漏標排在失敗項目之後的真正刪除成功項目');
+    if (!result.ctrlRemains) throw new Error('對照組（不在這次刪除範圍內）被意外從快取移除，代表快取修剪邏輯可能誤傷範圍外的項目');
   });
 
   return results;

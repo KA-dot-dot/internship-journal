@@ -1,7 +1,32 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v39
+ * 學生端自動化測試 v40
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v40 修正（2026-08-31）：使用者提供的一輪程式碼稽核（針對 08-30 那次薪資 null/0
+ * 修法的顯示端落差），確認並修復兩處會影響學生的顯示bug：renderJournalCardSelectable()
+ * （月記歷史頁卡片）／pdfJournalBlock()（PDF匯出）皆仍用
+ * `Number.isFinite(Number(j.salary))` 判斷「有沒有填」——Number(null) 在 JS 裡等於 0、
+ * 是個有限數字，導致「完全沒填薪資」的月記被誤判成「已填、金額是0」，顯示成
+ * 「💰 $0 元」，跟老師端「薪資缺漏」名單同時在追蹤的月記直接矛盾（看起來已經記錄成0元，
+ * 容易讓學生誤以為沒問題不會回頭補）。對照組：checkMonthDeadline()（`j.salary ?? ''`）、
+ * teacher.html 自己的 renderJournalCard()／所有薪資統計 filter 本來就寫對，純粹是這兩處
+ * 顯示函式沒跟上 v37（S-SEC-51）那次修法。修法：改用跟既有正確寫法一致的
+ * `j.salary != null` 判斷。同一輪也複查了 student.html 內另一份同名死碼
+ * renderJournalCard(j, isTeacher)（4552行）——同樣是舊寫法，但全檔案確認 0 呼叫，維持
+ * 原樣不動（若未來重新啟用需一併修正）。與 teacher_test.js 的 v38（T-SEC-68）對稱新增；
+ * teacher.html 的 executeTeacherBatchDelete() 快取修法（T-SEC-69）只影響 teacher.html，
+ * 本檔案不需要對應測項。
+ *   S-SEC-56  真執行 renderJournalCardSelectable()：純函式，直接回傳 HTML 字串、不碰
+ *             DOM／Firestore，可以安全真執行，比字串/regex比對函式原始碼更直接證明
+ *             修法生效（比照 S-SEC-50／S-SEC-52 的「真執行優於推理」標準）。分別餵
+ *             salary=null／0／500 三種情境，確認 null 不顯示金額區塊、0 顯示
+ *             「💰 $0 元」、500 顯示「💰 $500 元」（刻意選不需要千分位逗號的數字，
+ *             避免斷言依賴 toLocaleString() 的 locale 相關格式化細節）。
+ *   S-SEC-57  真執行 pdfJournalBlock()：回傳 pdfmake 內容陣列（純資料結構，不碰
+ *             DOM／Firestore），直接呼叫並在陣列裡找「本月薪資」那一項文字比對。
+ *             null 應顯示「本月薪資：-」（且不含「0 元」字樣）、0 顯示
+ *             「本月薪資：0 元」、500 顯示「本月薪資：500 元」。
  *
  * v39 修正（2026-08-30）：接續 v38 同一輪登入流程稽核當時一併發現、稍後才補上測試的
  * 第三項問題：new GoogleAuthProvider() 完全沒有網域限制——使用者按下「用 Google
@@ -3609,6 +3634,64 @@ async function runStudentTests(page, browserContext, log) {
     if (result.skip) return;
     if (!result.callsSetCustomParameters) throw new Error('provider.setCustomParameters(...) 呼叫消失了，Google 帳號選擇畫面可能不再優先顯示校內帳號');
     if (result.hdValue !== 'tcivs.tc.edu.tw') throw new Error(`hd 參數的網域值不正確，實際為 ${JSON.stringify(result.hdValue)}，預期 'tcivs.tc.edu.tw'（須跟 SCHOOL_DOMAIN 保持同步）`);
+  });
+
+
+  // ════════════════════════════════════════
+  // S-SEC-56 / S-SEC-57　2026-08-31 新增：薪資「沒填」被顯示成「$0」（08-30 v37／
+  // S-SEC-51 那次修法的顯示端落差，使用者稽核發現）
+  // ════════════════════════════════════════
+  // 背景：08-30 那次修法（見上方 v37 changelog／S-SEC-51）把 saveJournal() 寫入端改成用
+  // Number.isNaN() 判斷，讓「沒填」（null）跟「填0元」（0）能真正分開存進 Firestore，但
+  // 這個語意調整沒有同步套用到顯示端——renderJournalCardSelectable()（月記歷史頁卡片）／
+  // pdfJournalBlock()（PDF匯出）仍在用 `Number.isFinite(Number(j.salary))` 判斷「有沒有
+  // 填」。Number(null) 在 JS 裡等於 0，是個有限數字，導致「完全沒填」的月記被誤判成
+  // 「已填、金額是0」，顯示成「💰 $0 元」。跟老師端「薪資缺漏」名單同時在追蹤的月記直接
+  // 矛盾。對照組：checkMonthDeadline()（`j.salary ?? ''`）、teacher.html 自己的
+  // renderJournalCard()（6225行，`j.salary != null`）／所有薪資統計 filter 本來就寫對，
+  // 純粹是這兩處顯示函式沒跟上 v37 那次修法。修法：改用跟既有正確寫法一致的
+  // `j.salary != null` 判斷。與 teacher_test.js 的 T-SEC-68 對稱（teacher.html 的
+  // pdfJournalBlock() 同一種bug）。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-56 renderJournalCardSelectable() 薪資「沒填」不再顯示成「💰 $0 元」', async () => {
+    // 純函式，直接回傳 HTML 字串、不碰 DOM／Firestore，可以安全真執行，直接呼叫函式
+    // 本體並檢查回傳字串，比字串/regex 比對函式原始碼更直接證明修法生效。
+    const result = await page.evaluate(() => {
+      if (typeof renderJournalCardSelectable !== 'function') return { skip: true };
+      const base = { seatNo: '01', semester: '999-1', month: 1, entries: [] };
+      const notFilled = renderJournalCardSelectable({ ...base, salary: null });
+      const filledZero = renderJournalCardSelectable({ ...base, salary: 0 });
+      const filledNormal = renderJournalCardSelectable({ ...base, salary: 500 });
+      return { skip: false, notFilled, filledZero, filledNormal };
+    });
+    if (result.skip) return;
+    if (result.notFilled.includes('💰')) throw new Error('salary=null（沒填）不應該顯示金額區塊，實際卻出現 💰');
+    if (!result.filledZero.includes('💰 $0 元')) throw new Error(`salary=0（填0元）應顯示「💰 $0 元」，實際：${result.filledZero.slice(0, 200)}`);
+    if (!result.filledNormal.includes('💰 $500 元')) throw new Error(`salary=500 應顯示「💰 $500 元」，實際：${result.filledNormal.slice(0, 200)}`);
+  });
+
+  await test('S-SEC-57 pdfJournalBlock() 薪資「沒填」PDF匯出不再顯示成「0 元」，維持顯示「-」', async () => {
+    // pdfJournalBlock() 回傳 pdfmake 內容陣列（純資料結構，不碰 DOM／Firestore），直接
+    // 呼叫並在回傳陣列裡找「本月薪資」那一項文字比對，同樣是真執行而非靜態比對。
+    const result = await page.evaluate(() => {
+      if (typeof pdfJournalBlock !== 'function') return { skip: true };
+      const findSalaryLine = (content) => {
+        const item = (content || []).find(c => c && typeof c.text === 'string' && c.text.includes('本月薪資'));
+        return item ? item.text : null;
+      };
+      const notFilled = findSalaryLine(pdfJournalBlock({ salary: null, entries: [], _pdfEntries: [] }, 0));
+      const filledZero = findSalaryLine(pdfJournalBlock({ salary: 0, entries: [], _pdfEntries: [] }, 0));
+      const filledNormal = findSalaryLine(pdfJournalBlock({ salary: 500, entries: [], _pdfEntries: [] }, 0));
+      return { skip: false, notFilled, filledZero, filledNormal };
+    });
+    if (result.skip) return;
+    if (!result.notFilled || !result.notFilled.includes('-') || result.notFilled.includes('0 元'))
+      throw new Error(`salary=null（沒填）應顯示「本月薪資：-」，實際：${result.notFilled}`);
+    if (!result.filledZero || !result.filledZero.includes('0 元'))
+      throw new Error(`salary=0（填0元）應顯示「本月薪資：0 元」，實際：${result.filledZero}`);
+    if (!result.filledNormal || !result.filledNormal.includes('500 元'))
+      throw new Error(`salary=500 應顯示「本月薪資：500 元」，實際：${result.filledNormal}`);
   });
 
   return results;
