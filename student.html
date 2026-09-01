@@ -2011,6 +2011,50 @@ function pieSlicePath(cx, cy, r, sa, ea, ratio) {
   return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${la} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
 }
 
+// 2026-09-01 修正：手機窄螢幕下圓餅圖／折線圖 tooltip 卡到字（文字被螢幕左緣切掉一半）。
+// 根本原因有兩個，疊加在一起才會嚴重到切出螢幕外：①原本量測位置用的是外層 container
+// （含圖例區寬度）的 getBoundingClientRect()，但 tooltip 真正的 CSS 定位基準是它自己的
+// position:relative 父層（較窄的 svg 包裹層，寬度只有svg本身，且在窄螢幕上會因
+// justify-content:center 產生置中內縮）——兩者不是同一個座標系，這段內縮落差原本完全沒
+// 被扣掉；②靠右側觸發「翻轉到游標左邊」的邏輯（`lx = touchX - 200`）完全沒有下限保護，
+// container 越窄，這個寫死200px的翻轉量越容易把結果推成負值。改成共用函式：量測仍以
+// 外層 container（含圖例區）為準，維持原本讓 tooltip 可以蓋到圖例區域顯示的設計；套用
+// 位置前先換算成相對於 tipEl 實際定位基準（tipEl.parentElement）的座標；並改用顯示後
+// 才量得到的 tipEl.offsetWidth/offsetHeight（比原本寫死的200px準確）做上下左右四個方向
+// 的夾限，確保 tooltip 永遠落在 container 可視範圍內，不會有任何一邊被切出螢幕。
+// renderStudentCityChart()／renderStudentWorkTypeChart()／renderStudentSalaryLineChart()
+// 三處共用同一個問題與同一套修法，抽成共用函式避免各自演化又脫鉤（跟 pieSlicePath() 抽
+// 成共用函式是同一個理由）。
+// 2026-09-01 新增：三個學生統計圖表（縣市分布／工作類型／薪資趨勢）的 tooltip 原本各自
+// 獨立管理顯示/隱藏，只有「點自己所屬的 container」才會收起自己的 tooltip，彼此之間沒有
+// 連動——手機上點開A圖表的 tooltip 後，沒有再點A圖表本身就直接捲動到B圖表點選，A的
+// tooltip 會維持 display:block 停留在原本位置，跟B圖表新顯示的 tooltip 同時出現在畫面
+// 上，容易被誤以為是排版壞掉（例如蓋住旁邊圖表自己圖例文字，看起來像空白/灰底區塊）。
+// 用一個以圖表種類為 key 的全域字典記錄目前頁面上各圖表最新的 tooltip 元素（每次重新
+// render 時用同一個 key 覆蓋，不會隨重繪次數無限累積），每次要顯示任一圖表的 tooltip
+// 前，先把字典裡其餘圖表的 tooltip 收起來，確保同一時間畫面上最多只有一個圖表 tooltip
+// 顯示。
+window._chartTipEls = window._chartTipEls || {};
+function registerChartTip(key, tipEl) { window._chartTipEls[key] = tipEl; }
+function hideOtherChartTips(exceptEl) {
+  Object.values(window._chartTipEls).forEach(el => { if (el && el !== exceptEl) el.style.display = 'none'; });
+}
+
+function positionChartTip(tipEl, container, clientX, clientY, offX, offY) {
+  if (!tipEl) return;
+  const rect = container.getBoundingClientRect();
+  const wrapRect = tipEl.parentElement.getBoundingClientRect();
+  const tipW = tipEl.offsetWidth || 160;
+  const tipH = tipEl.offsetHeight || 28;
+  let lx = clientX - rect.left + offX;
+  if (lx + tipW > rect.width) lx = clientX - rect.left - tipW;
+  lx = Math.max(4, Math.min(lx, rect.width - tipW - 4));
+  let ly = clientY - rect.top - offY;
+  ly = Math.max(4, Math.min(ly, rect.height - tipH - 4));
+  tipEl.style.left = (lx - (wrapRect.left - rect.left)) + 'px';
+  tipEl.style.top  = (ly - (wrapRect.top  - rect.top )) + 'px';
+}
+
 function renderStudentWorkTypeChart(journals) {
   const container = document.getElementById('s-work-type-chart');
   if (!container) return;
@@ -2058,27 +2102,21 @@ function renderStudentWorkTypeChart(journals) {
   // 一互動就會丟 ReferenceError，tooltip完全不會顯示。renderStudentCityChart()／
   // renderStudentSalaryLineChart() 這兩個結構相同的函式都有這行，唯獨這裡漏掉。
   const tipEl = container.querySelector('#s-pie-tip');
+  registerChartTip('workType', tipEl);
   container.querySelectorAll('.s-pie-slice').forEach(path => {
     path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
     path.addEventListener('mousemove', function(e) {
-      if(!tipEl) return;
-      const rect = container.getBoundingClientRect();
-      let lx = e.clientX - rect.left + 12, ly = e.clientY - rect.top - 12;
-      if (lx + 200 > rect.width) lx = e.clientX - rect.left - 200;
-      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+      positionChartTip(tipEl, container, e.clientX, e.clientY, 12, 12);
     });
     path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
     // 觸控：點一下顯示 tooltip，再點別處隱藏
     path.addEventListener('click', function(e) {
       if(!tipEl) return;
+      hideOtherChartTips(tipEl);
       tipEl.textContent = this.getAttribute('data-tip');
       tipEl.style.display = 'block';
-      const rect = container.getBoundingClientRect();
       const touch = e.changedTouches?.[0] || e;
-      let lx = (touch.clientX || e.clientX) - rect.left + 12;
-      let ly = (touch.clientY || e.clientY) - rect.top - 12;
-      if (lx + 200 > rect.width) lx = (touch.clientX || e.clientX) - rect.left - 200;
-      tipEl.style.left = lx+'px'; tipEl.style.top = ly+'px';
+      positionChartTip(tipEl, container, touch.clientX || e.clientX, touch.clientY || e.clientY, 12, 12);
       e.stopPropagation();
     });
   });
@@ -2150,25 +2188,19 @@ function renderStudentCityChart(journals) {
     <div class="s-pie-legend" style="display:flex;flex-direction:column;gap:7px;min-width:110px;padding-top:2px">${legendHtml}</div>
   </div>`;
   const tipEl = container.querySelector('#s-city-tip');
+  registerChartTip('city', tipEl);
   container.querySelectorAll('.s-city-slice').forEach(path => {
     path.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
     path.addEventListener('mousemove', function(e) {
-      if(!tipEl) return;
-      const rect=container.getBoundingClientRect();
-      let lx=e.clientX-rect.left+12, ly=e.clientY-rect.top-12;
-      if(lx+200>rect.width) lx=e.clientX-rect.left-200;
-      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      positionChartTip(tipEl, container, e.clientX, e.clientY, 12, 12);
     });
     path.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
     path.addEventListener('click', function(e) {
       if(!tipEl) return;
+      hideOtherChartTips(tipEl);
       tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
-      const rect=container.getBoundingClientRect();
       const touch=e.changedTouches?.[0]||e;
-      let lx=(touch.clientX||e.clientX)-rect.left+12;
-      let ly=(touch.clientY||e.clientY)-rect.top-12;
-      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
-      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      positionChartTip(tipEl, container, touch.clientX||e.clientX, touch.clientY||e.clientY, 12, 12);
       e.stopPropagation();
     });
   });
@@ -2264,25 +2296,19 @@ function renderStudentSalaryLineChart(journals) {
     <div id="s-sal-tip" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:12px;pointer-events:none;z-index:99;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;color:var(--text)"></div>
   </div>`;
   const tipEl = container.querySelector('#s-sal-tip');
+  registerChartTip('salary', tipEl);
   container.querySelectorAll('.s-sal-dot').forEach(dot => {
     dot.addEventListener('mouseenter', function() { if(tipEl){tipEl.textContent=this.getAttribute('data-tip');tipEl.style.display='block';} });
     dot.addEventListener('mousemove', function(e) {
-      if(!tipEl) return;
-      const rect=container.getBoundingClientRect();
-      let lx=e.clientX-rect.left+14, ly=e.clientY-rect.top-14;
-      if (lx+200>rect.width) lx=e.clientX-rect.left-200;
-      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      positionChartTip(tipEl, container, e.clientX, e.clientY, 14, 14);
     });
     dot.addEventListener('mouseleave', function() { if(tipEl) tipEl.style.display='none'; });
     dot.addEventListener('click', function(e) {
       if(!tipEl) return;
+      hideOtherChartTips(tipEl);
       tipEl.textContent=this.getAttribute('data-tip'); tipEl.style.display='block';
-      const rect=container.getBoundingClientRect();
       const touch=e.changedTouches?.[0]||e;
-      let lx=(touch.clientX||e.clientX)-rect.left+14;
-      let ly=(touch.clientY||e.clientY)-rect.top-14;
-      if(lx+200>rect.width) lx=(touch.clientX||e.clientX)-rect.left-200;
-      tipEl.style.left=lx+'px'; tipEl.style.top=ly+'px';
+      positionChartTip(tipEl, container, touch.clientX||e.clientX, touch.clientY||e.clientY, 14, 14);
       e.stopPropagation();
     });
   });
