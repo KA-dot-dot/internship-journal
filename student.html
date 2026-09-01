@@ -290,6 +290,11 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-detail-row { display: flex; align-items: center; gap: 8px; border-radius: 6px; transition: background 0.15s; }
 .stat-detail-row.clickable { cursor: pointer; padding: 2px 4px; margin: 0 -4px; }
 .stat-detail-row.clickable:hover { background: var(--bg3); }
+/* 2026-08-31 新增：已逾期清單裡「過去學期、刻意不可點擊」的項目（見 loadStudentDashboard()
+   已逾期區塊註解——座號每學期重新分配，過去學期不開放直接點擊補繳）。只用降低透明度做
+   輕微視覺區隔，不改圖示或文字，避免使用者誤以為是「已解決」而降低警示感；同時讓它跟
+   本學期可點擊項目一眼就能分辨，不用點下去才發現沒反應。 */
+.stat-detail-row.stat-detail-row-muted { opacity: 0.62; }
 .stat-detail-row .journal-unread-badge,
 .stat-detail-row .journal-reviewed-badge,
 .stat-detail-row .journal-updated-badge,
@@ -1795,15 +1800,43 @@ function computeEntriesFirstCompleteAt(entriesFirstCompleteAtBefore, entriesFirs
     : { at: null, count: null };
 }
 
-// 已逾期：僅檢查「目前學期」中已設定截止日且已過期、但篇數未達標的月份
-// （刻意不往回查更早的學期，避免抓到系統裡其他屆學生留下的舊截止日資料）。
+// 2026-08-31 新增：✗未繳／△篇數不足（getOverdueMonths()，下方）原本鎖死只查「目前
+// 學期」，跟✓已繳／▲遲繳（getCompletedJournals()，上方）不對稱——後者直接對這個帳號
+// 名下全部歷史 journals 做 filter，deadlineDataMap 也是整個 /deadlines collection 全撈，
+// 兩者都沒有 semester 篩選，只要學生「有交」，不管哪個學期都能正確判斷準時/遲繳。
+// getOverdueMonths() 邏輯相反：不是「看已存在的 journal」，而是「枚舉應該要交的月份，
+// 再檢查有沒有交」，原本刻意鎖死在「目前學期」，避免抓到系統裡其他屆學生留下的舊截止日
+// 資料。要往前查「這個學生以前在哪些學期報到過」，目前系統沒有獨立的歷史報到記錄可查：
+// studentBindings/{emailKey} 只存目前 active 學期算出的座號（換學期時整批清空重建，見
+// AI_CONTEXT_狀態.md 第三節），/students/{semester}_{seatNo} 的讀取權限也只能拿目前
+// 座號去比對，查不到「上學期座號是幾號」。唯一還留著歷史線索的只有這個 uid 自己名下的
+// journals——journal 文件的 semester 欄位是當時繳交那一刻寫死的，ownerUid 又永久跟著
+// 這個帳號。用「這個學生自己 journals 裡出現過的 semester 集合」當檢查範圍，不會像
+// 枚舉整個 /deadlines collection 那樣撞回上面想避免的問題。純函式，不碰 Firestore。
+function getRelevantSemesters(journals, currentSem) {
+  const set = new Set((journals || []).map(j => j.semester).filter(Boolean));
+  set.add(currentSem); // 目前學期即使還沒交任何一筆，也要檢查（例如剛開學）
+  return [...set];
+}
+
+// 已逾期：檢查 relevantSemesters（由呼叫端用 getRelevantSemesters() 算出，通常是「這個
+// 學生自己 journals 裡出現過的學期」+「目前學期」）裡，已設定截止日且已過期、但篇數
+// 未達標的月份。2026-08-31 起改成可檢查多個學期——不是放寬成「查全部學期」，範圍仍然
+// 限定在 relevantSemesters 這個集合內，一樣不會掃到跟這個學生完全無關、其他屆學生留下
+// 的舊截止日資料，只是從「目前學期」放寬成「這個學生自己出現過的所有學期」。
 // 2026-07-17 起：不再是「完全沒有月記文件」才算逾期，改用跟 teacher.html
 // loadTeacherDashboard() 一致的篇數達標判斷（resolveMinEntries()）——只交1篇但規定要2篇，
 // 截止日一過一樣算逾期，不會因為「至少存了一份文件」就被排除在提醒之外，避免學生誤以為
 // 已經完成而忽略。deadlineDataMap 為選填的預先讀取結果（{ 'semester-month': deadlineDocData }，
 // 由呼叫端 loadStudentDashboard() 跟本月繳交狀態共用同一次查詢，避免重複打 Firestore），
 // 沒有傳入時自行查一次，維持函式本身仍可獨立呼叫。
-async function getOverdueMonths(sem, journals, deadlineDataMap = null) {
+// 2026-08-31 起：回傳形狀從純月份數字陣列改為 [{semester, month, entriesCount, required}, ...]
+// ——多學期情境下，裸月份數字無法區分「115-1 的9月」跟「115-2 剛好也有一筆9月資料」這種
+// 跨學期月份重疊；呼叫端也不需要再另外重算 entriesCount/required（見 loadStudentDashboard()），
+// 這裡內部本來就已經算過一次，兩邊各自重算一份容易脫鉤。依「學期新到舊、月份小到大」
+// 排序（學期方向比照 renderSubmittedMonthsDetail() 既有慣例；月份維持這個函式原本的
+// 小到大慣例——同一學期內先提醒最早逾期的月份）。
+async function getOverdueMonths(relevantSemesters, journals, deadlineDataMap = null) {
   let dataMap = deadlineDataMap;
   if (!dataMap) {
     const { collection, getDocs } = firebase_funcs;
@@ -1811,23 +1844,27 @@ async function getOverdueMonths(sem, journals, deadlineDataMap = null) {
     dataMap = {};
     snap.docs.forEach(d => { const dd = d.data(); if (dd.semester && dd.month) dataMap[`${dd.semester}-${dd.month}`] = dd; });
   }
+  const semSet = new Set(relevantSemesters);
   const now = new Date();
-  // 依月份加總本學期各月的 entries 篇數（一份月記理論上剛好對應一個月份，不會同月重複，
-  // 用加總寫法即使未來資料形狀改變也不會誤判成 0）
-  const entriesByMonth = new Map();
-  journals.filter(j => j.semester === sem).forEach(j => {
-    entriesByMonth.set(Number(j.month), (entriesByMonth.get(Number(j.month)) || 0) + (j.entries || []).length);
+  // 依「學期＋月份」加總 entries 篇數（一份月記理論上剛好對應一個月份，不會同月重複，
+  // 用加總寫法即使未來資料形狀改變也不會誤判成 0）。複合 key 避免不同學期同月份數字
+  // 互相覆蓋（例如 115-1 跟 115-2 都有月份 9 的資料時，裸月份數字會誤判成同一格）。
+  const entriesByKey = new Map();
+  journals.filter(j => semSet.has(j.semester)).forEach(j => {
+    const key = `${j.semester}-${Number(j.month)}`;
+    entriesByKey.set(key, (entriesByKey.get(key) || 0) + (j.entries || []).length);
   });
   const overdue = [];
   Object.values(dataMap).forEach(dd => {
-    if (dd.semester !== sem || !dd.month || !dd.closeDate) return;
+    if (!semSet.has(dd.semester) || !dd.month || !dd.closeDate) return;
     const close = new Date(dd.closeDate + 'T23:59:59+08:00');
     if (close >= now) return;
     const required = resolveMinEntries(dd);
-    const entriesCount = entriesByMonth.get(Number(dd.month)) || 0;
-    if (entriesCount < required) overdue.push(Number(dd.month));
+    const key = `${dd.semester}-${Number(dd.month)}`;
+    const entriesCount = entriesByKey.get(key) || 0;
+    if (entriesCount < required) overdue.push({ semester: dd.semester, month: Number(dd.month), entriesCount, required });
   });
-  return overdue.sort((a,b) => a-b);
+  return overdue.sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (a.month||0)-(b.month||0));
 }
 
 async function loadStudentDashboard() {
@@ -1890,27 +1927,44 @@ async function loadStudentDashboard() {
     document.getElementById('s-teacher-count').textContent = teacherList.length;
     document.getElementById('stat-detail-teacher').innerHTML = renderTeacherStatusDetail(teacherList);
 
-    // 已逾期
-    const overdueMonths = await getOverdueMonths(sem, journals, deadlineDataMap);
-    document.getElementById('s-overdue-count').textContent = overdueMonths.length;
-    // 2026-07-18 起：逾期清單比照 teacher.html「本月未繳名單」的既有慣例，只在「有交但篇數
-    // 不足」時才附上「（已交X篇，尚差Y篇）」；完全沒交（0篇）的月份維持原本單純的
-    // 「⚠️ 年/月」，不刻意寫「已交0篇」製造多餘資訊。刻意不改動 getOverdueMonths() 本身的
-    // 回傳格式（仍是純月份數字陣列），避免牽動既有測試對它回傳值形狀的假設——這裡改用呼叫端
-    // 已經持有的 journals／deadlineDataMap 自行重算篇數，屬於局部新增、風險最小的作法，跟
-    // getOverdueMonths() 內部判斷逾期用的是同一套 entriesByMonth／resolveMinEntries() 邏輯。
-    document.getElementById('stat-detail-overdue').innerHTML = overdueMonths.length
-      ? overdueMonths.map(m => {
-          const required = resolveMinEntries(deadlineDataMap[`${sem}-${m}`]);
-          const entriesCount = journals
-            .filter(j => j.semester === sem && Number(j.month) === Number(m))
-            .reduce((sum, j) => sum + (j.entries || []).length, 0);
-          const label = escapeHtml(semMonthToLabel(sem, m));
-          const detail = entriesCount > 0
-            ? `<span class="entries-progress-detail">（已交${entriesCount}篇，尚差${Math.max(required - entriesCount, 0)}篇）</span>`
+    // 已逾期（2026-08-31 起：不再只查「目前學期」，改用 getRelevantSemesters() 推導出
+    // 「這個學生自己 journals 出現過的學期」+「目前學期」，涵蓋歷史學期的✗未繳／△篇數
+    // 不足，跟✓已繳／▲遲繳（getCompletedJournals()）本來就不分學期對齊）。已知殘留限制：
+    // 如果學生某個過去學期整學期一篇都沒交過，那個學期不會出現在他自己 journals 裡，這裡
+    // 也就抓不到——沒有獨立的「歷史報到記錄」可查，是資料結構天生的盲點，不是這次修法的
+    // 疏漏，比照 entriesCompleteAt 等既有「已知殘留風險」寫法處理。完整討論見
+    // AI_CONTEXT_歷程.md 對應段落。
+    const relevantSemesters = getRelevantSemesters(journals, sem);
+    const overdueGroups = await getOverdueMonths(relevantSemesters, journals, deadlineDataMap);
+    document.getElementById('s-overdue-count').textContent = overdueGroups.length;
+    // entriesCount／required 現在由 getOverdueMonths() 內部直接算好一併回傳（見該函式
+    // 上方註解），UI 端不再需要用 journals／deadlineDataMap／sem 自行重算一次——改成多
+    // 學期後「用哪個 sem」已經沒有單一答案，回傳值本身帶著各自的 semester 才是正確資料
+    // 來源，兩邊各自重算一份容易脫鉤。
+    // 2026-08-31 補充：過去學期（o.semester !== sem）的項目刻意設計成不可點擊——
+    // goToWriteMonth() 導去的填寫頁最終由 saveJournal() 寫入
+    // users/{uid}/journals/{currentUser.seatNo}-{sem}-{month}，用的是「目前」座號；座號
+    // 每學期重新分配（見 AI_CONTEXT_狀態.md 第三節），若學生在座號變動後回頭補繳更早
+    // 學期的月記，新文件會被寫入現在的座號、跟那個學期其餘月記（用當時舊座號）不一致，
+    // 嚴重時還可能剛好撞上那個學期「現在座號」曾經真正屬於的另一位同學，污染對方的歷史
+    // 統計。這個風險是 goToWriteMonth()／initWriteForm() 既有設計本來就有的（填寫頁學期
+    // 下拉選單本來就沒有鎖定只能選目前學期），只是先前 getOverdueMonths() 只查目前學期，
+    // 從來沒有被這條路徑實際觸發過；現在主動把歷史缺口攤在首頁、一鍵可達，觸發機率大幅
+    // 提高，因此暫不開放點擊，只顯示提醒，需要補繳的過去學期月記請洽老師以管理員身分
+    // 處理。若之後要開放學生自行補繳，需要先讓補繳路徑改用「這個學生在那個學期其他月記
+    // 已經在用的座號」而非目前座號，屬於另一輪需要另外討論的修法，不在本次範圍。
+    document.getElementById('stat-detail-overdue').innerHTML = overdueGroups.length
+      ? overdueGroups.map(o => {
+          const isCurrentSem = o.semester === sem;
+          const label = escapeHtml(semMonthToLabel(o.semester, o.month));
+          const detail = o.entriesCount > 0
+            ? `<span class="entries-progress-detail">（已交${o.entriesCount}篇，尚差${Math.max(o.required - o.entriesCount, 0)}篇）</span>`
             : '';
-          const rowClass = entriesCount > 0 ? 'stat-detail-row clickable stat-detail-row-progress' : 'stat-detail-row clickable';
-          return `<div class="${rowClass}" onclick="goToWriteMonth(${jsArg(sem)},${Number(m)})" title="點擊前往填寫此月月記"><span class="entries-progress-main">⚠️ ${label}</span>${detail}</div>`;
+          const progressClass = o.entriesCount > 0 ? ' stat-detail-row-progress' : '';
+          if (isCurrentSem) {
+            return `<div class="stat-detail-row clickable${progressClass}" onclick="goToWriteMonth(${jsArg(o.semester)},${Number(o.month)})" title="點擊前往填寫此月月記"><span class="entries-progress-main">⚠️ ${label}</span>${detail}</div>`;
+          }
+          return `<div class="stat-detail-row stat-detail-row-muted${progressClass}" title="過去學期，請洽老師協助補繳"><span class="entries-progress-main">⚠️ ${label}</span>${detail}</div>`;
         }).join('')
       : '<div class="stat-detail-empty">沒有逾期未繳的月份</div>';
     syncStatCardHeights();
@@ -4541,50 +4595,19 @@ function initStatsDateSelects() {
   }
 }
 
-function renderJournalCard(j, isTeacher) {
-  const safeMonth = safeNumber(j.month);
-  const isAbnormalMonth = !safeMonth || safeMonth < 1 || safeMonth > 12;
-  const entryHtml = (j.entries || []).map(e => `
-    <div class="entry-item">
-      <div class="entry-date">${escapeHtml(e.date || '')} ${e.type ? '｜'+escapeHtml(e.type) : ''}</div>
-      ${e.address ? `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">📍 ${escapeHtml(e.address)}${e.distance != null ? ` ／ 距學校 ${escapeHtml(String(e.distance))} km（參考）` : ''}</div>` : ''}
-      <div class="entry-content">${escapeHtml(e.content || '')}</div>
-      ${e.noPhoto ? '<div style="font-size:11px;color:var(--text2);margin-top:6px">📵 不便拍照</div>' : ''}
-      ${(e.photos||[]).length ? `<div style="font-size:13px;font-weight:700;color:var(--text);margin:8px 0">📷 工作照片</div><div class="entry-photos">${e.photos.map(p => {const s=resolveImgSrc(p);return `<img src="${escapeHtml(s)}" class="entry-photo" onclick="openPhotoModal(this.src)">`}).join('')}</div>` : ''}
-    </div>
-  `).join('');
-  const salaryNum = Number(j.salary);
-  const salaryHtml = Number.isFinite(salaryNum) ? `<span style="color:var(--accent-green);font-weight:600">💰 $${salaryNum.toLocaleString()} 元</span>` : '';
-  const mentorHtml = j.mentor ? `<span style="color:var(--text2);font-size:12px">👨‍🏫 師傅：${escapeHtml(j.mentor)}</span>` : '';
-  const salaryPhotoHtml = renderSalaryPhotosHtml(j);
-  // 月份異常（0、NaN）：禁用編輯按鈕，只允許刪除，防止誤觸覆蓋正常月記
-  const editBtn = isAbnormalMonth
-    ? `<button class="btn-circ gray-circ" title="月份異常，無法編輯" disabled style="opacity:0.35;cursor:not-allowed"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
-    : `<button class="btn-circ gray-circ" title="編輯月記" onclick="editJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth})"><svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  const deleteBtn = `<button class="btn-circ red-circ" title="刪除月記" onclick="confirmDeleteJournal(${jsArg(j.seatNo)},${jsArg(j.semester)},${safeMonth},${jsArg(j.studentName||'')},false)"><svg viewBox="0 0 24 24" fill="none"><polyline points="3 6 5 6 21 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-  return `<div class="journal-card"${isAbnormalMonth ? ' style="border:1.5px solid var(--danger,#ef4444);opacity:0.85"' : ''}>
-    ${isAbnormalMonth ? '<div style="background:rgba(239,68,68,0.08);color:#dc2626;font-size:12px;font-weight:600;padding:6px 10px;border-radius:6px 6px 0 0;margin-bottom:6px">⚠️ 月份資料異常（自動化測試殘留），請直接刪除此筆資料</div>' : ''}
-    ${renderCommentBadgeHtml(j)}
-    <div class="journal-card-header">
-      <div class="journal-card-toprow" style="${hasCommentBadge(j) ? 'padding-right:92px' : ''}">
-        <span class="journal-month" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(safeMonth)}月份月記</span>
-        <span class="badge badge-blue" style="flex-shrink:0;white-space:nowrap">${escapeHtml(j.semester?.replace('-1','第1學期').replace('-2','第2學期') || '')}</span>
-        <div class="journal-card-actions">${editBtn}${deleteBtn}</div>
-      </div>
-    </div>
-    <div class="journal-meta" style="display:flex;gap:12px;flex-wrap:wrap">
-      <span>公司：${escapeHtml(j.company||'-')}</span><span style="white-space:nowrap">繳交：${escapeHtml(j.submittedAt?.slice(0,10)||'-')}${(j.updatedAt && j.updatedAt !== j.submittedAt) ? `<span style="font-size:11px;color:var(--text2);margin-left:5px">（更新：${escapeHtml(j.updatedAt.slice(0,10))}）</span>` : ''}</span>${salaryHtml}${mentorHtml}
-    </div>
-    ${salaryPhotoHtml}
-    <div style="font-size:13px;line-height:1.7;background:var(--bg3);padding:12px;border-radius:var(--radius-sm);margin-top:8px;overflow-wrap:break-word;word-break:break-all">
-      <strong style="font-size:12px;color:var(--text2)">本月心得</strong><br>${escapeHtml(j.reflection||'')}
-    </div>
-    ${entryHtml ? `<div class="journal-entries">${entryHtml}</div>` : ''}
-    ${j.teacherReviewed ? renderStudentReplyArea(j) : ''}
-  </div>`;
-}
+// 2026-08-31 移除：舊版 renderJournalCard(j, isTeacher) 死碼——歷史頁改用
+// renderJournalCardSelectable()（上方）已久，全檔案（含 onclick 屬性字串）確認 0
+// 呼叫點。v40 稽核時已查過一次（見上方 changelog），當時判斷「不影響行為，維持原樣」；
+// 這次稽核進一步發現：teacher.html 自己那份同名 renderJournalCard()（6203行）已經在
+// 2026-08-30（T-SEC-68）修成 j.salary != null，且 6565 行附近註解明確把它當「正確標準」
+// 引用；這裡這份卻沒有跟上（仍是 Number.isFinite(Number(j.salary)) 舊寫法），變成兩端
+// 「該逐字一致的共用函式」實際上已經不同步。既然這份在 student.html 裡確認完全用不到，
+// 直接刪除比繼續維護一份沒人呼叫、卻可能被誤以為仍在使用（或被複製到別處）的舊邏輯
+// 更乾淨，也徹底消除「跟 teacher.html 不同步」這個問題本身。若未來要重新啟用學生端
+// 的非勾選版卡片，請改為呼叫 renderJournalCardSelectable() 或另外重新實作，不要復原
+// 這份舊版。原本檢查這個函式 escapeHtml／jsArg 使用情況的 S-SEC-09，已改為檢查真正
+// 在用的 renderJournalCardSelectable()（見 student_test.js 同日 changelog）。
 
-// ---- 學生回覆評語（對話串版）----
 function renderStudentReplyArea(j) {
   const seatNo = escapeHtml(j.seatNo || '');
   const sem    = escapeHtml(j.semester || '');

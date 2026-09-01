@@ -1,7 +1,86 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v40
+ * 學生端自動化測試 v41
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v41 修正（2026-08-31）：✗未繳／△篇數不足（getOverdueMonths()）原本鎖死只查「目前
+ * 學期」，跟✓已繳／▲遲繳（getCompletedJournals()）不對稱——後者對這個帳號名下全部
+ * 歷史 journals 做 filter，不看 semester，天生就能跨學期正確判斷；前者是「枚舉應該要
+ * 交的月份，再檢查有沒有交」，原本刻意鎖死在「目前學期」，避免抓到系統裡其他屆學生
+ * 留下的舊截止日資料。新增純函式 getRelevantSemesters(journals, currentSem)，用「這個
+ * 學生自己 journals 裡出現過的 semester 集合」＋「目前學期」推導出該檢查哪些學期——
+ * 系統裡沒有獨立的「歷史報到記錄」可查（studentBindings 只存目前 active 學期的座號），
+ * 這是唯一還留著歷史線索的資料來源。getOverdueMonths() 第一參數從單一 sem 字串改為
+ * relevantSemesters 陣列，內部改用 Set 判斷成員資格取代字串相等比較；回傳形狀從純
+ * 月份數字陣列改為 [{semester,month,entriesCount,required}]（多學期情境下裸月份數字
+ * 會分不出「115-1的9月」跟另一學期同月份的資料），依「學期新到舊、月份小到大」排序。
+ * loadStudentDashboard() 改用這兩個函式的組合，UI 端不再需要另外重算 entriesCount／
+ * required。已知殘留限制：學生某個過去學期整學期一篇都沒交過時，那個學期不會出現在
+ * journals 裡，這裡也抓不到，是資料結構天生的盲點，比照既有「已知殘留風險」寫法接受。
+ * 額外發現並處理的風險（設計討論本身沒有提到，稽核時另外查證程式碼發現）：
+ * goToWriteMonth() 導去的填寫頁最終由 saveJournal() 寫入
+ * users/{uid}/journals/{currentUser.seatNo}-{sem}-{month}，用的是「目前」座號；座號
+ * 每學期重新分配，若讓學生對過去學期的逾期項目點擊補繳，新文件會被寫入現在的座號、
+ * 跟那個學期其餘月記（用當時舊座號）不一致，嚴重時可能污染另一位同學的歷史統計。這個
+ * 風險是 goToWriteMonth()／initWriteForm() 既有設計本來就有的（填寫頁學期下拉選單本來
+ * 就沒有鎖定只能選目前學期），只是先前 getOverdueMonths() 只查目前學期，從未被這條
+ * 路徑實際觸發過；這次主動把歷史缺口攤在首頁、一鍵可達，觸發機率大幅提高，故過去學期
+ * 的逾期項目改為不可點擊（純提醒），只有目前學期的項目維持原有「點擊前往填寫」行為。
+ *   S-SEC-36  同步更新既有測試：getOverdueMonths() 呼叫改傳陣列、回傳值改為物件陣列，
+ *             核心驗證目的（篇數不足＋已過期才算逾期）不變。
+ *   S-SEC-37  同步更新既有測試：loadStudentDashboard() 呼叫 getOverdueMonths() 時第一參
+ *             數改傳 relevantSemesters（而非直接傳 sem）的靜態比對規則。
+ *   S-SEC-58  真執行 getRelevantSemesters()：純函式，直接餵合成 journals 陣列驗證「過去
+ *             學期聯集目前學期、不重複、journals 為空時只剩目前學期自己」四種情境。
+ *   S-SEC-59  真執行 getOverdueMonths() 的多學期版本：合成資料涵蓋「過去學期已過期且
+ *             篇數不足」「目前學期已過期且篇數不足」「目前學期尚未過期」「不在
+ *             relevantSemesters 名單內的無關學期（模擬其他屆學生的舊截止日資料）」
+ *             四種情境，並驗證排序方向。
+ *   S-SEC-60  loadStudentDashboard() 靜態比對：確認改呼叫 getRelevantSemesters()，且用
+ *             o.semester === sem 分流出目前學期／過去學期兩種不同的渲染分支，過去學期
+ *             分支完全不呼叫 goToWriteMonth()（見上方風險說明）。
+ *
+ * v41 同批追加（2026-08-31，稽核上述修法時發現）：
+ * ①刪除死碼 renderJournalCard(j, isTeacher)（student.html 舊版月記卡片渲染函式，歷史頁
+ * 改用 renderJournalCardSelectable() 已久，全檔含 onclick 屬性字串確認 0 呼叫點）。這份
+ * 死碼 v40 稽核時已查過一次、當時判斷「不影響行為、維持原樣」，這次進一步發現它已經跟
+ * teacher.html 同名的「標準版」renderJournalCard()（6203行，T-SEC-68 已修成
+ * j.salary != null，6565行附近註解明確引用它為對照標準）不同步——student.html 這份仍是
+ * 舊版 Number.isFinite(Number(j.salary)) 寫法。既然確認完全用不到，直接刪除比繼續維護
+ * 一份可能被誤用/複製的舊邏輯更乾淨，也徹底消除「兩端該逐字一致卻沒跟上」這個問題本身。
+ * 這個「已知死碼、刻意不動」的狀態先前只記錄在本檔案 changelog（上一段引號內文字），
+ * AI_CONTEXT_狀態.md 並未同步記錄，這次直接刪除後，該落差自然一併消失，不需要另外
+ * 找地方記錄一個已經不存在的東西。
+ * ②S-SEC-09 原本檢查的對象正是這份被刪除的死碼。**這裡先前的敘述有誤，已訂正**：
+ * 頂層 `function` 宣告在瀏覽器裡於腳本執行時就會被 hoist 成真正的全域識別字，不論有沒有
+ * 被呼叫過——`typeof renderJournalCard` 在刪除前一直都是 `'function'`（不是 `false`），
+ * `if (!fnStr) return {skip:true}` 這個保護從未被觸發過。用 Node vm 對照原始檔案實際
+ * 執行 `typeof` 確認過這件事，也確認舊版死碼原始碼裡確實同時含有 `escapeHtml`／
+ * `jsArg`（沿用跟 renderJournalCardSelectable() 同一套寫法複製出來的）。真正發生的情況
+ * 是：這條測試刪除前一直都在正常執行、也一直通過，只是測到的是死碼本身——等於長期在
+ * 驗證一段沒人會走到的路徑，給了虛假的安全感，是「測到死碼、沒有實際涵蓋活著的渲染
+ * 邏輯」，不是「靜默 skip」，兩者是不同的失效模式，但結論一樣：這條測試沒有真正保護到
+ * 活著的程式碼。同時發現真正在用的 renderJournalCardSelectable() 反而從來
+ * 沒有專屬的 escapeHtml／jsArg 使用檢查（S-SEC-08 只驗證它的老師評語徽章渲染邏輯，是
+ * 不同的關注點）。改為讓 S-SEC-09 直接檢查 renderJournalCardSelectable()，這是它現在
+ * 唯一在用、真正需要這層 XSS 防護檢查的對應函式，修復了一個先前沒被注意到的覆蓋率缺口
+ * （而不只是單純刪掉一條測試了事）。
+ * ③已逾期清單裡「過去學期、不可點擊」項目新增 CSS class `.stat-detail-row-muted`
+ * （opacity:0.62）——原本只靠拿掉 clickable class／onclick 屬性做區隔，視覺上跟本學期
+ * 可點擊項目長得一模一樣，使用者可能要點了才發現沒反應。純 CSS 視覺調整，不影響任何
+ * 既有測試的字串/regex 斷言（`.stat-detail-row-muted` 不包含 `clickable` 子字串）。
+ * 以上三項與 getRelevantSemesters()／getOverdueMonths() 主要修法為同一批、尚未經使用者
+ * 本機 Step2_RunTests.bat 確認，一併記錄在 v41 內，不另外編號 v42。
+ * 開發階段已在沙盒環境用 Node vm 模組直接執行從實際 student.html 逐字抽取（括號配對，
+ * 非天真 regex）的 getRelevantSemesters()／getOverdueMonths() 原始碼，交叉驗證新舊版本
+ * 行為差異（舊版即使餵入陣列參數，字串相等比較也會直接判斷不通過、回傳空陣列，證明
+ * 這不是單純的向後相容擴充，函式內部邏輯確實需要改寫）；另外用完整 DOM／Firestore
+ * stub 端到端跑過一次真正的 loadStudentDashboard()（同樣逐字抽取，非重寫簡化版），
+ * 驗證實際產出的 innerHTML 字串在跨學期情境下的顯示、排序、可否點擊、muted樣式皆符合
+ * 預期，比單純字串/regex 比對函式原始碼更直接證明修法生效；也重新確認
+ * renderJournalCardSelectable() 抽取後真的同時包含 escapeHtml 與 jsArg。完整方法見
+ * AI_測試架構說明_歷程.md 同日條目。**以上沙盒驗證無法取代使用者本機
+ * Step2_RunTests.bat 對已部署正式網站的真實執行結果，待其確認。**
  *
  * v40 修正（2026-08-31）：使用者提供的一輪程式碼稽核（針對 08-30 那次薪資 null/0
  * 修法的顯示端落差），確認並修復兩處會影響學生的顯示bug：renderJournalCardSelectable()
@@ -1378,9 +1457,18 @@ async function runStudentTests(page, browserContext, log) {
     if (result !== 'ok') throw new Error(result);
   });
 
-  await test('S-SEC-09 renderJournalCard() 使用 escapeHtml 和 jsArg', async () => {
+  await test('S-SEC-09 renderJournalCardSelectable() 使用 escapeHtml 和 jsArg', async () => {
+    // 2026-08-31 改版：原本檢查的 renderJournalCard(j, isTeacher) 已確認在 student.html
+    // 全檔 0 呼叫點（歷史頁改用 renderJournalCardSelectable() 已久，見同日 student.html
+    // changelog），且跟 teacher.html 那份「該逐字一致的共用函式」已經不同步（沒跟上
+    // v40 的 j.salary != null 修法），已直接刪除。這個測試原本要驗證的目的——月記卡片
+    // 渲染函式（會把使用者自由輸入的姓名／地址／心得等塞進 innerHTML）有沒有正確用
+    // escapeHtml() 逃逸內容、onclick 參數有沒有正確用 jsArg() 逃逸——這件事本身仍然
+    // 重要，只是應該檢查真正在用的函式，不是已刪除的舊版；繼續指向已刪除的函式名稱只
+    // 會讓這條測試永遠靜默 skip、看起來像有涵蓋其實完全沒有。改為直接檢查
+    // renderJournalCardSelectable()。
     const result = await page.evaluate(() => {
-      const fnStr = (typeof renderJournalCard === 'function') ? renderJournalCard.toString() : '';
+      const fnStr = (typeof renderJournalCardSelectable === 'function') ? renderJournalCardSelectable.toString() : '';
       if (!fnStr) return { skip: true };
       return {
         skip: false,
@@ -1389,8 +1477,8 @@ async function runStudentTests(page, browserContext, log) {
       };
     });
     if (result.skip) return;
-    if (!result.hasEscapeHtml) throw new Error('renderJournalCard() 未使用 escapeHtml()');
-    if (!result.hasJsArg)      throw new Error('renderJournalCard() 的 onclick 未使用 jsArg()');
+    if (!result.hasEscapeHtml) throw new Error('renderJournalCardSelectable() 未使用 escapeHtml()');
+    if (!result.hasJsArg)      throw new Error('renderJournalCardSelectable() 的 onclick 未使用 jsArg()');
   });
 
   await test('S-SEC-10 checkMonthDeadline() 圖片 src / 日期欄位使用 escapeHtml', async () => {
@@ -2556,7 +2644,11 @@ async function runStudentTests(page, browserContext, log) {
     // 只要有存檔（不論篇數）就不算逾期。改成跟 teacher.html 主頁一致的篇數達標判斷
     // （resolveMinEntries()）——只交1篇但規定2篇，截止日一過仍要提醒，不會因為「至少存了
     // 一份文件」就被排除在提醒之外。直接呼叫真正的函式帶入合成資料驗證，而非只做靜態
-    // 字串比對。
+    // 字串比對。2026-08-31 起：getOverdueMonths() 第一參數改為 relevantSemesters 陣列
+    // （見 S-SEC-58／S-SEC-59），回傳形狀也從純月份數字改為
+    // [{semester,month,entriesCount,required}]（見 getRelevantSemesters() 上方註解），
+    // 這裡同步改用新呼叫方式與新回傳形狀斷言，核心驗證目的（篇數不足＋已過期才算逾期）
+    // 不變。
     const result = await page.evaluate(async () => {
       if (typeof getOverdueMonths !== 'function') return { skip: true };
 
@@ -2565,15 +2657,15 @@ async function runStudentTests(page, browserContext, log) {
         '115-1-8': { semester: '115-1', month: 8, closeDate: '2099-01-01', minEntries: 2 }, // 尚未過期
       };
 
-      const case1 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 7, entries: [{}] }], deadlineDataMap);
-      const case2 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 7, entries: [{}, {}] }], deadlineDataMap);
-      const case3 = await getOverdueMonths('115-1', [{ semester: '115-1', month: 8, entries: [{}] }], deadlineDataMap);
+      const case1 = await getOverdueMonths(['115-1'], [{ semester: '115-1', month: 7, entries: [{}] }], deadlineDataMap);
+      const case2 = await getOverdueMonths(['115-1'], [{ semester: '115-1', month: 7, entries: [{}, {}] }], deadlineDataMap);
+      const case3 = await getOverdueMonths(['115-1'], [{ semester: '115-1', month: 8, entries: [{}] }], deadlineDataMap);
 
       return {
         skip: false,
-        case1IncludesJuly: case1.includes(7),
-        case2ExcludesJuly: !case2.includes(7),
-        case3ExcludesAugust: !case3.includes(8),
+        case1IncludesJuly: case1.some(o => o.semester === '115-1' && o.month === 7),
+        case2ExcludesJuly: !case2.some(o => o.semester === '115-1' && o.month === 7),
+        case3ExcludesAugust: !case3.some(o => o.semester === '115-1' && o.month === 8),
       };
     });
 
@@ -2595,7 +2687,9 @@ async function runStudentTests(page, browserContext, log) {
       const usesResolveMinEntries = /resolveMinEntries\s*\(/.test(fnStr);
       const comparesEntriesCount = /currentEntriesCount\s*>=\s*requiredThisMonth/.test(fnStr);
       const hasIncompleteBadge = fnStr.includes('badge-incomplete');
-      const passesMapToOverdue = /getOverdueMonths\s*\(\s*sem\s*,\s*journals\s*,\s*deadlineDataMap\s*\)/.test(fnStr);
+      // 2026-08-31 起：getOverdueMonths() 第一參數改傳 relevantSemesters（見
+      // getRelevantSemesters(journals, sem) 的呼叫結果），不再直接傳 sem 本身。
+      const passesMapToOverdue = /getOverdueMonths\s*\(\s*relevantSemesters\s*,\s*journals\s*,\s*deadlineDataMap\s*\)/.test(fnStr);
 
       return { skip: false, usesResolveMinEntries, comparesEntriesCount, hasIncompleteBadge, passesMapToOverdue };
     });
@@ -2608,7 +2702,127 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.hasIncompleteBadge)
       throw new Error('loadStudentDashboard() 找不到 badge-incomplete，篇數不足時可能沒有正確顯示「未完成」狀態');
     if (!result.passesMapToOverdue)
-      throw new Error('loadStudentDashboard() 呼叫 getOverdueMonths() 時未傳入共用的 deadlineDataMap，可能重複查詢 Firestore');
+      throw new Error('loadStudentDashboard() 呼叫 getOverdueMonths() 時未傳入 getRelevantSemesters() 算出的 relevantSemesters＋共用的 deadlineDataMap，可能又鎖回單一學期或重複查詢 Firestore');
+  });
+
+  await test('S-SEC-58 getRelevantSemesters() 推導出「journals 出現過的學期」聯集「目前學期」，用於讓✗未繳／△篇數不足能跨學期偵測', async () => {
+    // 背景：✓已繳／▲遲繳（getCompletedJournals()）本來就對這個帳號全部歷史 journals
+    // 做 filter，不看 semester；✗未繳／△篇數不足（getOverdueMonths()）原本鎖死只查
+    // 「目前學期」，兩者不對稱。getRelevantSemesters() 是這次修法新增的純函式，用「這個
+    // 學生自己 journals 裡出現過的 semester 集合」＋「目前學期」，推導出 getOverdueMonths()
+    // 該檢查哪些學期，不需要（也沒有管道）去枚舉整個 /deadlines collection 的所有學期。
+    const result = await page.evaluate(() => {
+      if (typeof getRelevantSemesters !== 'function') return { skip: true };
+
+      const journals = [
+        { semester: '114-2', month: 5 },
+        { semester: '115-1', month: 9 },
+        { semester: '115-1', month: 10 },
+      ];
+      const withHistory = getRelevantSemesters(journals, '115-2');
+      const noJournalsYet = getRelevantSemesters([], '115-2');
+      const dedupes = getRelevantSemesters([{ semester: '115-2', month: 3 }], '115-2');
+
+      return {
+        skip: false,
+        includesPastSemesters: withHistory.includes('114-2') && withHistory.includes('115-1'),
+        includesCurrentEvenIfAbsent: withHistory.includes('115-2'),
+        currentAloneWhenNoHistory: noJournalsYet.length === 1 && noJournalsYet[0] === '115-2',
+        noDuplicateWhenCurrentAlreadyInJournals: dedupes.length === 1,
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.includesPastSemesters)
+      throw new Error('getRelevantSemesters() 沒有把 journals 裡出現過的過去學期（114-2／115-1）納入結果');
+    if (!result.includesCurrentEvenIfAbsent)
+      throw new Error('目前學期即使 journals 裡還沒有任何一筆資料（例如剛開學），getRelevantSemesters() 也應該把它納入');
+    if (!result.currentAloneWhenNoHistory)
+      throw new Error('journals 為空陣列時，getRelevantSemesters() 應該只回傳目前學期自己一個');
+    if (!result.noDuplicateWhenCurrentAlreadyInJournals)
+      throw new Error('目前學期已經出現在 journals 裡時，getRelevantSemesters() 不應該把它重複列兩次');
+  });
+
+  await test('S-SEC-59 getOverdueMonths() 改為多學期版本後，能正確抓到「journals 出現過的過去學期」裡的逾期月份，且不會誤抓 relevantSemesters 以外的學期', async () => {
+    // 背景：2026-08-31 起 getOverdueMonths() 第一參數從單一 sem 字串改為
+    // relevantSemesters 陣列，回傳形狀也從純月份數字改為
+    // [{semester,month,entriesCount,required}]，讓同一批結果可以同時涵蓋不同學期、
+    // 且能正確標示每一筆各自屬於哪個學期（裸月份數字在跨學期情境下會分不出「115-1的9月」
+    // 跟「115-2剛好也有9月資料」）。這裡驗證：①過去學期（114-2）裡已過期且篇數不足的
+    // 月份會被抓到；②不在 relevantSemesters 名單內的學期（115-9，模擬「系統裡其他屆
+    // 學生留下的舊截止日資料」，即使已過期也不該被抓到，這正是原本設計就要避免的
+    // 問題，只是現在改成用集合判斷而非單一字串相等）；③排序依「學期新到舊、月份小到大」。
+    const result = await page.evaluate(async () => {
+      if (typeof getOverdueMonths !== 'function' || typeof getRelevantSemesters !== 'function') return { skip: true };
+
+      const deadlineDataMap = {
+        '114-2-5': { semester: '114-2', month: 5, closeDate: '2000-01-01', minEntries: 2 }, // 過去學期，早已過期，篇數不足
+        '115-1-8': { semester: '115-1', month: 8, closeDate: '2000-01-01', minEntries: 1 }, // 目前學期，早已過期，篇數不足
+        '115-1-9': { semester: '115-1', month: 9, closeDate: '2099-01-01', minEntries: 1 }, // 目前學期，尚未過期
+        '115-9-1': { semester: '115-9', month: 1, closeDate: '2000-01-01', minEntries: 1 }, // 不相關學期（不在 relevantSemesters 內），即使早已過期也不該被抓到
+      };
+      const journals = [
+        { semester: '114-2', month: 4, entries: [{}, {}] }, // 114-2 有交過其他月份，讓 114-2 會出現在 relevantSemesters 裡
+      ];
+      const relevantSemesters = getRelevantSemesters(journals, '115-1');
+      const overdue = await getOverdueMonths(relevantSemesters, journals, deadlineDataMap);
+
+      return {
+        skip: false,
+        relevantSemesters,
+        catchesPastSemesterOverdue: overdue.some(o => o.semester === '114-2' && o.month === 5),
+        catchesCurrentSemesterOverdue: overdue.some(o => o.semester === '115-1' && o.month === 8),
+        excludesUnrelatedSemester: !overdue.some(o => o.semester === '115-9'),
+        excludesNotYetDue: !overdue.some(o => o.semester === '115-1' && o.month === 9),
+        sortedNewestSemesterFirst: overdue.length >= 2 && overdue[0].semester === '115-1' && overdue[overdue.length - 1].semester === '114-2',
+      };
+    });
+
+    if (result.skip) return;
+    if (!result.catchesPastSemesterOverdue)
+      throw new Error('過去學期（114-2）裡已過期且篇數不足的月份沒有被抓到——這正是本次修法要達成的核心目標（跨學期偵測✗未繳／△篇數不足）');
+    if (!result.catchesCurrentSemesterOverdue)
+      throw new Error('目前學期原有的逾期偵測能力被改壞了');
+    if (!result.excludesUnrelatedSemester)
+      throw new Error('抓到了不在 relevantSemesters 名單內的學期（模擬系統裡其他屆學生留下的舊截止日資料）——這正是原始設計要避免、这次改成多學期後必須繼續守住的邊界');
+    if (!result.excludesNotYetDue)
+      throw new Error('截止日尚未到的月份被誤判為逾期');
+    if (!result.sortedNewestSemesterFirst)
+      throw new Error('排序不是「學期新到舊」——回傳陣列應該把目前學期（115-1）排在過去學期（114-2）前面');
+  });
+
+  await test('S-SEC-60 loadStudentDashboard() 已逾期清單改用 getRelevantSemesters()，且過去學期項目刻意不可點擊', async () => {
+    // 背景：見 getOverdueMonths() 上方 2026-08-31 註解——過去學期的逾期項目若沿用
+    // goToWriteMonth() 導去填寫頁，saveJournal() 最終會用「目前」座號寫入文件，跟座號
+    // 每學期重新分配（見 AI_CONTEXT_狀態.md 第三節）的事實衝突，可能寫出跟該學期其餘
+    // 月記座號不一致、甚至污染另一位同學歷史統計的資料。這裡是純原始碼靜態比對（渲染
+    // 邏輯依賴真實 DOM id／Firestore 資料，不安全真執行，比照 S-SEC-37 既有做法），
+    // 確認：①改叫 getRelevantSemesters()；②针对是否為目前學期分流出不同的 HTML（過去
+    // 學期分支不含 onclick="goToWriteMonth"）。
+    const result = await page.evaluate(() => {
+      if (typeof loadStudentDashboard !== 'function') return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(loadStudentDashboard.toString());
+
+      const callsGetRelevantSemesters = /getRelevantSemesters\s*\(\s*journals\s*,\s*sem\s*\)/.test(fnStr);
+      const branchesOnCurrentSem = /isCurrentSem\s*=\s*o\.semester\s*===\s*sem/.test(fnStr);
+      // 過去學期分支（isCurrentSem 為 false 時 return 的那一段）不應該包含 goToWriteMonth 呼叫。
+      // 用「isCurrentSem 判斷式之後、到函式結尾」這段程式碼裡出現 goToWriteMonth 的次數，
+      // 應該剛好只有 1 次（只在 if(isCurrentSem) 分支裡呼叫一次，另一個分支完全不呼叫）。
+      const afterBranchIdx = fnStr.indexOf('isCurrentSem');
+      const afterBranchCode = afterBranchIdx >= 0 ? fnStr.slice(afterBranchIdx) : '';
+      const goToWriteMonthCallCount = (afterBranchCode.match(/goToWriteMonth\s*\(/g) || []).length;
+
+      return { skip: false, callsGetRelevantSemesters, branchesOnCurrentSem, goToWriteMonthCallCount };
+    });
+
+    if (result.skip) return;
+    if (!result.callsGetRelevantSemesters)
+      throw new Error('loadStudentDashboard() 找不到 getRelevantSemesters(journals, sem) 呼叫，已逾期清單可能又鎖回單一學期');
+    if (!result.branchesOnCurrentSem)
+      throw new Error('loadStudentDashboard() 找不到依 o.semester === sem 分流目前學期／過去學期的判斷式');
+    if (result.goToWriteMonthCallCount !== 1)
+      throw new Error(`過去學期項目應該完全不可點擊（不呼叫 goToWriteMonth），預期只有目前學期分支呼叫1次，實際偵測到 ${result.goToWriteMonthCallCount} 次`);
   });
 
   await test('S-SEC-46 學生首頁已繳累計排除篇數不足月記，並正確標示遲繳', async () => {
