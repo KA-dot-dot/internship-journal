@@ -318,6 +318,11 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .s-chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:16px; box-shadow:var(--shadow); }
 .s-chart-title { font-size:15px; font-weight:700; margin-bottom:14px; color:var(--text); }
 .s-chart-empty { text-align:center; padding:24px 0; color:var(--text2); font-size:13px; }
+/* 2026-09-01：三個統計圖表可點擊的 SVG 元素（圓餅圖切片／折線圖資料點）點擊時，
+   行動裝置瀏覽器預設會疊加一層灰色的 tap-highlight 高亮，跟本來就會顯示的 tooltip
+   同時出現，視覺上顯得突兀多餘——點擊回饋本身已經由 tooltip 負責，不需要瀏覽器
+   另外疊加預設灰底，三個 class 一併關閉。*/
+.s-pie-slice, .s-city-slice, .s-sal-dot { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 600px) {
   #s-city-chart > div svg, #s-work-type-chart > div svg { width:120px !important; height:120px !important; }
 }
