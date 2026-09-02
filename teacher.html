@@ -1164,6 +1164,17 @@ tr:last-child td { border-bottom: none; }
                   <div style="font-size:15px;font-weight:700;margin-bottom:10px">🗺️ 縣市分布</div>
                   <div id="city-filter-summary" style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:6px 10px;background:var(--bg3);border-radius:6px">查詢後顯示</div>
                   <div id="city-chart-filtered" class="chart-bar-wrap"><div class="empty-state"><div class="icon">📍</div><p>查詢後顯示</p></div></div>
+                  <div id="city-unknown-wrap" class="hidden" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+                    <button type="button" onclick="toggleCityUnknownList()" style="width:100%;border:0;background:none;color:var(--accent-yellow);padding:0;cursor:pointer;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+                      <span id="city-unknown-summary">⚠️ 0 筆地址未能辨識縣市</span><span id="city-unknown-arrow">▾</span>
+                    </button>
+                    <div id="city-unknown-list" class="hidden" style="margin-top:8px">
+                      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="copyCityUnknownList()" id="copy-city-unknown-btn" style="white-space:nowrap;flex-shrink:0">📋 複製清單</button>
+                      </div>
+                      <div class="table-wrap"><table style="min-width:420px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th>姓名</th><th style="min-width:100px">公司</th><th style="white-space:nowrap">日期</th><th>工作地址</th></tr></thead><tbody id="city-unknown-table-body"></tbody></table></div>
+                    </div>
+                  </div>
                 </div>
                 <div class="card">
                   <div style="font-size:15px;font-weight:700;margin-bottom:6px">📏 距台中高工參考距離</div>
@@ -3207,6 +3218,29 @@ function copySalaryMissingList() {
   });
 }
 
+// 2026-09-02 新增：複製「地址未能辨識縣市」清單（renderCityUnknownList() 收集的
+// window._cityUnknownRecords），方便老師直接貼到 LINE 提醒學生確認/更正地址格式。
+// 比照 copyMissingList()／copySalaryMissingList() 既有慣例（navigator.clipboard 失敗時
+// fallback prompt()、按鈕文字暫時變成「✅ 已複製」）。這份清單本身筆數通常不多、是給
+// 老師識別特定問題用，附上姓名不影響排版對齊（跟「本月未繳」複製版本刻意拿掉姓名的
+// 理由不同——那邊常常是幾十筆座號要對齊排版，這裡通常只有個位數幾筆）。
+function copyCityUnknownList() {
+  const list = window._cityUnknownRecords || [];
+  if (list.length === 0) {
+    toast('目前沒有地址未能辨識縣市的紀錄', 'info');
+    return;
+  }
+  const lines = list.map(r => `${r.seatNo} ${r.name}${r.date ? '　' + r.date : ''}　${r.address}`);
+  const text = `【地址待確認】\n以下工作紀錄的地址系統無法自動辨識縣市，麻煩確認並更正地址格式：\n${lines.join('\n')}`;
+  const btn = document.getElementById('copy-city-unknown-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { btn.textContent = '✅ 已複製'; setTimeout(() => { btn.innerHTML = '📋 複製清單'; }, 2000); }
+    toast('已複製清單，可直接貼到 LINE 群組', 'success');
+  }).catch(() => {
+    prompt('請手動複製以下內容：', text);
+  });
+}
+
 // 2026-08-05 新增：固定寬度按鈕＋角落篇數分數徽章＋下方缺月數小字，供「本月未繳名單」
 // （toggleStatList('missing')）與「已逾期未達標」（toggleOverduePanel()）共用同一套視覺
 // 呈現，避免兩處各自維護一份樣式又逐漸不一致。徽章顯示「已交/應繳」篇數（entriesCount/
@@ -4907,13 +4941,21 @@ function renderFilteredCity(journals) {
 
   // 縣市統計（只計算勾選公司的月記）
   const cityMap = {};
+  // 2026-09-02 新增：cityMap 只有累計數字，老師看到「未知：N筆」時無法回頭得知是哪個
+  // 學生、哪一筆地址被歸類成未知。同一個迴圈裡順便收集完整記錄（座號/姓名/公司/日期/
+  // 地址），供下方 renderCityUnknownList() 顯示可展開、可複製的清單，不需要另外查詢。
+  const unknownRecords = [];
   journals.forEach(j => {
     if (!isCompanySelected(j.company, selectedCompanies)) return;
     (j.entries||[]).forEach(e => {
       const addr = (e.address||'').trim();
       if (!addr) return;
-      const city = extractCityFromAddress(addr) || '未知';
+      const cityFound = extractCityFromAddress(addr);
+      const city = cityFound || '未知';
       cityMap[city] = (cityMap[city]||0) + 1;
+      if (!cityFound) {
+        unknownRecords.push({ seatNo: j.seatNo || '', name: j.studentName || '', company: j.company || '未填寫', date: e.date || '', address: addr });
+      }
     });
   });
 
@@ -4932,6 +4974,7 @@ function renderFilteredCity(journals) {
   }
   const summaryEl = document.getElementById('city-filter-summary');
   if (summaryEl) summaryEl.textContent = `共 ${total} 筆工作記錄，${sorted.length} 個縣市`;
+  renderCityUnknownList(unknownRecords);
 
   // 距離統計
   const distBuckets = { '0-5km': 0, '5-10km': 0, '10-20km': 0, '20-50km': 0, '50-100km': 0, '100+km': 0 };
@@ -4957,6 +5000,39 @@ function renderFilteredCity(journals) {
     }).join('') : '<div class="empty-state"><div class="icon">📏</div><p>無距離資料</p></div>';
   }
   renderLocationDetailTable(journals, selectedCompanies);
+}
+
+// 2026-09-02 新增：獨立渲染「地址未能辨識縣市」清單（見 renderFilteredCity() 收集的
+// unknownRecords）。每次重新查詢或切換公司篩選都會被重新呼叫、整段 innerHTML 重新
+// 產生，因此固定重置為摺疊狀態——跟 renderLocationDetailTable() 既有各公司分組
+// （toggleLocDetail()）的摺疊行為一致，不是本次新增才有的不一致。無資料時整個區塊
+// 隱藏，不佔版面。
+function renderCityUnknownList(records) {
+  window._cityUnknownRecords = records;
+  const wrap = document.getElementById('city-unknown-wrap');
+  const summaryEl = document.getElementById('city-unknown-summary');
+  const listEl = document.getElementById('city-unknown-list');
+  const bodyEl = document.getElementById('city-unknown-table-body');
+  const arrowEl = document.getElementById('city-unknown-arrow');
+  if (!wrap || !summaryEl || !listEl || !bodyEl) return;
+  if (!records.length) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  listEl.classList.add('hidden');
+  if (arrowEl) arrowEl.textContent = '▾';
+  summaryEl.textContent = `⚠️ ${records.length} 筆地址未能辨識縣市（點此展開）`;
+  const rows = [...records].sort((a,b) => `${a.seatNo}${a.date}`.localeCompare(`${b.seatNo}${b.date}`));
+  bodyEl.innerHTML = rows.map(r => `<tr><td style="text-align:center">${escapeHtml(r.seatNo)}</td><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(r.company)}</td><td style="white-space:nowrap">${escapeHtml(r.date || '-')}</td><td>${escapeHtml(r.address)}</td></tr>`).join('');
+}
+
+function toggleCityUnknownList() {
+  const el = document.getElementById('city-unknown-list');
+  const arrow = document.getElementById('city-unknown-arrow');
+  if (!el) return;
+  el.classList.toggle('hidden');
+  if (arrow) arrow.textContent = el.classList.contains('hidden') ? '▾' : '▴';
 }
 
 function escapeHtml(v) {
