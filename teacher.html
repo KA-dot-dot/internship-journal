@@ -628,6 +628,19 @@ tr:last-child td { border-bottom: none; }
 .salary-alert-item > strong { white-space:nowrap; flex-shrink:0; }
 .salary-alert-main { color:var(--text); font-weight:600; }
 .salary-alert-note { color:var(--text3); font-size:11px; margin-top:2px; }
+/* 2026-09-02 修正：「地址未能辨識縣市」清單原本是五欄表格（含公司欄），固定
+   min-width:420px 在手機版會撐開橫向捲動，捲到後面「座號」欄反而看不到。改成
+   單欄卡片列表——不需要橫向捲動，也拿掉公司欄（這份清單是給老師逐筆檢查/更正
+   地址格式用，公司資訊不是必要欄位）。視覺語言比照既有 .salary-alert-item
+   （上緣細分隔線＋左右留白），但這裡固定兩行：第一行「座號 姓名｜日期」，
+   第二行完整地址。 */
+.city-unknown-list-body { display:flex; flex-direction:column; }
+.city-unknown-item { border-top:1px solid rgba(255,255,255,0.06); padding-top:7px; margin-top:7px; font-size:12px; }
+.city-unknown-item:first-child { border-top:none; padding-top:0; margin-top:0; }
+.city-unknown-item-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.city-unknown-item-who { color:var(--text); font-weight:600; }
+.city-unknown-item-date { color:var(--text2); white-space:nowrap; flex-shrink:0; }
+.city-unknown-item-addr { color:var(--text2); margin-top:2px; word-break:break-all; }
 /* 2026-08-15 新增：「薪資缺漏」與「薪資單尚未上傳」原本疊在同一個箱子裡上下接續顯示、
    共用同一條捲軸，改成左右各自獨立一個子面板（.salary-missing-pane），各自的
    .salary-alert-list 各自套用 max-height/overflow-y，資料多寡互不影響對方的捲動；
@@ -1172,7 +1185,7 @@ tr:last-child td { border-bottom: none; }
                       <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
                         <button type="button" class="btn btn-secondary btn-sm" onclick="copyCityUnknownList()" id="copy-city-unknown-btn" style="white-space:nowrap;flex-shrink:0">📋 複製清單</button>
                       </div>
-                      <div class="table-wrap"><table style="min-width:420px"><thead><tr><th style="text-align:center;white-space:nowrap">座號</th><th>姓名</th><th style="min-width:100px">公司</th><th style="white-space:nowrap">日期</th><th>工作地址</th></tr></thead><tbody id="city-unknown-table-body"></tbody></table></div>
+                      <div id="city-unknown-table-body" class="city-unknown-list-body"></div>
                     </div>
                   </div>
                 </div>
@@ -5024,7 +5037,7 @@ function renderCityUnknownList(records) {
   if (arrowEl) arrowEl.textContent = '▾';
   summaryEl.textContent = `⚠️ ${records.length} 筆地址未能辨識縣市（點此展開）`;
   const rows = [...records].sort((a,b) => `${a.seatNo}${a.date}`.localeCompare(`${b.seatNo}${b.date}`));
-  bodyEl.innerHTML = rows.map(r => `<tr><td style="text-align:center">${escapeHtml(r.seatNo)}</td><td>${escapeHtml(r.name || '-')}</td><td>${escapeHtml(r.company)}</td><td style="white-space:nowrap">${escapeHtml(r.date || '-')}</td><td>${escapeHtml(r.address)}</td></tr>`).join('');
+  bodyEl.innerHTML = rows.map(r => `<div class="city-unknown-item"><div class="city-unknown-item-head"><span class="city-unknown-item-who">${escapeHtml(r.seatNo)} ${escapeHtml(r.name || '-')}</span><span class="city-unknown-item-date">${escapeHtml(r.date || '-')}</span></div><div class="city-unknown-item-addr">${escapeHtml(r.address)}</div></div>`).join('');
 }
 
 function toggleCityUnknownList() {
