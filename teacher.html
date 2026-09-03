@@ -1762,6 +1762,26 @@ function getSemesterMonths(semKey) {
   return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
 }
 
+// 2026-09-03 補修：學期內「月份數字大小」跟「時序」不一致——第1學期固定
+// 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個學期最後一個月。
+// 任何直接用裸月份數字相減排序（如 a.month-b.month）的地方，只要資料同時橫跨
+// 12月與隔年1月，1月就會被排到跟時間順序完全相反的位置（升冪排序時1月排最前面、
+// 降冪排序時1月排最後面）。共用函式回傳「這個月份在其所屬學期裡的時序位置」
+// （0起算，依 getSemesterMonths() 既有的月份順序陣列查表，不重複定義第三份
+// [7,8,9,10,11,12,1]），呼叫端一律用一般數字比較語法排序，不需要另外處理跨年
+// 進位。查不到（理論上不該發生的異常資料，如 month 不屬於該學期）時回傳 99，
+// 排到最後而不是讓整個排序邏輯出錯。（比照 student.html 同名函式，兩端各自獨立
+// 維護一份，不 import。）
+function monthOrderInSemester(semester, month) {
+  // 防呆：getSemesterMonths() 內部會對 semester 呼叫 .split('-')，若呼叫端直接傳入
+  // 可能缺漏 semester 欄位的資料（理論上 rule.txt 已要求月記文件必須有 semester，但
+  // 這裡刻意不假設呼叫端一定會先做 ||'' 防呆——傳入這裡拋例外會讓整個
+  // .sort() 連帶整頁載入失敗，比原本「排序跑掉」的問題嚴重得多，值得多一行防禦）。
+  const order = getSemesterMonths(String(semester || ''));
+  const idx = order.indexOf(Number(month));
+  return idx === -1 ? 99 : idx;
+}
+
 function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;
@@ -3008,7 +3028,7 @@ async function loadTeacherDashboard() {
       });
     }
   });
-  window._overdueGroups = overdueGroupsRaw.sort((a, b) => a.month - b.month);
+  window._overdueGroups = overdueGroupsRaw.sort((a, b) => monthOrderInSemester(sem, a.month) - monthOrderInSemester(sem, b.month));
   // 供點擊名單直接跳去審閱（跟跨月待複審 _crossMonthClickData 同一套用法）
   window._overdueClickData = window._overdueGroups.flatMap(g =>
     g.students.map(s => ({ seatNo: s.sno, name: s.name, semester: sem, month: g.month }))
@@ -3065,7 +3085,7 @@ async function loadTeacherDashboard() {
   });
   // 依學期倒序、月份倒序排列（最近的在前）
   window._crossMonthGroups = Object.values(crossMonthMap).sort((a, b) =>
-    a.semester !== b.semester ? b.semester.localeCompare(a.semester) : b.month - a.month
+    a.semester !== b.semester ? b.semester.localeCompare(a.semester) : monthOrderInSemester(b.semester,b.month) - monthOrderInSemester(a.semester,a.month)
   );
   // 跨月待複審扁平清單（供審閱隊列使用，順序與 _crossMonthGroups 一致）
   window._crossMonthClickData = window._crossMonthGroups.flatMap(g => g.students);
@@ -4619,7 +4639,7 @@ async function exportAllStatsExcel() {
   const allJournals = userJournalData(jSnap);
   let journals = [...allJournals];
   if (start && end) journals = journals.filter(j => journalMonthInRange(j, start, end));
-  journals.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
+  journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
   const monthSlots = getStatsMonthSlots(start, end, journals);
   const students = await loadRosterStudentsForSemesters(monthSlots.map(s => s.sem), allJournals);
   const studentMap = {};
@@ -4812,7 +4832,7 @@ async function exportAllStatsExcel() {
   // 2026-07-01 補修（同批次）：姓名/學期/月份/繳交時間/最後更新皆源自月記頂層欄位，
   // rule.txt 未驗證格式，補上 sanitizeExcelCell() 防護。老師評語/已審閱來自老師端輸入，
   // 信任邊界不同，不在本次範圍內（沿用既有判斷）。
-  const journalListRows = journalListSource.sort((a,b)=>(a.seatNo+String(a.month).padStart(2,'0')).localeCompare(b.seatNo+String(b.month).padStart(2,'0'))).map(j => ({
+  const journalListRows = journalListSource.sort((a,b)=>(a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month)).map(j => ({
     座號: j.seatNo || '',
     姓名: sanitizeExcelCell((studentMap[`${j.semester}-${j.seatNo}`]?.name) || j.studentName || ''),
     學期: sanitizeExcelCell((j.semester || '').replace('-1','第1學期').replace('-2','第2學期')),
@@ -5506,8 +5526,14 @@ function renderSalaryStatsFromCache(cache) {
     return `<tr><td>${escapeHtml(d.name)}</td><td>${d.studentCount}</td><td style="color:var(--accent-green);font-weight:700">$${avg.toLocaleString()}</td></tr>`;
   }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
-  document.getElementById('salary-detail-table').innerHTML = [...journals].sort((a,b)=>(String(a.seatNo || '')+String(a.month).padStart(2,'0')).localeCompare(String(b.seatNo || '')+String(b.month).padStart(2,'0'))).map(j =>
-    `<tr><td>${escapeHtml(j.seatNo)}</td><td style="white-space:nowrap">${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td style="white-space:nowrap">${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${(j.salary || 0).toLocaleString()}</td></tr>`
+  document.getElementById('salary-detail-table').innerHTML = [...journals].sort((a,b)=>String(a.seatNo || '').localeCompare(String(b.seatNo || '')) || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month)).map(j =>
+    // 2026-09-03 補修：座號欄位原本直接顯示 j.seatNo，沒有沿用上面「學生薪資總覽」
+    // 表格已經算好的 collidingSeatNos——跨學期同座號的兩位不同學生在這張明細表上會
+    // 顯示成看起來像同一人的兩筆紀錄，容易誤判成資料重複。改用 seatDisplayWithSemester()
+    // 沿用同一次撞號偵測結果，跟「學生薪資總覽」表格一致：沒撞號維持裸座號，真的撞號
+    // 才加註學期（例如「01（115-1）」）。collidingSeatNos 是從餵進 studentMap 的同一份
+    // journals 算出來的（見上方），不需要重新計算。
+    `<tr><td>${escapeHtml(seatDisplayWithSemester(j.seatNo, j.semester, collidingSeatNos))}</td><td style="white-space:nowrap">${escapeHtml(j.studentName || '-')}</td><td>${escapeHtml(getJournalCompany(j, stuCompanyMap) || '-')}</td><td style="white-space:nowrap">${escapeHtml(j.month)}月</td><td style="color:var(--accent-green);font-weight:700;white-space:nowrap">$${(j.salary || 0).toLocaleString()}</td></tr>`
   ).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   renderSalaryFocus(studentList, companyList);
@@ -5751,7 +5777,7 @@ function filterAndSortJournals(journals, startStr, endStr, search) {
   let result = [...journals];
   if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search) || (j.company||'').toLowerCase().includes(search));
-  result.sort((a,b) => ((a.semester||'')+(a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.semester||'')+(b.seatNo||'')+String(b.month).padStart(2,'0')));
+  result.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
   return result;
 }
 
@@ -5832,7 +5858,7 @@ function updateTeacherBatchBar() {
 
 function getTeacherJournalMonthRangeLabel(journals) {
   if (!journals.length) return '';
-  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
   // 學期+月份換算為西元年/月（與 student.html 的 getJournalMonthRangeLabel 邏輯一致）
   // 第1學期：7~12月為當年，1月為隔年；第2學期：2~6月皆為隔年
   const toCEYearMonth = (j) => {
@@ -6009,7 +6035,7 @@ async function exportSemesterPDF() {
     const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '月記資料');
     let journals = userJournalData(jSnap);
     if (startStr && endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-    journals.sort((a,b) => ((a.seatNo||'')+String(a.month).padStart(2,'0')).localeCompare((b.seatNo||'')+String(b.month).padStart(2,'0')));
+    journals.sort((a,b) => (a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
     if (!journals.length) {
       if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>無資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">無月記資料可匯出</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
       return toast('無月記資料可匯出', 'error');
@@ -6042,7 +6068,7 @@ async function exportStudentPDF() {
     const jSnap = await getDocsWithFallback(collectionGroup(db, 'journals'), '學生月記資料');
     const journals = userJournalData(jSnap)
       .filter(j => String(j.seatNo) === String(seat) && (semester ? j.semester === semester : true))
-      .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+      .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
     if (!journals.length) {
       if (win && !win.closed) { win.document.open(); win.document.write('<html><head><meta charset="UTF-8"><title>無資料</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;"><p style="font-size:18px;color:#555;">該學生尚無月記</p><button onclick="window.close()" style="margin-top:20px;padding:10px 24px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">✕ 關閉</button></body></html>'); win.document.close(); }
       return toast('該學生尚無月記', 'error');

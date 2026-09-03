@@ -1,7 +1,60 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v38
+ * 老師端自動化測試 v40
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v40 修正（2026-09-03）：使用者複查「薪資明細」表格時發現，第二十二節「跨學期座號
+ * 合併問題」修法當時列出的 5 處裡漏了這一張表——`renderSalaryStatsFromCache()` 裡
+ * 「學生薪資總覽」表格已經改用 `seatDisplayWithSemester(s.seatNo, s.semester,
+ * collidingSeatNos)` 顯示座號（撞號才加註學期，如「01（115-1）」），但緊接著同一個
+ * 函式裡的「薪資明細」表格座號欄位仍直接顯示裸 `j.seatNo`，沒有沿用同一次已經算好
+ * 的 `collidingSeatNos`。修法：座號欄位改呼叫 `seatDisplayWithSemester()`，其餘欄位
+ * （姓名／公司／月份／金額）不變。**同時釐清一個文件落差**：使用者提出「薪資統計／
+ * 工作類型」頁籤是否真的「預設空白→橫跨全部學期」，經追蹤 `initStatsDateSelects()`
+ * （路由切到 t-stats／t-journals／t-export 任一分頁時就會執行）確認：欄位若還是空的
+ * 會被自動帶入「目前學期」起訖日，只有使用者事後手動清空或擴大範圍才會出現跨學期
+ * 資料——第二十二節原文只強調「欄位沒有寫死的 HTML value」，沒提到這個自動帶入
+ * 步驟，容易讓人誤以為橫跨全部學期是預設就會看到的畫面。這不影響修法本身的必要性
+ * （手動清空/擴大範圍是真實會發生的操作路徑），完整說明見 AI_CONTEXT_狀態.md 對應
+ * 章節。
+ *   T-SEC-75  真執行 renderSalaryStatsFromCache()（比照既有 T-SEC-73 覆寫下游5個
+ *             渲染函式＋getSelectedCompanies 的隔離做法）：座號01橫跨114-2／115-1
+ *             兩學期時，兩筆分別正確加註「01（114-2）」／「01（115-1）」；座號02
+ *             無撞號的對照組維持裸座號「02」，確認修法沒有誤傷正常情境。
+ * 開發階段已用 Node 直接從實際 teacher.html 抽取 computeCollidingSeatNos()／
+ * seatDisplayWithSemester() 本體，真執行驗證撞號情境下的座號顯示格式，確認邏輯
+ * 正確後才寫入測試斷言。
+ *
+ * v39 修正（2026-09-03）：與 student_test.js 的 v42 對稱——第1學期跨年（12月→隔年1月）
+ * 月份排序錯誤，使用者回報並經逐一核對程式碼確認屬實，完整背景見該檔案同日
+ * changelog／AI_CONTEXT_狀態.md 對應章節。teacher.html 除了跟 student.html 對稱的裸
+ * 數字排序寫法，額外有5處用字串拼接排序（String(month).padStart(2,'0') 後
+ * localeCompare()），本質是同一種bug，這次一併修正。新增共用純函式
+ * monthOrderInSemester(semester, month)（teacher.html 獨立一份，同名不 import，比照
+ * 專案既有慣例），取代 loadTeacherDashboard()（已逾期未達標／跨月待複審兩處）／
+ * getTeacherJournalMonthRangeLabel()／exportAllStatsExcel()（主排序＋Excel「月記清單」
+ * 工作表兩處）／renderSalaryStatsFromCache()（「薪資明細」表格）／
+ * filterAndSortJournals()（月記總覽）／exportSemesterPDF()／exportStudentPDF() 共9處
+ * 排序。monthOrderInSemester() 內部對缺失/非法 semester 做防呆，理由同 student.html。
+ *   T-SEC-70  對稱 S-SEC-61：真執行 monthOrderInSemester()（teacher.html 獨立一份），
+ *             同一套驗證（時序遞增、1月晚於12月、未知月份回傳99、防呆不拋例外）。
+ *   T-SEC-71  對稱 S-SEC-62：真執行 getTeacherJournalMonthRangeLabel()，重現使用者
+ *             原始回報bug情境（12月＋1月範圍標籤顛倒）。
+ *   T-SEC-72  真執行 filterAndSortJournals()（月記總覽篩選排序，函式本身註解已明確
+ *             標示「在前端執行，不走網路」）：驗證同一學期內7月／12月／1月排序時序
+ *             正確為 7,12,1。
+ *   T-SEC-73  真執行 renderSalaryStatsFromCache()（比照既有 T-SEC-59 覆寫下游5個渲染
+ *             函式＋getSelectedCompanies 的隔離做法）：驗證「薪資明細」表格同一學生
+ *             橫跨12月與隔年1月時，月份排序時序正確。
+ *   T-SEC-74  靜態比對 loadTeacherDashboard()／exportAllStatsExcel()／
+ *             exportSemesterPDF()／exportStudentPDF()：確認皆已改用
+ *             monthOrderInSemester()，不再殘留裸數字或 padStart 字串拼接排序（這幾處
+ *             因會讀 Firestore／DOM 且函式體龐大，比照既有 T-SEC-53／T-SEC-62 取捨，
+ *             改用靜態比對而非真執行覆寫）。
+ * 開發階段已用 Node 直接從實際 teacher.html 逐字抽取（括號配對，非天真 regex）上述
+ * 函式本體，對修好版本與原始未修復版本分別跑過一輪同一套斷言，確認新斷言在原始版本
+ * 上正確 fail、在修好版本上正確 pass。**以上沙盒驗證無法取代使用者本機
+ * Step2_RunTests.bat 對已部署正式網站的真實執行結果，待其確認。**
  *
  * v38 修正（2026-08-31）：使用者提供的一輪程式碼稽核，確認並修復兩項問題（皆純前端
  * 修法，未異動 rule.txt）：
@@ -4117,6 +4170,232 @@ async function runTeacherTests(page, log) {
     if (!result.cRemoved) throw new Error('第3筆（真正刪除成功，但排在失敗項目之後）沒有從快取移除——這正是 slice(0, success) 的bug：漏標排在失敗項目之後的真正刪除成功項目');
     if (!result.ctrlRemains) throw new Error('對照組（不在這次刪除範圍內）被意外從快取移除，代表快取修剪邏輯可能誤傷範圍外的項目');
   });
+
+  // ════════════════════════════════════════
+  // T-SEC-70 ～ T-SEC-74　2026-09-03 新增：第1學期跨年（12月→隔年1月）月份排序錯誤
+  // （使用者回報，對稱 student_test.js 的 S-SEC-61～64，見本檔案開頭 v39 changelog）
+  // ════════════════════════════════════════
+  // 背景：第1學期固定 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個
+  // 學期最後一個月。任何直接用裸月份數字相減排序、或用 String(month).padStart(2,'0')
+  // 後 localeCompare() 字串拼接排序的地方，只要資料同時橫跨12月與隔年1月，1月就會被
+  // 排到跟時間順序相反的位置。修法新增共用純函式 monthOrderInSemester(semester, month)，
+  // 取代 teacher.html 內 9 處排序。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-70 monthOrderInSemester() 正確反映學期內月份的真實時序（1月在第1學期是最後一個月，不是數字最小的月份），並對缺失/非法 semester 防呆不拋例外', async () => {
+    // 對稱 student_test.js 的 S-SEC-61（teacher.html 獨立一份同名函式）。
+    const result = await page.evaluate(() => {
+      if (typeof monthOrderInSemester !== 'function') return { skip: true };
+      const sem1Order = [7,8,9,10,11,12,1].map(m => monthOrderInSemester('115-1', m));
+      const sem2Order = [2,3,4,5,6].map(m => monthOrderInSemester('115-2', m));
+      let undefinedThrew = false, nullThrew = false;
+      try { monthOrderInSemester(undefined, 7); } catch (e) { undefinedThrew = true; }
+      try { monthOrderInSemester(null, 7); } catch (e) { nullThrew = true; }
+      return {
+        skip: false,
+        sem1Order,
+        sem2Order,
+        janAfterDec: monthOrderInSemester('115-1', 1) > monthOrderInSemester('115-1', 12),
+        julyIsFirst: monthOrderInSemester('115-1', 7) === 0,
+        unknownMonth: monthOrderInSemester('115-1', 99),
+        undefinedThrew,
+        nullThrew,
+      };
+    });
+    if (result.skip) return;
+    const strictlyIncreasing = arr => arr.every((v, i) => i === 0 || v > arr[i - 1]);
+    if (!strictlyIncreasing(result.sem1Order))
+      throw new Error(`第1學期依 7,8,9,10,11,12,1 這個時序取值應該嚴格遞增，實際：${JSON.stringify(result.sem1Order)}`);
+    if (!strictlyIncreasing(result.sem2Order))
+      throw new Error(`第2學期依 2,3,4,5,6 這個時序取值應該嚴格遞增，實際：${JSON.stringify(result.sem2Order)}`);
+    if (!result.janAfterDec)
+      throw new Error('1月在第1學期的時序位置應該晚於12月（1月是隔年1月，是整個學期最後一個月）——這正是本次要修正的核心bug：1月的數字比12月小，但時序上排在後面');
+    if (!result.julyIsFirst)
+      throw new Error('7月應該是第1學期時序位置0（第一個月）');
+    if (result.unknownMonth !== 99)
+      throw new Error(`不屬於該學期的月份應回傳99（排到最後而不是讓排序整個出錯），實際：${result.unknownMonth}`);
+    if (result.undefinedThrew)
+      throw new Error('semester 為 undefined 時 monthOrderInSemester() 不應該拋出例外——呼叫端可能未加 ||\'\' 防呆直接傳入 a.semester，拋例外會讓整個 .sort() 連帶失敗，比原本排序跑掉更嚴重');
+    if (result.nullThrew)
+      throw new Error('semester 為 null 時 monthOrderInSemester() 同樣不應該拋出例外');
+  });
+
+  await test('T-SEC-71 getTeacherJournalMonthRangeLabel() 批次選取範圍橫跨12月與隔年1月時，範圍標籤正確顯示「12月~隔年1月」而非顛倒（使用者原始回報的bug情境）', async () => {
+    // 對稱 student_test.js 的 S-SEC-62。
+    const result = await page.evaluate(() => {
+      if (typeof getTeacherJournalMonthRangeLabel !== 'function') return { skip: true };
+      const decJanLabel = getTeacherJournalMonthRangeLabel([
+        { semester: '115-1', month: 12 },
+        { semester: '115-1', month: 1 },
+      ]);
+      const fullSemLabel = getTeacherJournalMonthRangeLabel(
+        [7,8,9,10,11,12,1].map(m => ({ semester: '115-1', month: m }))
+      );
+      return { skip: false, decJanLabel, fullSemLabel };
+    });
+    if (result.skip) return;
+    if (result.decJanLabel !== '2026/12~2027/1，共2筆')
+      throw new Error(`只選12月＋1月時範圍標籤應為「2026/12~2027/1，共2筆」，實際：「${result.decJanLabel}」——使用者原始回報的bug是顯示成顛倒的「2027/1~2026/12」`);
+    if (result.fullSemLabel !== '2026/7~2027/1，共7筆')
+      throw new Error(`整個第1學期(7~1月)全選時範圍標籤應為「2026/7~2027/1，共7筆」，實際：「${result.fullSemLabel}」`);
+  });
+
+  await test('T-SEC-72 filterAndSortJournals()（月記總覽）在學期橫跨12月與隔年1月時，排序時序正確', async () => {
+    // filterAndSortJournals(journals, startStr, endStr, search) 是純函式（函式本身
+    // 註解已明確標示「篩選 + 排序（在前端執行，不走網路）」），不碰 Firestore，可安全
+    // 直接呼叫本體驗證。
+    const result = await page.evaluate(() => {
+      if (typeof filterAndSortJournals !== 'function') return { skip: true };
+      const journals = [7, 12, 1].map(m => ({ semester: '999-1', seatNo: '01', month: m }));
+      const sorted = filterAndSortJournals(journals, '', '', '');
+      return { skip: false, order: sorted.map(j => j.month) };
+    });
+    if (result.skip) return;
+    if (result.order.join(',') !== '7,12,1')
+      throw new Error(`filterAndSortJournals() 同一學期內應依時序排序為 7,12,1，實際：${result.order.join(',')}——若1月排最前面，代表又退回裸數字/字串比較`);
+  });
+
+  await test('T-SEC-73 renderSalaryStatsFromCache()「薪資明細」表格在同一學生橫跨12月與隔年1月時，月份排序時序正確', async () => {
+    // 比照既有 T-SEC-59：直接呼叫真正部署的 renderSalaryStatsFromCache()，暫時覆寫它
+    // 下游會呼叫的5個渲染函式為 no-op、以及 getSelectedCompanies()（讀真實頁面上的
+    // 公司核取方塊，會把合成公司名濾掉），呼叫結束後即時還原。
+    const result = await page.evaluate(() => {
+      if (typeof renderSalaryStatsFromCache !== 'function') return { skip: true };
+      const origFocus = window.renderSalaryFocus;
+      const origAlerts = window.renderSalaryAlerts;
+      const origLine = window.renderSalaryLineChart;
+      const origBar = window.renderSalaryBarChart;
+      const origSwitch = window.switchSalaryDetailTab;
+      const origGetSelectedCompanies = window.getSelectedCompanies;
+      try {
+        window.renderSalaryFocus = () => {};
+        window.renderSalaryAlerts = () => {};
+        window.renderSalaryLineChart = () => {};
+        window.renderSalaryBarChart = () => {};
+        window.switchSalaryDetailTab = () => {};
+        window.getSelectedCompanies = () => null;
+
+        const journals = [7, 12, 1].map(m => ({ seatNo: '01', semester: '999-1', studentName: '測試生', company: 'A公司', month: m, salary: 30000 }));
+        const cache = { allActiveJournals: journals, salaryJournals: journals, stuCompanyMap: {}, stuInfoMap: {} };
+        renderSalaryStatsFromCache(cache);
+        const html = document.getElementById('salary-detail-table').innerHTML;
+        return {
+          skip: false,
+          idx7: html.indexOf('7月'),
+          idx12: html.indexOf('12月'),
+          idx1: html.indexOf('1月'),
+        };
+      } finally {
+        window.renderSalaryFocus = origFocus;
+        window.renderSalaryAlerts = origAlerts;
+        window.renderSalaryLineChart = origLine;
+        window.renderSalaryBarChart = origBar;
+        window.switchSalaryDetailTab = origSwitch;
+        window.getSelectedCompanies = origGetSelectedCompanies;
+      }
+    });
+    if (result.skip) return;
+    if (!(result.idx7 >= 0 && result.idx7 < result.idx12 && result.idx12 < result.idx1))
+      throw new Error(`「薪資明細」表格月份排序應為 7月→12月→1月（時序），實際位置：7月=${result.idx7}, 12月=${result.idx12}, 1月=${result.idx1}——若1月排最前面，代表又退回裸座號+padStart字串排序`);
+  });
+
+  await test('T-SEC-75 renderSalaryStatsFromCache()「薪資明細」表格座號欄位在跨學期同座號撞號時正確加註學期（沿用「學生薪資總覽」已算好的 collidingSeatNos），沒撞號時維持裸座號', async () => {
+    // 2026-09-03 新增：使用者回報「薪資明細」表格座號欄位原本沒有沿用同一函式裡
+    // 已經算好的 collidingSeatNos，跨學期同座號的兩位不同學生在這張表上會顯示成
+    // 看起來像同一人的兩筆紀錄。修法只是把座號欄位改呼叫 seatDisplayWithSemester()，
+    // 跟「學生薪資總覽」表格（studentMap 那份）用同一份撞號偵測結果，比照既有
+    // T-SEC-73 的覆寫/還原模式，額外驗證座號欄位本身的顯示格式。
+    const result = await page.evaluate(() => {
+      if (typeof renderSalaryStatsFromCache !== 'function') return { skip: true };
+      const origFocus = window.renderSalaryFocus;
+      const origAlerts = window.renderSalaryAlerts;
+      const origLine = window.renderSalaryLineChart;
+      const origBar = window.renderSalaryBarChart;
+      const origSwitch = window.switchSalaryDetailTab;
+      const origGetSelectedCompanies = window.getSelectedCompanies;
+      try {
+        window.renderSalaryFocus = () => {};
+        window.renderSalaryAlerts = () => {};
+        window.renderSalaryLineChart = () => {};
+        window.renderSalaryBarChart = () => {};
+        window.switchSalaryDetailTab = () => {};
+        window.getSelectedCompanies = () => null;
+
+        // 座號01橫跨114-2／115-1兩學期（真撞號，兩個不同學生）；座號02只在115-1
+        // 出現（無撞號，對照組，確認修法沒有誤傷正常情境）。
+        const journals = [
+          { seatNo: '01', semester: '114-2', studentName: '甲同學', company: 'A公司', month: 6, salary: 28000 },
+          { seatNo: '01', semester: '115-1', studentName: '乙同學', company: 'B公司', month: 7, salary: 30000 },
+          { seatNo: '02', semester: '115-1', studentName: '丙同學', company: 'C公司', month: 7, salary: 32000 },
+        ];
+        const cache = { allActiveJournals: journals, salaryJournals: journals, stuCompanyMap: {}, stuInfoMap: {} };
+        renderSalaryStatsFromCache(cache);
+        const html = document.getElementById('salary-detail-table').innerHTML;
+        return { skip: false, html };
+      } finally {
+        window.renderSalaryFocus = origFocus;
+        window.renderSalaryAlerts = origAlerts;
+        window.renderSalaryLineChart = origLine;
+        window.renderSalaryBarChart = origBar;
+        window.switchSalaryDetailTab = origSwitch;
+        window.getSelectedCompanies = origGetSelectedCompanies;
+      }
+    });
+    if (result.skip) return;
+    if (!result.html.includes('01（114-2）'))
+      throw new Error(`座號01在114-2學期那筆應顯示加註「01（114-2）」，實際HTML片段：${result.html.slice(0, 400)}`);
+    if (!result.html.includes('01（115-1）'))
+      throw new Error(`座號01在115-1學期那筆應顯示加註「01（115-1）」，實際HTML片段：${result.html.slice(0, 400)}`);
+    if (!/<td>02<\/td>/.test(result.html))
+      throw new Error('座號02沒有跟其他學期撞號，應該維持裸座號「02」顯示，不應該被誤加註學期');
+  });
+
+  await test('T-SEC-74 loadTeacherDashboard()（已逾期未達標／跨月待複審）／exportAllStatsExcel()／exportSemesterPDF()／exportStudentPDF() 皆已改用 monthOrderInSemester() 排序月份，不再殘留跨年月份排序錯誤的裸數字或字串拼接寫法', async () => {
+    // 這幾個函式會讀 Firestore／DOM 且函式體龐大，比照既有 T-SEC-53／T-SEC-62 取捨，
+    // 不貿然真執行覆寫全域函式，改用靜態原始碼比對（codeOnly() 過濾註解，同陷阱19
+    // 既有做法）。分別針對每個函式內部實際的排序寫法定位，而非泛用的一次性 regex，
+    // 避免其中一處被誤改壞、卻被另一處仍存在的 monthOrderInSemester() 呼叫蓋過去。
+    const result = await page.evaluate(() => {
+      const fnNames = ['loadTeacherDashboard', 'exportAllStatsExcel', 'exportSemesterPDF', 'exportStudentPDF'];
+      if (fnNames.some(name => typeof window[name] !== 'function')) return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+
+      const dash = codeOnly(loadTeacherDashboard.toString());
+      const excel = codeOnly(exportAllStatsExcel.toString());
+      const semPdf = codeOnly(exportSemesterPDF.toString());
+      const stuPdf = codeOnly(exportStudentPDF.toString());
+
+      return {
+        skip: false,
+        dashOverdueOk: /overdueGroupsRaw\.sort\(\(a,\s*b\)\s*=>\s*monthOrderInSemester\(sem,\s*a\.month\)\s*-\s*monthOrderInSemester\(sem,\s*b\.month\)\)/.test(dash),
+        dashCrossMonthOk: /crossMonthMap\)\.sort\(\(a,\s*b\)\s*=>[\s\S]{0,300}monthOrderInSemester\(b\.semester,b\.month\)\s*-\s*monthOrderInSemester\(a\.semester,a\.month\)/.test(dash),
+        excelMainSortOk: /\(a\.seatNo\|\|''\)\.localeCompare\(b\.seatNo\|\|''\)\s*\|\|\s*monthOrderInSemester\(a\.semester,a\.month\)-monthOrderInSemester\(b\.semester,b\.month\)/.test(excel),
+        excelJournalListOk: /journalListSource\.sort\(\(a,b\)=>\(a\.seatNo\|\|''\)\.localeCompare\(b\.seatNo\|\|''\)\s*\|\|\s*monthOrderInSemester/.test(excel),
+        semPdfOk: /journals\.sort\(\(a,b\)\s*=>\s*\(a\.seatNo\|\|''\)\.localeCompare\(b\.seatNo\|\|''\)\s*\|\|\s*monthOrderInSemester/.test(semPdf),
+        stuPdfOk: /\.sort\(\(a,b\)\s*=>\s*\(a\.semester\|\|''\)\.localeCompare\(b\.semester\|\|''\)\s*\|\|\s*monthOrderInSemester\(a\.semester,a\.month\)-monthOrderInSemester\(b\.semester,b\.month\)\)/.test(stuPdf),
+        anyHasPadStartMonth: [dash, excel, semPdf, stuPdf].some(fnStr => /String\s*\(\s*[ab]\.month\s*\)\s*\.padStart/.test(fnStr)),
+        anyHasNaiveMonthSub: [dash, excel, semPdf, stuPdf].some(fnStr => /(^|[^a-zA-Z_.])[ab]\.month\s*-\s*[ab]\.month([^a-zA-Z_]|$)/.test(fnStr)),
+      };
+    });
+    if (result.skip) return;
+    if (!result.dashOverdueOk)
+      throw new Error('loadTeacherDashboard()「已逾期未達標」（overdueGroupsRaw）排序找不到 monthOrderInSemester(sem, a.month)-monthOrderInSemester(sem, b.month) 比較式');
+    if (!result.dashCrossMonthOk)
+      throw new Error('loadTeacherDashboard()「跨月待複審」（crossMonthMap）排序找不到對應的 monthOrderInSemester() 比較式');
+    if (!result.excelMainSortOk)
+      throw new Error('exportAllStatsExcel() 主要 journals 排序找不到 monthOrderInSemester() 比較式，可能又退回字串拼接排序');
+    if (!result.excelJournalListOk)
+      throw new Error('exportAllStatsExcel() Excel「月記清單」工作表排序找不到 monthOrderInSemester() 比較式');
+    if (!result.semPdfOk)
+      throw new Error('exportSemesterPDF() 排序找不到 monthOrderInSemester() 比較式');
+    if (!result.stuPdfOk)
+      throw new Error('exportStudentPDF() 排序找不到 monthOrderInSemester() 比較式');
+    if (result.anyHasPadStartMonth)
+      throw new Error('這幾個函式裡仍殘留 String(month).padStart() 字串拼接排序寫法');
+    if (result.anyHasNaiveMonthSub)
+      throw new Error('這幾個函式裡仍殘留裸月份數字相減排序寫法（a.month-b.month）');
+  });
+
 
   return results;
 }

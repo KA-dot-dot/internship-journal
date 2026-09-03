@@ -1052,6 +1052,25 @@ function getSemesterMonths(semKey) {
   return half === 1 ? [7,8,9,10,11,12,1] : [2,3,4,5,6];
 }
 
+// 2026-09-03 補修：學期內「月份數字大小」跟「時序」不一致——第1學期固定
+// 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個學期最後一個月。
+// 任何直接用裸月份數字相減排序（如 a.month-b.month）的地方，只要資料同時橫跨
+// 12月與隔年1月，1月就會被排到跟時間順序完全相反的位置（升冪排序時1月排最前面、
+// 降冪排序時1月排最後面）。共用函式回傳「這個月份在其所屬學期裡的時序位置」
+// （0起算，依 getSemesterMonths() 既有的月份順序陣列查表，不重複定義第三份
+// [7,8,9,10,11,12,1]），呼叫端一律用一般數字比較語法排序，不需要另外處理跨年
+// 進位。查不到（理論上不該發生的異常資料，如 month 不屬於該學期）時回傳 99，
+// 排到最後而不是讓整個排序邏輯出錯。
+function monthOrderInSemester(semester, month) {
+  // 防呆：getSemesterMonths() 內部會對 semester 呼叫 .split('-')，若呼叫端直接傳入
+  // 可能缺漏 semester 欄位的資料（理論上 rule.txt 已要求月記文件必須有 semester，但
+  // 這裡刻意不假設呼叫端一定會先做 ||'' 防呆——traversal 到這裡拋例外會讓整個
+  // .sort() 連帶整頁載入失敗，比原本「排序跑掉」的問題嚴重得多，值得多一行防禦）。
+  const order = getSemesterMonths(String(semester || ''));
+  const idx = order.indexOf(Number(month));
+  return idx === -1 ? 99 : idx;
+}
+
 function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;
@@ -1585,7 +1604,7 @@ function toggleStatDetail(key) {
 
 function renderSubmittedMonthsDetail(journals, deadlineDataMap) {
   if (!journals.length) return '<div class="stat-detail-empty">尚無已繳交的月記</div>';
-  const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (b.month||0)-(a.month||0));
+  const sorted = [...journals].sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || monthOrderInSemester(b.semester,b.month)-monthOrderInSemester(a.semester,a.month));
   return sorted.map(j => {
     const deadlineDoc = deadlineDataMap[`${j.semester}-${j.month}`];
     const status = isStudentJournalLate(j, deadlineDoc) ? '▲ 遲繳' : '✅';
@@ -1869,7 +1888,7 @@ async function getOverdueMonths(relevantSemesters, journals, deadlineDataMap = n
     const entriesCount = entriesByKey.get(key) || 0;
     if (entriesCount < required) overdue.push({ semester: dd.semester, month: Number(dd.month), entriesCount, required });
   });
-  return overdue.sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || (a.month||0)-(b.month||0));
+  return overdue.sort((a,b) => (b.semester||'').localeCompare(a.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
 }
 
 async function loadStudentDashboard() {
@@ -1891,7 +1910,7 @@ async function loadStudentDashboard() {
     ]);
     const journals = snap.docs.map(d => d.data());
     // 依 semester 再依 month 排序（與 loadStudentHistory()/exportMyPDF() 同邏輯一致），避免 Firestore 回傳順序不固定
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
 
     const deadlineDataMap = {};
     deadlinesSnap.docs.forEach(d => {
@@ -1988,7 +2007,7 @@ async function loadStudentStats() {
   try {
     const snap = await getMyJournalDocs();
     const journals = snap.docs.map(d => d.data());
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
     renderStudentSalaryLineChart(journals);
     renderStudentCityChart(journals);
     renderStudentWorkTypeChart(journals);
@@ -4149,7 +4168,7 @@ async function loadStudentHistory() {
         return normalised === typeFilter;
       }));
     }
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
     window._studentHistoryJournals = journals;
     const toolbar = document.getElementById('s-batch-toolbar');
     if (toolbar) toolbar.style.display = 'none';
@@ -4283,7 +4302,7 @@ function updateHistoryBatchBar() {
 
 function getJournalMonthRangeLabel(journals) {
   if (!journals.length) return '';
-  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+  const sorted = [...journals].sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
   // 學期+月份換算為西元年/月（與 journalMonthInRange/pdfJournalYear 的學期定義一致：
   // 第1學期 7~12月當年、1月隔年；第2學期 2~6月皆隔年）
   const toCEYearMonth = (j) => {
@@ -4379,7 +4398,7 @@ async function exportMyPDF() {
     const snap = await getMyJournalDocs(30000);
     let journals = snap.docs.map(d => d.data());
     if (startStr || endStr) journals = journals.filter(j => journalMonthInRange(j, startStr, endStr));
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.month||0)-(b.month||0));
+    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
     if (!journals.length) {
       if (win && !win.closed) {
         win.document.open();

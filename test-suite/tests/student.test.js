@@ -1,7 +1,43 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v41
+ * 學生端自動化測試 v42
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v42 修正（2026-09-03）：第1學期跨年（12月→隔年1月）月份排序錯誤——第1學期固定
+ * 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個學期最後一個月。使用者
+ * 回報並經逐一核對程式碼確認屬實：任何直接用裸月份數字相減排序（a.month-b.month）的
+ * 地方，只要資料同時橫跨12月與隔年1月，1月就會被排到跟時間順序相反的位置——升冪排序
+ * 時1月排最前面、降冪排序時1月排最後面。新增共用純函式 monthOrderInSemester(semester,
+ * month)（沿用既有 getSemesterMonths() 的月份順序陣列查表取得時序位置，不重複定義
+ * 第三份 [7,8,9,10,11,12,1]），取代 renderSubmittedMonthsDetail()／getOverdueMonths()／
+ * loadStudentDashboard()／loadStudentStats()／loadStudentHistory()／
+ * getJournalMonthRangeLabel()／exportMyPDF() 共7處裸月份數字排序。monthOrderInSemester()
+ * 內部對缺失/非法 semester 做防呆（String(semester||'')），避免呼叫端未加 ||'' 直接傳入
+ * a.semester 時，一筆資料缺 semester 欄位就讓整個 .sort() 拋例外、比原本排序跑掉更嚴重。
+ * 與 teacher_test.js 的 v39（T-SEC-70～74）對稱——teacher.html 額外有5處用字串拼接
+ * （String(month).padStart(2,'0') 後 localeCompare()）的同類排序，一併修正。完整背景見
+ * AI_CONTEXT_狀態.md 對應章節。
+ *   S-SEC-61  真執行 monthOrderInSemester()：純函式，驗證第1/2學期各月份時序位置嚴格
+ *             遞增、1月時序位置晚於12月（核心bug情境）、不屬於該學期的月份回傳99、
+ *             semester 為 undefined/null 時安全回傳不拋例外。
+ *   S-SEC-62  真執行 getJournalMonthRangeLabel()：重現使用者原始回報的bug情境（批次只
+ *             勾選12月＋1月兩筆），確認範圍標籤正確顯示「2026/12~2027/1」而非顛倒的
+ *             「2027/1~2026/12」；另外驗證整個第1學期(7~1月)全選時範圍標籤正確。
+ *   S-SEC-63  真執行 getOverdueMonths()／renderSubmittedMonthsDetail()：同一學期內
+ *             7月／12月／1月三個月份同時存在時，前者（先提醒最早逾期）驗證升冪時序
+ *             正確排出 7,12,1；後者（新到舊）驗證降冪時序正確排出 1,12,7（不是純數字
+ *             升冪/降冪會得出的 1,7,12 或 12,7,1）。
+ *   S-SEC-64  靜態比對 loadStudentDashboard()／loadStudentStats()／loadStudentHistory()／
+ *             exportMyPDF()：確認四處皆已改用 monthOrderInSemester() 排序比較式，且
+ *             不再殘留舊版 (a.month||0)-(b.month||0) 裸數字比較（這四處會讀 Firestore／
+ *             currentUser，比照 S-SEC-49 既有取捨，不貿然真執行覆寫全域函式，改用
+ *             靜態比對）。
+ * 開發階段已用 Node 直接從實際 student.html 逐字抽取（括號配對，非天真 regex）
+ * monthOrderInSemester()／getJournalMonthRangeLabel()／getOverdueMonths()／
+ * renderSubmittedMonthsDetail() 及上述四個 Firestore 相關函式本體，對修好版本與原始
+ * 未修復版本分別跑過一輪同一套斷言，確認新斷言在原始版本上正確 fail、在修好版本上
+ * 正確 pass，不是巧合通過。**以上沙盒驗證無法取代使用者本機 Step2_RunTests.bat 對
+ * 已部署正式網站的真實執行結果，待其確認。**
  *
  * v41 修正（2026-08-31）：✗未繳／△篇數不足（getOverdueMonths()）原本鎖死只查「目前
  * 學期」，跟✓已繳／▲遲繳（getCompletedJournals()）不對稱——後者對這個帳號名下全部
@@ -3907,6 +3943,135 @@ async function runStudentTests(page, browserContext, log) {
     if (!result.filledNormal || !result.filledNormal.includes('500 元'))
       throw new Error(`salary=500 應顯示「本月薪資：500 元」，實際：${result.filledNormal}`);
   });
+
+  // ════════════════════════════════════════
+  // S-SEC-61 ～ S-SEC-64　2026-09-03 新增：第1學期跨年（12月→隔年1月）月份排序錯誤
+  // （使用者回報，見本檔案開頭 v42 changelog）
+  // ════════════════════════════════════════
+  // 背景：第1學期固定 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個
+  // 學期最後一個月。任何直接用裸月份數字相減排序（a.month-b.month）的地方，只要資料
+  // 同時橫跨12月與隔年1月，1月就會被排到跟時間順序相反的位置。修法新增共用純函式
+  // monthOrderInSemester(semester, month)，取代 7 處裸月份數字排序。與 teacher_test.js
+  // 的 T-SEC-70～74 對稱。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-61 monthOrderInSemester() 正確反映學期內月份的真實時序（1月在第1學期是最後一個月，不是數字最小的月份），並對缺失/非法 semester 防呆不拋例外', async () => {
+    // 純函式，直接呼叫本體驗證，而非只做靜態字串比對。
+    const result = await page.evaluate(() => {
+      if (typeof monthOrderInSemester !== 'function') return { skip: true };
+      const sem1Order = [7,8,9,10,11,12,1].map(m => monthOrderInSemester('115-1', m));
+      const sem2Order = [2,3,4,5,6].map(m => monthOrderInSemester('115-2', m));
+      let undefinedThrew = false, nullThrew = false;
+      try { monthOrderInSemester(undefined, 7); } catch (e) { undefinedThrew = true; }
+      try { monthOrderInSemester(null, 7); } catch (e) { nullThrew = true; }
+      return {
+        skip: false,
+        sem1Order,
+        sem2Order,
+        janAfterDec: monthOrderInSemester('115-1', 1) > monthOrderInSemester('115-1', 12),
+        julyIsFirst: monthOrderInSemester('115-1', 7) === 0,
+        unknownMonth: monthOrderInSemester('115-1', 99),
+        undefinedThrew,
+        nullThrew,
+      };
+    });
+    if (result.skip) return;
+    const strictlyIncreasing = arr => arr.every((v, i) => i === 0 || v > arr[i - 1]);
+    if (!strictlyIncreasing(result.sem1Order))
+      throw new Error(`第1學期依 7,8,9,10,11,12,1 這個時序取值應該嚴格遞增，實際：${JSON.stringify(result.sem1Order)}`);
+    if (!strictlyIncreasing(result.sem2Order))
+      throw new Error(`第2學期依 2,3,4,5,6 這個時序取值應該嚴格遞增，實際：${JSON.stringify(result.sem2Order)}`);
+    if (!result.janAfterDec)
+      throw new Error('1月在第1學期的時序位置應該晚於12月（1月是隔年1月，是整個學期最後一個月）——這正是本次要修正的核心bug：1月的數字比12月小，但時序上排在後面');
+    if (!result.julyIsFirst)
+      throw new Error('7月應該是第1學期時序位置0（第一個月）');
+    if (result.unknownMonth !== 99)
+      throw new Error(`不屬於該學期的月份應回傳99（排到最後而不是讓排序整個出錯），實際：${result.unknownMonth}`);
+    if (result.undefinedThrew)
+      throw new Error('semester 為 undefined 時 monthOrderInSemester() 不應該拋出例外——呼叫端可能未加 ||\'\' 防呆直接傳入 a.semester，拋例外會讓整個 .sort() 連帶失敗，比原本排序跑掉更嚴重');
+    if (result.nullThrew)
+      throw new Error('semester 為 null 時 monthOrderInSemester() 同樣不應該拋出例外');
+  });
+
+  await test('S-SEC-62 getJournalMonthRangeLabel() 批次選取範圍橫跨12月與隔年1月時，範圍標籤正確顯示「12月~隔年1月」而非顛倒（使用者原始回報的bug情境）', async () => {
+    const result = await page.evaluate(() => {
+      if (typeof getJournalMonthRangeLabel !== 'function') return { skip: true };
+      // 重現使用者原始回報情境：批次刪除／匯出範圍只勾選12月＋1月兩筆
+      const decJanLabel = getJournalMonthRangeLabel([
+        { semester: '115-1', month: 12 },
+        { semester: '115-1', month: 1 },
+      ]);
+      // 整個第1學期（7~1月）全選，範圍應為「7月~隔年1月」
+      const fullSemLabel = getJournalMonthRangeLabel(
+        [7,8,9,10,11,12,1].map(m => ({ semester: '115-1', month: m }))
+      );
+      return { skip: false, decJanLabel, fullSemLabel };
+    });
+    if (result.skip) return;
+    if (result.decJanLabel !== '2026/12~2027/1，共2筆')
+      throw new Error(`只選12月＋1月時範圍標籤應為「2026/12~2027/1，共2筆」，實際：「${result.decJanLabel}」——使用者原始回報的bug是顯示成顛倒的「2027/1~2026/12」`);
+    if (result.fullSemLabel !== '2026/7~2027/1，共7筆')
+      throw new Error(`整個第1學期(7~1月)全選時範圍標籤應為「2026/7~2027/1，共7筆」，實際：「${result.fullSemLabel}」`);
+  });
+
+  await test('S-SEC-63 getOverdueMonths()／renderSubmittedMonthsDetail() 在學期橫跨12月與隔年1月時，時序排序正確（1月不會被排到升冪排序最前面，也不會被排到降冪排序最後面）', async () => {
+    const result = await page.evaluate(async () => {
+      if (typeof getOverdueMonths !== 'function' || typeof renderSubmittedMonthsDetail !== 'function' || typeof semMonthToLabel !== 'function') return { skip: true };
+
+      // ① getOverdueMonths()：同一學期內 7月／12月／1月皆早已過期且完全未繳，函式既有
+      // 「同一學期內先提醒最早逾期的月份」慣例，時序上應排出 7→12→1（升冪）。
+      const deadlineDataMap = {
+        '999-1-7':  { semester: '999-1', month: 7,  closeDate: '2000-01-01', minEntries: 1 },
+        '999-1-12': { semester: '999-1', month: 12, closeDate: '2000-01-01', minEntries: 1 },
+        '999-1-1':  { semester: '999-1', month: 1,  closeDate: '2000-01-01', minEntries: 1 },
+      };
+      const overdue = await getOverdueMonths(['999-1'], [], deadlineDataMap);
+      const overdueMonths = overdue.filter(o => o.semester === '999-1').map(o => o.month);
+
+      // ② renderSubmittedMonthsDetail()：同一學期已繳交7月／12月／1月，「新到舊」降冪
+      // 排序時，時序上最新的1月應排最前面，7月排最後面。
+      const journals = [7, 12, 1].map(m => ({ semester: '999-1', month: m, entries: [{}] }));
+      const html = renderSubmittedMonthsDetail(journals, deadlineDataMap);
+      const idx7 = html.indexOf(semMonthToLabel('999-1', 7));
+      const idx12 = html.indexOf(semMonthToLabel('999-1', 12));
+      const idx1 = html.indexOf(semMonthToLabel('999-1', 1));
+
+      return { skip: false, overdueMonths, idx7, idx12, idx1 };
+    });
+    if (result.skip) return;
+    if (result.overdueMonths.join(',') !== '7,12,1')
+      throw new Error(`getOverdueMonths() 同一學期內應依時序「7月→12月→1月」排序（先提醒最早逾期的），實際：${result.overdueMonths.join(',')}——若1月排在最前面，代表又退回用裸月份數字比較大小`);
+    if (!(result.idx1 >= 0 && result.idx1 < result.idx12 && result.idx12 < result.idx7))
+      throw new Error(`renderSubmittedMonthsDetail() 應該以「新到舊」時序排列，1月（隔年、最新）應排最前，12月居中，7月（最舊）排最後，實際位置：1月=${result.idx1}, 12月=${result.idx12}, 7月=${result.idx7}`);
+  });
+
+  await test('S-SEC-64 loadStudentDashboard()／loadStudentStats()／loadStudentHistory()／exportMyPDF() 皆已改用 monthOrderInSemester() 排序月記，不再殘留跨年月份排序錯誤的裸數字比較寫法', async () => {
+    // 這四個函式會讀 Firestore／依賴 currentUser 登入狀態，比照 S-SEC-49 既有取捨，
+    // 不貿然真執行覆寫全域函式，改用靜態原始碼比對（codeOnly() 過濾註解，同陷阱19
+    // 既有做法，避免命中函式內解釋性註解裡也會出現的文字）。
+    const result = await page.evaluate(() => {
+      const fnNames = ['loadStudentDashboard', 'loadStudentStats', 'loadStudentHistory', 'exportMyPDF'];
+      if (fnNames.some(name => typeof window[name] !== 'function')) return { skip: true };
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const report = {};
+      fnNames.forEach(name => {
+        const fnStr = codeOnly(window[name].toString());
+        report[name] = {
+          usesMonthOrderInSemester: /monthOrderInSemester\s*\(\s*a\.semester\s*,\s*a\.month\s*\)\s*-\s*monthOrderInSemester\s*\(\s*b\.semester\s*,\s*b\.month\s*\)/.test(fnStr),
+          hasNaiveMonthSub: /\(a\.month\s*\|\|\s*0\)\s*-\s*\(b\.month\s*\|\|\s*0\)/.test(fnStr),
+        };
+      });
+      return { skip: false, report };
+    });
+    if (result.skip) return;
+    Object.entries(result.report).forEach(([name, r]) => {
+      if (!r.usesMonthOrderInSemester)
+        throw new Error(`${name}() 找不到 monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month) 排序比較式，月份排序可能又退回裸數字比較`);
+      if (r.hasNaiveMonthSub)
+        throw new Error(`${name}() 仍殘留舊版 (a.month||0)-(b.month||0) 裸數字排序寫法`);
+    });
+  });
+
 
   return results;
 }
