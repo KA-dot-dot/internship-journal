@@ -1,7 +1,45 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v42
+ * 學生端自動化測試 v43
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v43 修正（2026-09-04）：saveJournal() 的「快取新鮮度檢查」有跨裝置/跨分頁競態
+ * 條件——2026-07-13 版本只在偵測到「快取的 sem/month 跟目前選定不一致」時才現查一次
+ * Firestore，防的是 checkMonthDeadline() 非同步查詢還沒完成就被搶先按下儲存這條路徑，
+ * 但完全沒有防護「sem/month 從頭到尾沒變過、但同一份月記在另一台裝置/分頁背景被存過」
+ * 這條路徑——window._currentJournalCache 是純本機全域變數，手機開著同一個月份的填寫頁
+ * 很久沒關、電腦這段期間存過一次月記，是很常見的使用情境，不需要任何刻意操作。使用者
+ * 提出情境後逐一核對程式碼與 rule.txt 確認屬實，實際會造成兩種後果：①若另一裝置存檔
+ * 後 notify-service（每5分鐘一次）已把 journalSubmitNotifiedAt 從 null 改寫成真正
+ * 時間戳，這裡因為誤判成第一次繳交、payload 帶 journalSubmitNotifiedAt:null，撞上
+ * rule.txt「一般編輯必須維持原值不變」而整份月記存檔被拒（403）——且因為 catch 區塊
+ * 不會清除這份過期快取，同一分頁重試會不斷卡在同一個錯誤，直到離開填寫頁再回來或
+ * 重新整理頁面觸發 checkMonthDeadline() 重新查詢為止，是持續鎖死而非單次失敗；②若
+ * 間隔在 notify-service 排程之內（兩邊 journalSubmitNotifiedAt 剛好都還是 null），
+ * 這條驗證能通過，但 submittedAt（rule.txt 完全沒有驗證此欄位）會被悄悄改成這次存檔
+ * 的時間，蓋掉另一裝置真正的第一次繳交時間，且會用錯誤的 entriesCountBefore（誤判
+ * 成0）重算 entriesCompleteAt／entriesFirstCompleteAt，可能把已經誠實達標過的凍結
+ * 時間往後推移，重演 entriesFirstCompleteAt 那三輪修法要解決的「誠實操作被系統計算
+ * 邏輯搞錯」問題（換了跨裝置快取過期這個新的觸發途徑）。修法：拿掉「sem/month 是否
+ * 相符」這個條件判斷，改成每次儲存前一律無條件現查一次 Firestore，跟
+ * saveTeacherComment()／saveStudentReply() 修多裝置/多分頁競態問題用的做法完全一致。
+ * checkMonthDeadline()／editJournal() 寫入快取的邏輯不變（仍記錄 sem/month，只是這裡
+ * 不再拿來當判斷依據，非必要不擴大改動範圍）。
+ * 本輪更新既有 S-SEC-32（原本驗證「有條件現查」機制，核心驗證目的——現查邏輯要在
+ * isFirstSubmit 計算之前生效——不變，斷言隨新邏輯改寫：確認舊版「只在不符時才查」的
+ * 判斷式痕跡已消失、且 journalRef 宣告到 isFirstSubmit 計算這段區間完全沒有任何 if
+ * 判斷式能跳過現查），未新增具名呼叫點。未比照 S-SEC-49／S-SEC-51 的既有取捨改用真
+ * 執行——saveJournal() 會動到 Firestore（getDoc／setDoc／getDocs／updateDoc），這個
+ * 共用測試頁面之後還有其他測試依賴 firebase_funcs／currentUser 維持真實登入狀態，
+ * 貿然覆寫風險不成比例，維持靜態比對。
+ * 開發階段已用 Node 直接抽取（括號配對，非天真 regex）修法前／後兩版 saveJournal()
+ * 原始碼，把新斷言分別跑在兩版上交叉驗證：修好版本全部通過、模擬還原成舊版邏輯時
+ * noStaleMismatchGate／noConditionalSkip 皆正確判定失敗，確認斷言真的有鑑別力、不是
+ * 巧合通過；另外用最小化的 mock（getDoc／window._currentJournalCache）單獨重播回報
+ * 情境本身（sem/month 相同、伺服器已被另一裝置存過），確認舊邏輯完全不呼叫 getDoc、
+ * isFirstSubmit 誤判為 true，新邏輯無條件呼叫一次 getDoc、isFirstSubmit 正確算出
+ * false，證明修法真的解決了回報的競態情境，不只是「程式碼長得對」。**以上沙盒驗證
+ * 無法取代使用者本機 Step2_RunTests.bat 對已部署正式網站的真實執行結果，待其確認。**
  *
  * v42 修正（2026-09-03）：第1學期跨年（12月→隔年1月）月份排序錯誤——第1學期固定
  * 7,8,9,10,11,12,1（隔年1月結束），1月數字最小、但時序上是整個學期最後一個月。使用者
@@ -2497,76 +2535,91 @@ async function runStudentTests(page, browserContext, log) {
       );
   });
 
-  await test('S-SEC-32 checkMonthDeadline()/editJournal() 快取寫入 sem/month，saveJournal() 送出前比對快取新鮮度', async () => {
-    // 2026-07-13 新增。背景：_currentJournalCache 是 checkMonthDeadline() 非同步寫入的
-    // （學期/月份 select 的 onchange 直接呼叫、未 await，且 checkMonthDeadline() 內部完全
-    // 沒有 showLoading() 鎖住畫面，儲存按鈕在查詢完成前就已經可以點擊）。原本的快取物件
-    // 沒有記錄自己對應哪個學期/月份，saveJournal() 的 isFirstSubmit 判斷完全信任快取，
-    // 若學生切換學期/月份後在查詢真正完成前就按下儲存，讀到的會是前一個學期/月份殘留的
-    // 快取——這在 journalSubmitNotifiedAt 出現以前只是「覆蓋確認對話框不會跳出來」這種
-    // 可接受的小瑕疵，但現在會產生兩種更嚴重的後果：①目標月記其實已推播過，卻誤判為
-    // 第一次繳交，payload 帶 journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須
-    // 維持原值不變」而整份月記存檔被拒（403）；②目標月記其實是真正的第一次繳交，卻誤判
-    // 為非第一次，payload 完全不帶這個欄位，CREATE 規則允許省略而寫入成功，但這份文件
-    // 從此永遠不會出現在 checkNewJournals() 的查詢範圍內，老師安靜地收不到繳交通知。
+  await test('S-SEC-32 saveJournal() 送出前一律無條件現查 Firestore，不再只在 sem/month 不符時才查', async () => {
+    // 2026-07-13 原始版本（已被 2026-09-04 修法取代，此段落保留供對照歷史問題）：
+    // _currentJournalCache 是 checkMonthDeadline() 非同步寫入的（學期/月份 select 的
+    // onchange 直接呼叫、未 await，且內部完全沒有 showLoading() 鎖住畫面），原本只在
+    // 偵測到「快取的 sem/month 跟目前選定的不一致」時才現查一次 Firestore，防的是查詢
+    // 真正完成「前」就被搶先按下儲存這條路徑。
+    //
+    // 2026-09-04 補修：使用者提出「只比對 sem/month」防不了另一條完全不需要切換學期/
+    // 月份就會發生的路徑——window._currentJournalCache 是純本機的全域變數，同一份月記
+    // 若在另一台裝置/分頁被存過（例如手機開著這個月份的填寫頁很久沒關、電腦這段期間
+    // 存了一次），sem/month 從頭到尾沒變過，舊邏輯完全不會重新現查，會用過期的快取
+    // 誤判 isFirstSubmit。經逐行核對程式碼、並用 Node 沙盒重播回報情境後確認屬實，
+    // 實際會造成兩種後果：①若另一裝置存檔後 notify-service 已把 journalSubmitNotifiedAt
+    // 從 null 改寫成真正時間戳，這裡誤判成第一次繳交、payload 帶
+    // journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須維持原值不變」而整份
+    // 月記存檔被拒（403）——且因為失敗時不清除這份過期快取，同一分頁重試會持續卡在
+    // 同一個錯誤；②若間隔內兩邊 journalSubmitNotifiedAt 剛好都還是 null，這條驗證能
+    // 通過，但 submittedAt（rule.txt 完全沒有驗證這個欄位）會被悄悄改成這次存檔的
+    // 時間，蓋掉另一裝置真正的第一次繳交時間。修法：拿掉「sem/month 是否相符」這個
+    // 條件判斷，改成每次儲存前一律現查一次 Firestore，不再有可以跳過現查的分支——跟
+    // saveTeacherComment()／saveStudentReply() 修多裝置/多分頁競態問題用的「送出前
+    // 無條件現查」完全一致。
     //
     // 驗證五項特徵（缺一即退化）：
-    //   1. checkMonthDeadline() 的快取物件 exists:true 分支有記錄 sem/month
-    //   2. checkMonthDeadline() 的 exists:false 分支要出現 2 次皆帶 sem/month（ternary 的
-    //      false 分支 + 下方清空表單時的重複賦值，兩處都要同步更新，漏一處會讓其中一條
-    //      路徑的快取遺失 sem/month）
-    //   3. editJournal() 的快取物件也記錄 sem/month（跟 checkMonthDeadline() 的快取結構
-    //      保持一致，否則「先編輯再儲存、未切換月份」這條路徑會被誤判為快取不新鮮）
-    //   4. saveJournal() 有比對快取的 sem/month 是否與目前選定的一致，不一致時會
-    //      await getDoc(journalRef) 現查並把結果寫回 _currentJournalCache
-    //   5. 這段現查邏輯要出現在 isFirstSubmit 計算「之前」（在原始碼字串中的位置早於
-    //      const isFirstSubmit 這行），否則現查了也沒用，isFirstSubmit 還是用舊快取算
+    //   1. checkMonthDeadline() 的快取物件 exists:true 分支仍記錄 sem/month（結構不變，
+    //      這兩個欄位雖然不再被 saveJournal() 拿來當判斷依據，但保留不影響正確性）
+    //   2. checkMonthDeadline() 的 exists:false 分支仍出現 2 次皆帶 sem/month
+    //   3. editJournal() 的快取物件仍記錄 sem/month
+    //   4. saveJournal() 的「journalRef 宣告」到「isFirstSubmit 計算」這段區間裡，已經
+    //      找不到舊版那個「只在不符時才查」的判斷式痕跡（_currentJournalCache.sem !==
+    //      sem），且這段區間完全沒有任何 if 判斷式——只要現查還能被任何條件跳過，這個
+    //      bug 就等於換一種寫法重新出現
+    //   5. await getDoc(journalRef) 與寫回 window._currentJournalCache 兩行仍然存在，
+    //      且位置仍早於 isFirstSubmit 的計算
     const result = await page.evaluate(() => {
       const checkFnStr = (typeof checkMonthDeadline === 'function') ? checkMonthDeadline.toString() : '';
       const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
       const editFnStr = (typeof editJournal === 'function') ? editJournal.toString() : '';
       if (!checkFnStr || !saveFnStr || !editFnStr) return { skip: true };
 
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const saveCode = codeOnly(saveFnStr);
+
       const checkTrueBranchHasSemMonth = /exists:\s*true,\s*sem,\s*month/.test(checkFnStr);
       const checkFalseBranchCount = (checkFnStr.match(/exists:\s*false,\s*sem,\s*month/g) || []).length;
 
       const editCacheHasSemMonth = /exists:\s*true,\s*sem,\s*month,/.test(editFnStr);
 
-      const hasMismatchCheck =
-        /_currentJournalCache\.sem\s*!==\s*sem/.test(saveFnStr) &&
-        /_currentJournalCache\.month\s*!==\s*month/.test(saveFnStr);
-      const hasFreshGetDoc = /await\s+getDoc\s*\(\s*journalRef\s*\)/.test(saveFnStr);
-      const freshSnapWritesCache = /window\._currentJournalCache\s*=\s*freshSnap\.exists\(\)/.test(saveFnStr);
+      const refIdx = saveCode.indexOf('const journalRef');
+      const isFirstSubmitIdx = saveCode.indexOf('const isFirstSubmit');
+      const segmentFound = refIdx !== -1 && isFirstSubmitIdx !== -1 && refIdx < isFirstSubmitIdx;
+      const segment = segmentFound ? saveCode.slice(refIdx, isFirstSubmitIdx) : '';
 
-      const mismatchIdx = saveFnStr.search(/_currentJournalCache\.sem\s*!==\s*sem/);
-      const isFirstSubmitIdx = saveFnStr.indexOf('const isFirstSubmit');
-      const mismatchCheckBeforeIsFirstSubmit =
-        mismatchIdx !== -1 && isFirstSubmitIdx !== -1 && mismatchIdx < isFirstSubmitIdx;
+      const noStaleMismatchGate = segmentFound && !/_currentJournalCache\.sem\s*!==\s*sem/.test(segment);
+      const noConditionalSkip = segmentFound && !segment.includes('if (') && !segment.includes('if(');
+      const hasFreshGetDoc = /await\s+getDoc\s*\(\s*journalRef\s*\)/.test(segment);
+      const freshSnapWritesCache = /window\._currentJournalCache\s*=\s*freshSnap\.exists\(\)/.test(segment);
 
       return {
         skip: false,
         checkTrueBranchHasSemMonth,
         checkFalseBranchCount,
         editCacheHasSemMonth,
-        hasMismatchCheck,
+        segmentFound,
+        noStaleMismatchGate,
+        noConditionalSkip,
         hasFreshGetDoc,
         freshSnapWritesCache,
-        mismatchCheckBeforeIsFirstSubmit,
       };
     });
     if (result.skip) return;
     if (!result.checkTrueBranchHasSemMonth)
-      throw new Error('checkMonthDeadline() 的 exists:true 快取分支找不到 sem/month，saveJournal() 無法判斷這份快取對應哪個學期/月份');
+      throw new Error('checkMonthDeadline() 的 exists:true 快取分支找不到 sem/month，跟 editJournal() 的快取結構不一致');
     if (result.checkFalseBranchCount < 2)
       throw new Error(`checkMonthDeadline() 的 exists:false 快取分支應出現 2 次（ternary 的 false 分支 + 清空表單時的重複賦值）皆帶 sem/month，實際只找到 ${result.checkFalseBranchCount} 次，可能有一處忘記同步補上`);
     if (!result.editCacheHasSemMonth)
-      throw new Error('editJournal() 的快取物件找不到 sem/month，跟 checkMonthDeadline() 的快取結構不一致，會讓「先編輯再儲存」這條路徑被誤判為快取不新鮮');
-    if (!result.hasMismatchCheck)
-      throw new Error('saveJournal() 找不到比對 _currentJournalCache.sem/.month 是否與目前選定學期/月份一致的邏輯，切換月份後快速按下儲存仍可能誤判 isFirstSubmit');
+      throw new Error('editJournal() 的快取物件找不到 sem/month，跟 checkMonthDeadline() 的快取結構不一致');
+    if (!result.segmentFound)
+      throw new Error('saveJournal() 找不到「journalRef 宣告」到「isFirstSubmit 計算」這段區間，函式結構可能已大幅改動，需要重新確認現查邏輯是否還在');
+    if (!result.noStaleMismatchGate)
+      throw new Error('saveJournal() 仍找得到舊版「只在 sem/month 不符時才現查」的判斷式痕跡（_currentJournalCache.sem !== sem），2026-09-04 的修法可能被回退，跨裝置快取過期造成403/資料覆蓋的問題會重新出現');
+    if (!result.noConditionalSkip)
+      throw new Error('saveJournal() 的「journalRef 宣告」到「isFirstSubmit 計算」之間找到了 if 判斷式，代表現查 Firestore 這件事又變成有條件執行——不論條件是什麼，只要能被跳過，跨裝置快取過期的問題就可能用不同寫法重新繞過這層保護');
     if (!result.hasFreshGetDoc || !result.freshSnapWritesCache)
-      throw new Error('saveJournal() 找不到「快取不符時 await getDoc(journalRef) 現查並寫回 _currentJournalCache」的邏輯，快取不新鮮時仍會直接信任舊資料');
-    if (!result.mismatchCheckBeforeIsFirstSubmit)
-      throw new Error('saveJournal() 的快取新鮮度檢查沒有寫在 isFirstSubmit 計算之前，即使現查更新了快取，isFirstSubmit 仍可能用到舊值計算');
+      throw new Error('saveJournal() 找不到「await getDoc(journalRef) 現查並寫回 window._currentJournalCache」的邏輯，isFirstSubmit 可能又變成完全信任舊快取');
   });
 
   // ════════════════════════════════════════

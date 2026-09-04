@@ -3933,38 +3933,47 @@ async function saveJournal() {
   // 同一個布林值——「第一次才記錄當下時間」這句話本身就是「journalSubmitNotifiedAt
   // 這個推播用標記欄位，第一次才需要明確寫成 null」的同一件事，不另外重算一次條件。
   //
-  // 2026-07-13 補修：_currentJournalCache 是 checkMonthDeadline() 非同步寫入的（學期/月份
-  // select 的 onchange 直接呼叫、未 await，且 checkMonthDeadline() 內部完全沒有
-  // showLoading() 鎖住畫面，儲存按鈕在查詢完成前就已經是可點擊狀態），若學生切換學期/
-  // 月份後在該次查詢真正完成「前」就按下儲存，這裡讀到的會是前一個學期/月份殘留的快取。
-  // 這在 journalSubmitNotifiedAt 出現以前只會造成「覆蓋確認對話框不會跳出來」或
-  // 「submittedAt 被重設」這種可接受的小瑕疵，但現在會造成兩種更嚴重的後果：
-  // ①目標月記其實已推播過（journalSubmitNotifiedAt 已是非 null 字串），卻誤判為第一次
-  // 繳交，payload 帶 journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯必須維持原值
-  // 不變」而整份月記存檔被拒（403）；②目標月記其實是真正的第一次繳交，卻誤判為非第一次，
-  // payload 完全不帶這個欄位，CREATE 規則允許省略而寫入成功，但這份文件從此永遠不會出現
-  // 在 checkNewJournals() 的查詢範圍內，老師安靜地收不到繳交通知且難以事後察覺。
-  // 修法：checkMonthDeadline()／editJournal() 寫入快取時現在會多存 sem/month（見兩處對應
-  // 修改），這裡送出前先比對快取的 sem/month 是否與目前選定的一致；只要不一致（含快取
-  // 完全沒有 sem/month，例如更早版本殘留或尚未跑過 checkMonthDeadline() 就直接儲存的邊界
-  // 情況），一律視為不可信，改為現查一次 Firestore 拿到真正的當下狀態，不直接信任可能
-  // 過期的快取——跟 saveStudentReply()／saveTeacherComment() 修多裝置/多分頁競態問題用的
-  // 「送出前現查」是同一套思路。現查後把結果寫回 window._currentJournalCache，讓下面
-  // （覆蓋確認對話框那段）也直接受惠，不必再讀第二次。
+  // 2026-07-13 補修（已被下方 2026-09-04 修法取代，此段落保留供對照歷史問題）：原本
+  // 只在偵測到「快取的 sem/month 跟目前選定的不一致」時才現查一次 Firestore，防的是
+  // checkMonthDeadline() 非同步查詢還沒完成、學生就搶先按下儲存這條路徑（select 的
+  // onchange 直接呼叫、未 await，且內部完全沒有 showLoading() 鎖住畫面）。
+  //
+  // 2026-09-04 補修：上面「只比對 sem/month」的判斷防不了另一條完全不需要切換學期/
+  // 月份就會發生的路徑——window._currentJournalCache 是純本機的全域變數，同一份月記
+  // 若在另一台裝置/分頁被存過（例如手機開著這個月份的填寫頁很久沒關、電腦這段期間
+  // 存了一次），這裡的 sem/month 從頭到尾沒變過，舊邏輯完全不會重新現查，會用過期的
+  // 快取誤判 isFirstSubmit。實際重現會造成兩種後果：①若另一裝置存檔後，notify-service
+  // 排程（每5分鐘一次）已經把 journalSubmitNotifiedAt 從 null 改寫成真正的時間戳，這裡
+  // 誤判成第一次繳交、payload 帶 journalSubmitNotifiedAt:null，撞上 rule.txt「一般編輯
+  // 必須維持原值不變」而整份月記存檔被拒（403）——且因為失敗時不會清除這份過期快取，
+  // 同一分頁重試會不斷卡在同一個錯誤，直到離開填寫頁再回來或重新整理頁面觸發
+  // checkMonthDeadline() 重新查詢為止；②若間隔在notify-service排程之內（兩邊
+  // journalSubmitNotifiedAt 剛好都還是 null），這條驗證能通過，但 submittedAt（
+  // rule.txt 完全沒有驗證這個欄位）會被這次誤判的「第一次繳交」邏輯悄悄改成這次存檔
+  // 的時間，蓋掉另一裝置真正的第一次繳交時間，且會連帶用錯誤的 entriesCountBefore
+  // （誤判成0）重算 entriesCompleteAt／entriesFirstCompleteAt，可能把已經誠實達標過的
+  // 凍結時間往後推移，重演 entriesFirstCompleteAt 那三輪修法要解決的「誠實操作被系統
+  // 計算邏輯搞錯」問題（只是這次換了跨裝置快取過期這個新的觸發途徑）。
+  // 修法：拿掉「sem/month 是否相符」這個條件判斷，改成每次儲存前一律現查一次
+  // Firestore，不再有可以跳過現查的分支——跟 saveTeacherComment()／saveStudentReply()
+  // 修多裝置/多分頁競態問題用的「送出前無條件現查」完全一致。現查後把結果寫回
+  // window._currentJournalCache，讓下面（覆蓋確認對話框那段）直接受惠，不必再讀
+  // 第二次。checkMonthDeadline()／editJournal() 寫入快取時仍照舊記錄 sem/month（結構
+  // 不變，非必要不擴大改動範圍），只是這兩個欄位不再被這裡拿來當「要不要現查」的
+  // 判斷依據。**已知殘留風險**：跟 saveTeacherComment() 現況一致，未引入 transaction，
+  // getDoc 後到 setDoc 前仍有極短暫的競態窗口（例如兩台裝置幾乎同時查完、幾乎同時
+  // 送出），評估為低機率邊界案例可接受，比照現有 saveTeacherComment() 的取捨。
   const journalRef = doc(db, 'users', currentUser.uid, 'journals', `${currentUser.seatNo}-${sem}-${month}`);
-  if (!window._currentJournalCache || window._currentJournalCache.sem !== sem || window._currentJournalCache.month !== month) {
-    try {
-      const freshSnap = await getDoc(journalRef);
-      window._currentJournalCache = freshSnap.exists()
-        ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? null }
-        : { exists: false, sem, month };
-    } catch (e) {
-      // 現查失敗（例如網路瞬斷）：跟第 3113 行附近截止日查詢失敗的既有處理原則一致——
-      // 不因為這個輔助性檢查失敗就擋住整個儲存流程，僅記錄警告，沿用當下的快取值
-      // （可能仍是過期的，但比起讓學生完全存不了檔，這是可接受的退化，機率也更低——
-      // 需要同時滿足「快取過期」與「現查剛好也失敗」兩個條件才會發生）。
-      console.warn('儲存前重新核對月記狀態失敗，暫時沿用現有快取', e);
-    }
+  try {
+    const freshSnap = await getDoc(journalRef);
+    window._currentJournalCache = freshSnap.exists()
+      ? { exists: true, sem, month, company: freshSnap.data().company, submittedAt: freshSnap.data().submittedAt, updatedAt: freshSnap.data().updatedAt, teacherReviewed: freshSnap.data().teacherReviewed, teacherComment: freshSnap.data().teacherComment, studentReply: freshSnap.data().studentReply || null, studentReplyUnread: freshSnap.data().studentReplyUnread || false, entriesCount: (freshSnap.data().entries || []).length, entriesCompleteAt: freshSnap.data().entriesCompleteAt || null, entriesFirstCompleteAt: freshSnap.data().entriesFirstCompleteAt || null, entriesFirstCompleteAtCount: freshSnap.data().entriesFirstCompleteAtCount ?? null }
+      : { exists: false, sem, month };
+  } catch (e) {
+    // 現查失敗（例如網路瞬斷）：跟截止日查詢失敗時的既有處理原則一致——不因為這個
+    // 輔助性檢查失敗就擋住整個儲存流程，僅記錄警告，沿用當下的快取值（可能是過期的，
+    // 甚至完全沒有快取過），比起讓學生完全存不了檔，這是可接受的退化。
+    console.warn('儲存前重新核對月記狀態失敗，暫時沿用現有快取', e);
   }
   const isFirstSubmit = !(window._currentJournalCache?.exists && window._currentJournalCache?.submittedAt);
   // 2026-07-24 新增：entriesCompleteAt——記錄「篇數真正達到當月最少應繳篇數（minEntries）
