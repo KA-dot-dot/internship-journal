@@ -1,7 +1,32 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v40
+ * 老師端自動化測試 v41
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v41 修正（2026-09-05）：與 student_test.js 的 v45 對稱——使用者自行稽核找到一組
+ * 監聽器疊加 bug，橫跨 student.html／teacher.html 共4處，完整背景（含 3 個學生端
+ * 圖表函式的細節、使用者原先建議的 bind-once 旗標寫法為何行不通）見該檔案同日
+ * changelog。這裡只記錄 teacher.html 側的第4處：`renderSalaryLineChart()`（薪資趨勢
+ * 折線圖）手機版「假捲軸」分支用 `legendEl.addEventListener('scroll', updateThumb)`
+ * 綁定捲動同步邏輯，`legendEl` 是寫死在 HTML 裡、只被 `innerHTML=''` 清空子內容而不會
+ * 被砍掉重建的永久節點，每次 `renderSalaryLineChart()` 重跑（篩選公司／切換日期範圍等
+ * 查詢條件變更都會整個函式重跑一次）都會再疊加一個新的 scroll 監聽器、從未清除。
+ * **性質跟 student.html 那 3 處不完全一樣**：`track`／`thumb`／`legendEl` 三者都是
+ * 永久節點，`updateThumb` 讀的是呼叫當下即時的 `scrollTop`／`scrollHeight`／
+ * `clientHeight` 等屬性，不像 `tipEl` 那樣每次重繪都是全新節點——這裡即使真的用
+ * bind-once 旗標寫法也不會出錯（不會有「handler 停在舊節點」的退化風險），只是不如
+ * 屬性指派簡潔、還要多維護一個旗標變數。改用 `legendEl.onscroll = updateThumb`（DOM
+ * Level 0 屬性指派，同一屬性只能存一個 handler，指派新的自動取代舊的）取代
+ * `addEventListener()`，跟 student.html 那 3 處使用同一套修法手段，維持兩端一致。
+ *   T-SEC-76  真執行 renderSalaryLineChart()：直接呼叫（不透過
+ *             renderSalaryStatsFromCache()），暫時覆寫 window.innerWidth 強制觸發
+ *             手機版分支；對 legendEl.addEventListener 暫時包一層 spy，重繪3次後
+ *             確認 scroll 監聽器沒有疊加成3個。
+ * 開發階段已用 Node + jsdom（AST 解析定位函式邊界）對修法前原始碼／修法後程式碼分別
+ * 跑過同一套斷言交叉驗證：原始碼正確顯示3次疊加；修好版本 0 次
+ * addEventListener('scroll') 呼叫、改用 onscroll 屬性正確綁定。另外用本機 HTTP
+ * server + 真實 headless Chromium（非 jsdom 近似）對兩個版本各跑一次交叉確認，結果
+ * 與 jsdom 一致。與 student.html 側的 S-SEC-66 使用同一套驗證方法論。
  *
  * v40 修正（2026-09-03）：使用者複查「薪資明細」表格時發現，第二十二節「跨學期座號
  * 合併問題」修法當時列出的 5 處裡漏了這一張表——`renderSalaryStatsFromCache()` 裡
@@ -4396,6 +4421,61 @@ async function runTeacherTests(page, log) {
       throw new Error('這幾個函式裡仍殘留裸月份數字相減排序寫法（a.month-b.month）');
   });
 
+
+  // ════════════════════════════════════════
+  // T-SEC-76  2026-09-05 新增：renderSalaryLineChart() 手機版圖例假捲軸 scroll 監聽器
+  // 疊加修復（與 student_test.js 的 S-SEC-66 對稱，使用者自行稽核發現）
+  // ════════════════════════════════════════
+  // 背景見檔頭 v41 changelog：legendEl 是永久節點，renderSalaryLineChart() 每次重跑
+  // 都用 addEventListener('scroll', updateThumb) 再疊加一個新的監聽器、從未清除。已
+  // 改用 legendEl.onscroll = updateThumb（DOM Level 0 屬性指派）取代。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-76 renderSalaryLineChart() 手機版圖例假捲軸的 scroll 監聽器每次重繪不再疊加', async () => {
+    // 直接呼叫 renderSalaryLineChart()（不透過 renderSalaryStatsFromCache()，這個
+    // 函式本身簽名是 (journals, stuCompanyMap)，可以獨立呼叫，不需要覆寫下游渲染
+    // 函式）。isMobile 分支判斷讀的是 window.innerWidth，比照專案既有「暫時覆寫全域
+    // 依賴、結束後還原」慣例（見 T-SEC-59 覆寫 getSelectedCompanies() 的做法）強制
+    // 模擬手機寬度觸發這個分支。
+    //
+    // 跟 S-SEC-66 那 3 處不同：這裡的 track／thumb／legendEl 都是永久節點，
+    // updateThumb 讀的是呼叫當下即時的 scrollTop 等屬性，不會有「handler 停在舊節點」
+    // 的退化風險，所以這裡只需要驗證疊加是否消失，不需要額外驗證「最新一次」正確性
+    // 那一半。
+    const result = await page.evaluate(() => {
+      if (typeof renderSalaryLineChart !== 'function') return { skip: true };
+      const legendEl = document.getElementById('salary-line-chart-legend');
+      if (!legendEl) return { skip: true };
+
+      const origDesc = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+      Object.defineProperty(window, 'innerWidth', { value: 500, configurable: true });
+
+      let scrollAddCount = 0;
+      const origAdd = legendEl.addEventListener.bind(legendEl);
+      legendEl.addEventListener = function(type, ...args) {
+        if (type === 'scroll') scrollAddCount++;
+        return origAdd(type, ...args);
+      };
+
+      const journals = [
+        { seatNo: '01', semester: '999-1', month: 8, salary: 30000, company: 'A公司' },
+        { seatNo: '02', semester: '999-1', month: 9, salary: 40000, company: 'A公司' },
+      ];
+      try {
+        for (let i = 0; i < 3; i++) renderSalaryLineChart(journals, {});
+      } finally {
+        legendEl.addEventListener = origAdd;
+        if (origDesc) Object.defineProperty(window, 'innerWidth', origDesc);
+      }
+
+      return { skip: false, scrollAddCount, onscrollBound: typeof legendEl.onscroll === 'function' };
+    });
+    if (result.skip) return;
+    if (result.scrollAddCount > 1)
+      throw new Error(`legendEl 的 scroll 監聽器在3次重繪後被綁了 ${result.scrollAddCount} 次，應該最多1次（疊加沒有被修好）`);
+    if (!result.onscrollBound)
+      throw new Error('legendEl.onscroll 沒有被正確綁定——可能改用了其他寫法但沒有實際生效');
+  });
 
   return results;
 }

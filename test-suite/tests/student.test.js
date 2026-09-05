@@ -1,7 +1,50 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v44
+ * 學生端自動化測試 v45
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v45 修正（2026-09-05）：使用者自行稽核找到一組監聽器疊加 bug，橫跨 student.html／
+ * teacher.html 共4處，皆為同一種模式——renderStudentWorkTypeChart()／
+ * renderStudentCityChart()／renderStudentSalaryLineChart() 三個統計圖表函式，各自在
+ * 結尾用 container.addEventListener('click', ...) 綁「點容器背景收起 tooltip」；
+ * container 是寫死在 HTML 裡、頁面切換只靠 showPage() 加/拿掉 hidden class（不會被
+ * 砍掉重建）的永久節點，每次重繪（每次切回「統計圖表」頁）都會再疊加一個新的監聽器、
+ * 從未清除。AI 助手逐一核對程式碼確認屬實：學生在統計圖表頁與其他頁籤間切換N次，這個
+ * click 監聽器就會疊加成N個。**嚴重度評估**：疊加的舊監聽器各自閉包捕捉的是各自那次
+ * render 產生的 tipEl（container.innerHTML 早已把它換掉，變成不在畫面上的孤兒節點），
+ * 操作孤兒節點沒有可見副作用，純粹是白工，不會顯示錯誤內容——用 jsdom 對修法前的原始
+ * 程式碼實際執行驗證過：3次重繪後 addEventListener('click') 確實被呼叫3次，但點擊容器
+ * 仍然正確隱藏「最新一次」render 的 tooltip（3個疊加的監聽器裡，最新那個仍然對應最新
+ * 的 tipEl，行為正確，只是多餘的舊監聽器在做白工）。**使用者原先建議的修法**（比照
+ * initWriteDraftAutoSave() 的「一次性旗標」寫法，用 container.dataset.tipClickBound
+ * 只綁一次）經查證後發現行不通：AI 助手指出並用 jsdom 實測證明——那兩個既有函式能
+ * 「只綁一次」，是因為 handler 讀的是呼叫當下即時的 e.target／DOM 狀態，不會過期；但
+ * 這 3 個圖表函式的 tipEl 是每次 render 都重新查詢出來的全新節點，若改成「只綁一次、
+ * 之後用旗標跳過」，會讓 handler 永遠停在第一次 render 的 tipEl 上——實測第3次重繪後
+ * 點擊容器，「收起tooltip」功能對當下畫面上的 tooltip 完全靜默失效（不報錯，就是點了
+ * 沒反應），是比原本疊加問題更嚴重的功能退步。改用 container.onclick =
+ * function(){...}（DOM Level 0 屬性指派，同一屬性只能存一個 handler，指派新的自動
+ * 取代舊的）取代 addEventListener()：不會疊加，且每次重繪都正確對應到當次的 tipEl，
+ * 不需要任何旗標變數；這個手法在兩份檔案裡本來就有真實先例（如 teacher.html 的
+ * `btnAll.onclick = () => ...`）。teacher.html 的 renderSalaryLineChart()（手機版
+ * 圖例假捲軸）有結構相同的第4處：legendEl.addEventListener('scroll', updateThumb)
+ * 同樣每次查詢/切換統計條件重繪都疊加，改用 legendEl.onscroll = updateThumb 同一
+ * 手法修正，見 teacher.test.js T-SEC-76——但那處性質跟前3處不完全一樣：track／
+ * thumb／legendEl 三者都是永久節點，updateThumb 讀的是呼叫當下即時的 scrollTop 等
+ * 屬性，不像 tipEl 那樣每次重繪都換人，即使真的用 bind-once 旗標寫法也不會出錯，只是
+ * 不如屬性指派簡潔。
+ *   S-SEC-66  真執行 renderStudentWorkTypeChart()／renderStudentCityChart()／
+ *             renderStudentSalaryLineChart()：對各自的 container 暫時包一層
+ *             addEventListener spy，各重繪3次後確認 click 監聽器沒有疊加成3個；並
+ *             手動顯示「最新一次」render 的 tooltip、對 container 背景（非色塊本身）
+ *             dispatch 一次 click，確認正確被收起——這是防止未來被誤改成 bind-once
+ *             旗標寫法重演「點擊收起靜默失效」退步的關鍵斷言，不是只驗證「沒有疊加」
+ *             這一半。
+ * 開發階段已用 Node + jsdom（AST 解析定位函式邊界，非天真 regex/括號配對），對修法前
+ * 原始碼、修法後程式碼、以及模擬使用者原先建議的 bind-once 旗標寫法三個版本分別跑過
+ * 同一套斷言交叉驗證：原始碼正確顯示3次疊加（但收起功能仍正確）；bind-once 版本正確
+ * 顯示不疊加、但收起功能對第3次重繪失效（印證上述退步分析非臆測）；修好版本兩項皆
+ * 正確通過。
  *
  * v44 修正（2026-09-05）：v43 修好「切換分頁前」的過期快取競態後，使用者重新檢視同一個
  * saveJournal() 函式，發現一個範圍更廣、性質不同的第二個缺口——「使用者確認覆蓋」的
@@ -4222,6 +4265,96 @@ async function runStudentTests(page, browserContext, log) {
       throw new Error('saveJournal() 找不到「if (staleOverwrite) { ... return; }」中止邏輯——即使有偵測到資料被動過，也可能沒有真的擋下這次存檔，只是算出結果卻繼續往下執行到 setDoc()');
     if (!result.abortClearsCache)
       throw new Error('saveJournal() 中止覆蓋時找不到 window._currentJournalCache = null——沒有清空快取，可能讓使用者在同一分頁重試時繼續沿用這份已知過期的快取');
+  });
+
+
+  // ════════════════════════════════════════
+  // S-SEC-66  2026-09-05 新增：統計圖表容器的 click 監聽器疊加修復（使用者自行稽核發現）
+  // ════════════════════════════════════════
+  // 背景見檔頭 v45 changelog：renderStudentWorkTypeChart()／renderStudentCityChart()／
+  // renderStudentSalaryLineChart() 三個函式結尾都用 container.addEventListener('click',
+  // ...) 綁「點容器背景收起 tooltip」，container 是永久節點（頁面切換只靠 showPage()
+  // 加/拿掉 hidden class，不會被砍掉重建），每次重繪都疊加一個新的、從未清除。已改用
+  // container.onclick = function(){...}（DOM Level 0 屬性指派）取代。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-66 統計圖表（工作類型／縣市分布／薪資趨勢）容器的 click 監聽器每次重繪不再疊加，且正確對應最新一次 render 的 tooltip', async () => {
+    // 這是純 DOM 渲染函式，不碰 Firestore／currentUser，不需要學生登入 session，直接
+    // 在這個共用 page 上真執行（比照 S-SEC-52 已建立的「真執行優於推理」標準）。驗證
+    // 兩件事，缺一不可：
+    //   ①疊加是否真的消失——對 container.addEventListener 暫時包一層 spy，計算重繪3次
+    //     後 'click' 被註冊了幾次。
+    //   ②（更關鍵）點擊容器背景是否仍然正確對應「最新一次」render 的 tooltip——這一項
+    //     專門防止未來被誤改成 container.dataset.xxxBound 這種「只綁一次、之後用旗標
+    //     跳過」的寫法：那種寫法也能讓①變成1次，但因為 tooltip 元素本身每次重繪都是
+    //     全新節點（container.innerHTML 換掉了），只綁一次會讓 handler 永遠指向第一次
+    //     render 的舊節點，對之後每一次重繪畫面上真正顯示的 tooltip 完全沒有作用（不
+    //     報錯，就是點了沒反應）。只驗證①、不驗證②的測試會被這種「看似正確」的錯誤
+    //     修法騙過去。
+    const result = await page.evaluate(() => {
+      const targets = [
+        {
+          fn: 'renderStudentWorkTypeChart', containerId: 's-work-type-chart', tipId: 's-pie-tip',
+          journals: [{ entries: [{ type: '搬運' }, { type: '搬運' }, { type: '包裝' }] }],
+        },
+        {
+          fn: 'renderStudentCityChart', containerId: 's-city-chart', tipId: 's-city-tip',
+          journals: [{ entries: [{ address: '台中市西屯區文華路100號' }, { address: '台北市信義區松高路1號' }] }],
+        },
+        {
+          fn: 'renderStudentSalaryLineChart', containerId: 's-salary-line-chart', tipId: 's-sal-tip',
+          // 兩個以上月份資料才會走到有 click 監聽器那個分支（只有1筆薪資點時提前 return）
+          journals: [{ semester: '115-1', month: 8, salary: 30000 }, { semester: '115-1', month: 9, salary: 32000 }],
+        },
+      ];
+      const out = {};
+      for (const t of targets) {
+        const container = document.getElementById(t.containerId);
+        if (typeof window[t.fn] !== 'function' || !container) { out[t.fn] = { skip: true }; continue; }
+
+        let clickAddCount = 0;
+        const origAdd = container.addEventListener.bind(container);
+        container.addEventListener = function(type, ...args) {
+          if (type === 'click') clickAddCount++;
+          return origAdd(type, ...args);
+        };
+
+        try {
+          let latestTipEl = null;
+          for (let i = 0; i < 3; i++) {
+            window[t.fn](t.journals);
+            latestTipEl = container.querySelector('#' + t.tipId);
+          }
+          if (!latestTipEl) { out[t.fn] = { skip: true }; continue; }
+          latestTipEl.style.display = 'block';
+          container.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          out[t.fn] = {
+            skip: false,
+            clickAddCount,
+            latestHidden: latestTipEl.style.display === 'none',
+          };
+        } finally {
+          container.addEventListener = origAdd;
+        }
+      }
+      return out;
+    });
+
+    // 盡量還原成真實資料，還原失敗不影響本測試判定（同 S-SEC-52 既有取捨）
+    try {
+      await page.evaluate(async () => {
+        if (typeof currentUser !== 'undefined' && currentUser && typeof loadStudentStats === 'function') await loadStudentStats();
+      });
+    } catch (_) {}
+
+    for (const fnName of ['renderStudentWorkTypeChart', 'renderStudentCityChart', 'renderStudentSalaryLineChart']) {
+      const r = result[fnName];
+      if (!r || r.skip) continue;
+      if (r.clickAddCount > 1)
+        throw new Error(`${fnName}: container 的 click 監聽器在3次重繪後被綁了 ${r.clickAddCount} 次，應該最多1次（疊加沒有被修好）`);
+      if (!r.latestHidden)
+        throw new Error(`${fnName}: 點擊 container 背景沒有正確收起「最新一次」render 的 tooltip（可能被改成只綁定第一次的旗標寫法，對當下畫面的 tooltip 靜默失效）`);
+    }
   });
 
   return results;

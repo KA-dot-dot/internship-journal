@@ -7194,7 +7194,18 @@ function renderSalaryLineChart(journals, stuCompanyMap) {
         thumb.style.height = thumbH + 'px';
         thumb.style.top = thumbTop + 'px';
       }
-      legendEl.addEventListener('scroll', updateThumb);
+      // 2026-09-05 修正：legendEl 是寫死在 HTML 裡、只被 innerHTML='' 清空「子內容」
+      // 而不會被砍掉重建的永久節點；renderSalaryLineChart() 每次查詢條件變更（篩選
+      // 公司／切換日期範圍等）都會重新整個函式重跑一次，先前用 addEventListener('scroll',
+      // updateThumb) 綁定，會讓每次重繪都再疊加一個新的 scroll 監聽器、從未清除，切換
+      // 查詢條件次數越多，同一次捲動要重複算並寫入同樣的值越多次。改用 legendEl.onscroll
+      // = updateThumb（屬性指派，取代而非疊加）取代 addEventListener()。這裡改成屬性
+      // 指派是安全的，且跟 renderStudent*Chart() 那三處的情況不同——track／thumb／
+      // legendEl 三者都是永久節點，updateThumb 讀的也是呼叫當下即時的 scrollTop 等
+      // 屬性，不像 tooltip 案例的 tipEl 每次重繪都是全新節點，不會有「只綁一次」導致
+      // handler 停在舊節點的退化風險；即使改成 bind-once 旗標寫法在這裡功能上也不會
+      // 出錯，只是不如屬性指派簡潔、還要多維護一個旗標變數。
+      legendEl.onscroll = updateThumb;
       // 初始化（等 DOM 渲染後）
       setTimeout(updateThumb, 50);
     }

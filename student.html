@@ -2144,7 +2144,23 @@ function renderStudentWorkTypeChart(journals) {
       e.stopPropagation();
     });
   });
-  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+  // 2026-09-05 修正：container 是寫死在 HTML 裡、頁面切換只靠 showPage() 加/拿掉
+  // hidden class（不是砍掉重建）的永久節點。先前用 addEventListener('click', ...)
+  // 綁「點容器背景收起 tooltip」，每次重繪（每次切回「統計圖表」頁）都會再疊加一個
+  // 新的監聽器、從未清除——多次切換頁面後，同一次點擊會觸發多個舊監聽器。這些舊
+  // 監聽器各自閉包捕捉的是各自那次 render 產生的 tipEl（container.innerHTML 早已
+  // 把它換掉，變成不在畫面上的孤兒節點），操作孤兒節點沒有可見副作用，純粹是白工，
+  // 不會顯示錯誤內容。改用 container.onclick = function(){...}（屬性指派，同一個
+  // DOM 屬性只能存一個 handler，指派新的會自動取代舊的，不會疊加）取代
+  // addEventListener()。**這裡不能改成「只在第一次綁定、之後用旗標跳過」這種
+  // bind-once 寫法**：那種做法乍看也能解決疊加，但會製造一個新的功能性退步——
+  // 綁定會永遠停在第一次 render 的 tipEl 上，第二次以後重繪的 tooltip「點擊容器
+  // 收起」這個功能會靜默失效（不報錯，只是點了沒反應），因為 tipEl 是每次 render
+  // 都重新查詢出來的全新節點，不像 initWriteDraftAutoSave()／bindWriteProgressFloat()
+  // 那兩個既有的 bind-once 案例——它們的 handler 是讀取當下即時的 e.target／DOM
+  // 狀態，不會因為容器重繪而過期。renderStudentCityChart()／
+  // renderStudentSalaryLineChart() 兩個結構相同的函式共用同一個問題與同一套修法。
+  container.onclick = function() { if(tipEl) tipEl.style.display='none'; };
 }
 
 // 台灣 22 縣市標準名稱（與 teacher.html 同步，用最早出現的縣市全名比對）
@@ -2228,7 +2244,10 @@ function renderStudentCityChart(journals) {
       e.stopPropagation();
     });
   });
-  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+  // 2026-09-05 修正：同 renderStudentWorkTypeChart() 的問題與修法（container 是永久
+  // 節點、tipEl 每次重繪都是全新節點，改用 onclick 屬性指派避免疊加、且不能改成
+  // bind-once 旗標寫法，理由與細節見該函式上方註解）。
+  container.onclick = function() { if(tipEl) tipEl.style.display='none'; };
 }
 
 function renderStudentSalaryLineChart(journals) {
@@ -2336,7 +2355,10 @@ function renderStudentSalaryLineChart(journals) {
       e.stopPropagation();
     });
   });
-  container.addEventListener('click', function() { if(tipEl) tipEl.style.display='none'; });
+  // 2026-09-05 修正：同 renderStudentWorkTypeChart() 的問題與修法（container 是永久
+  // 節點、tipEl 每次重繪都是全新節點，改用 onclick 屬性指派避免疊加、且不能改成
+  // bind-once 旗標寫法，理由與細節見該函式上方註解）。
+  container.onclick = function() { if(tipEl) tipEl.style.display='none'; };
 }
 
 function initWriteMonths() {
