@@ -1,7 +1,55 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v41
+ * 老師端自動化測試 v42
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v42 修正（2026-09-06）：使用者稽核 comment-modal（老師留評語）發現一個「開兩次之間
+ * 互相搶跑」的競態——openCommentModal() 同步立刻把 _currentCommentJournal（存檔目標）
+ * 蓋成最新一次點擊的學生，但 _openCommentModalWithUid() 的 getDoc().then() 回呼無條件
+ * 覆寫畫面（標題/姓名/評語文字框），若「先點但後回」的舊請求晚到，畫面顯示的學生會跟
+ * 實際存檔目標不一致，評語可能存錯人。該處已用 requestToken 手法修過（本輪之前）。
+ * 使用者接著要求比照同一個角度，把其餘四個 Modal（photo-modal／add-student-modal／
+ * t-batch-delete-modal／import-modal）也逐一查一遍是否有同款問題。逐一讀原始碼後確認：
+ * - photo-modal（openPhotoModal()）：全程同步，無 await，不受影響。
+ * - t-batch-delete-modal（confirmTeacherBatchDelete()）：全程同步（讀勾選 checkbox→
+ *   組 journals 陣列→綁定 confirm 按鈕 onclick 皆在同一個同步區塊完成），不受影響。
+ * - import-modal（openImportModal()／importStudents()）：不依賴「先設定、後由非同步
+ *   回呼寫入」的共用目標變數，importStudents() 存檔時直接讀當下 textarea 內容，不受
+ *   這個模式影響（另有一個不同性質、範圍更廣的 updateSelectedTermSnapshot() 併發覆寫
+ *   疑慮，不在本次處理範圍）。
+ * - **add-student-modal（editStudent()）：有結構不同、嚴重度較低的同類問題**。
+ *   editStudent(seatNo) 內部 `await getRosterForSelectedTerm()` 有非同步空窗，原本
+ *   await 後無條件寫入表單欄位。跟 comment-modal 的關鍵差異：`modal.dataset.editId`
+ *   是跟其他欄位在同一個同步區塊、await 之後才一起寫入（不像 `_currentCommentJournal`
+ *   在點擊當下就先同步設定），且全檔案確認 `dataset.editId` 從未被讀取過——
+ *   saveStudent() 存檔時直接讀 `add-seat` 輸入框當下的值，不依賴這個欄位。因此不會
+ *   出現「畫面顯示A、實際存進B」的靜默錯置；殘留風險是較慢回來的舊請求會把使用者
+ *   正在編輯中途的表單輸入悄悄蓋掉（資料遺失，不是存錯人）。修法：比照
+ *   openCommentModal()/_openCommentModalWithUid() 的 requestToken 手法——
+ *   editStudent() 與 openAddStudentModal()（新增學生）共用一個全域
+ *   `_addStudentModalRequestToken`，每次呼叫都換一個新物件參考；editStudent() 的
+ *   await 結束後先確認 token 是否仍是自己那個，不是就直接放棄，不寫欄位、也不重新
+ *   彈出 Modal。
+ *   T-SEC-77  真執行 editStudent()：暫時覆寫 getRosterForSelectedTerm()（用呼叫次數
+ *             控制回應延遲，模擬「先點但後回」）與 openModal()（記錄呼叫次數），
+ *             模擬老師快速連點「座號01編輯」（60ms才回）緊接著「座號02編輯」
+ *             （10ms就回）：驗證最終欄位顯示座號02（不是被較慢的01覆蓋回去）、
+ *             modal.dataset.editId 為02、openModal() 只被呼叫1次（舊請求真的放棄，
+ *             沒有連「重新彈出Modal」都做了一次）。
+ *   T-SEC-78  真執行 editStudent() 與 openAddStudentModal() 的競態：老師點了座號01
+ *             的「編輯」（getRosterForSelectedTerm() 60ms才回）、在回來前改點「新增
+ *             學生」，驗證較慢回來的舊 editStudent(01) 資料不會把已經清空、準備讓
+ *             老師填寫新學生的表單悄悄改填回舊學生資料，editId 維持空字串，
+ *             openModal() 只被呼叫1次（來自「新增學生」，不是舊請求）。
+ * 開發階段已用純 Node（不含 DOM）模擬同一套 requestToken 判斷邏輯與非同步排序，對
+ * 「修好版本」與「修法前的原始邏輯」分別跑過同一套斷言交叉驗證：修好版本兩個情境皆
+ * 正確通過；套在原始邏輯上，兩個情境皆正確重現「舊請求覆蓋新選擇／覆蓋新增表單」的
+ * 症狀並使斷言失敗——確認斷言本身有鑑別力，不是巧合通過。**這只是沙盒層級的邏輯
+ * 交叉驗證，不是在真實瀏覽器對已部署網站執行；仍待使用者本機 Step2_RunTests.bat
+ * 的真實執行結果確認，包含最終的具名呼叫點／執行時項數統計**（本檔案在此之前已是
+ * v41／T-SEC-76，本輪新增 T-SEC-77／T-SEC-78 兩條，皆非迴圈產生，具名呼叫點與執行時
+ * 項數應各自 +2）。student_test.js 本輪未異動——add-student-modal／editStudent() 只
+ * 存在於 teacher.html，student.html 沒有對應功能。
  *
  * v41 修正（2026-09-05）：與 student_test.js 的 v45 對稱——使用者自行稽核找到一組
  * 監聽器疊加 bug，橫跨 student.html／teacher.html 共4處，完整背景（含 3 個學生端
@@ -4475,6 +4523,137 @@ async function runTeacherTests(page, log) {
       throw new Error(`legendEl 的 scroll 監聽器在3次重繪後被綁了 ${result.scrollAddCount} 次，應該最多1次（疊加沒有被修好）`);
     if (!result.onscrollBound)
       throw new Error('legendEl.onscroll 沒有被正確綁定——可能改用了其他寫法但沒有實際生效');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-77／T-SEC-78  2026-09-06 新增：add-student-modal 開啟競態修復
+  // （使用者稽核 comment-modal 後要求比照角度查其餘 Modal，發現 editStudent() 有
+  // 結構不同、嚴重度較低的同類問題；完整背景見檔頭 v42 changelog）
+  // ════════════════════════════════════════
+  // editStudent() 內部 await getRosterForSelectedTerm() 有非同步空窗，原本 await
+  // 後無條件覆寫表單欄位。已改用 requestToken 手法（同 openCommentModal()），
+  // editStudent() 與 openAddStudentModal() 共用全域 _addStudentModalRequestToken，
+  // await 結束後先確認 token 是否仍是自己那個，不是就放棄、不寫欄位也不重開 Modal。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-77 editStudent() 快速切換兩位不同學生時，較慢回來的舊請求不會覆蓋較快回來的新選擇', async () => {
+    // 測試手法：暫時覆寫 getRosterForSelectedTerm()，用呼叫次數控制回應延遲——
+    // 第一次呼叫（對應「先點、座號01」）刻意回應較慢（60ms），第二次呼叫（對應
+    // 「後點、座號02」）回應較快（10ms），模擬「先點的請求反而晚到」這個最容易
+    // 觸發 bug 的順序。同時覆寫 openModal() 記錄呼叫次數，藉此確認舊請求真的完全
+    // 放棄、不會連「重新彈出 Modal」都做了一次（不只檢查欄位內容，也檢查副作用
+    // 有沒有被正確攔下）。
+    const result = await page.evaluate(async () => {
+      if (typeof editStudent !== 'function' || typeof openAddStudentModal !== 'function') return { skip: true };
+      const modal = document.getElementById('add-student-modal');
+      const fieldIds = ['add-seat', 'add-student-id', 'add-name', 'add-company', 'add-google-email'];
+      if (!modal || fieldIds.some(id => !document.getElementById(id))) return { skip: true };
+
+      const origGetRoster = window.getRosterForSelectedTerm;
+      const origOpenModal = window.openModal;
+      const savedValues = {};
+      fieldIds.forEach(id => { savedValues[id] = document.getElementById(id).value; });
+      const savedEditId = modal.dataset.editId;
+      const savedPhotoUrl = modal.dataset.photoUrl;
+
+      try {
+        const openModalCalls = [];
+        window.openModal = (id) => { openModalCalls.push(id); };
+
+        const roster = [
+          { seatNo: '01', studentId: 'S01', name: '學生甲', company: 'A公司', email: '', photoUrl: '' },
+          { seatNo: '02', studentId: 'S02', name: '學生乙', company: 'B公司', email: '', photoUrl: '' },
+        ];
+        let callCount = 0;
+        window.getRosterForSelectedTerm = () => {
+          callCount++;
+          const delay = callCount === 1 ? 60 : 10;
+          return new Promise(resolve => setTimeout(() => resolve(roster), delay));
+        };
+
+        // 模擬老師快速連點：先點座號01「編輯」，緊接著點座號02「編輯」——兩個
+        // 呼叫幾乎同時發出，01先發但60ms才回，02後發卻10ms就回。
+        const p1 = editStudent('01');
+        const p2 = editStudent('02');
+        await Promise.all([p1, p2]);
+
+        return {
+          skip: false,
+          seatField: document.getElementById('add-seat').value,
+          nameField: document.getElementById('add-name').value,
+          companyField: document.getElementById('add-company').value,
+          editId: modal.dataset.editId,
+          openModalCalls,
+        };
+      } finally {
+        window.getRosterForSelectedTerm = origGetRoster;
+        window.openModal = origOpenModal;
+        fieldIds.forEach(id => { document.getElementById(id).value = savedValues[id]; });
+        modal.dataset.editId = savedEditId || '';
+        modal.dataset.photoUrl = savedPhotoUrl || '';
+      }
+    });
+    if (result.skip) return;
+    if (result.nameField !== '學生乙' || result.seatField !== '02' || result.companyField !== 'B公司')
+      throw new Error(`較慢回來的座號01舊請求覆蓋了較快回來的座號02新選擇——欄位顯示 seat=${result.seatField} name=${result.nameField} company=${result.companyField}，預期應維持座號02（學生乙）`);
+    if (result.editId !== '02')
+      throw new Error(`modal.dataset.editId 應為 02（最新一次點擊），實際是「${result.editId}」`);
+    if (result.openModalCalls.length !== 1)
+      throw new Error(`openModal() 應該只被呼叫 1 次（來自座號02這次），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已經放棄的舊請求仍然重新彈出了 Modal`);
+  });
+
+  await test('T-SEC-78 editStudent() 查詢尚未回來時若改點「新增學生」，稍後才回來的舊資料不會覆蓋乾淨的新增表單', async () => {
+    // 同一套 requestToken 機制的另一個情境：openAddStudentModal()（新增學生，全
+    // 同步）呼叫時也會換一個新 token，讓正在飛行中的 editStudent() 作廢。驗證的是
+    // 「舊的 editStudent() 回呼不會把已經清空、準備讓老師填寫新學生資料的表單，
+    // 悄悄改填回舊學生的資料」。
+    const result = await page.evaluate(async () => {
+      if (typeof editStudent !== 'function' || typeof openAddStudentModal !== 'function') return { skip: true };
+      const modal = document.getElementById('add-student-modal');
+      const fieldIds = ['add-seat', 'add-student-id', 'add-name', 'add-company', 'add-google-email'];
+      if (!modal || fieldIds.some(id => !document.getElementById(id))) return { skip: true };
+
+      const origGetRoster = window.getRosterForSelectedTerm;
+      const origOpenModal = window.openModal;
+      const savedValues = {};
+      fieldIds.forEach(id => { savedValues[id] = document.getElementById(id).value; });
+      const savedEditId = modal.dataset.editId;
+      const savedPhotoUrl = modal.dataset.photoUrl;
+
+      try {
+        const openModalCalls = [];
+        window.openModal = (id) => { openModalCalls.push(id); };
+
+        const roster = [{ seatNo: '01', studentId: 'S01', name: '學生甲', company: 'A公司', email: '', photoUrl: '' }];
+        window.getRosterForSelectedTerm = () => new Promise(resolve => setTimeout(() => resolve(roster), 60));
+
+        // 老師點了座號01的「編輯」（尚未回來），改變主意改點「新增學生」
+        const p1 = editStudent('01');
+        openAddStudentModal(); // 同步執行：立刻清空欄位＋換新 token＋openModal
+        await p1; // 等座號01那個較慢的舊請求真的回來（若沒被擋下，會在這裡覆寫欄位）
+
+        return {
+          skip: false,
+          seatField: document.getElementById('add-seat').value,
+          nameField: document.getElementById('add-name').value,
+          editId: modal.dataset.editId,
+          openModalCalls,
+        };
+      } finally {
+        window.getRosterForSelectedTerm = origGetRoster;
+        window.openModal = origOpenModal;
+        fieldIds.forEach(id => { document.getElementById(id).value = savedValues[id]; });
+        modal.dataset.editId = savedEditId || '';
+        modal.dataset.photoUrl = savedPhotoUrl || '';
+      }
+    });
+    if (result.skip) return;
+    if (result.nameField !== '' || result.seatField !== '')
+      throw new Error(`點了「新增學生」之後，較慢回來的舊 editStudent(01) 請求仍然把表單填回舊學生資料——seat=${result.seatField} name=${result.nameField}，預期應維持空白（新增學生表單）`);
+    if (result.editId !== '')
+      throw new Error(`modal.dataset.editId 應維持空字串（新增學生，不是編輯），實際是「${result.editId}」`);
+    if (result.openModalCalls.length !== 1)
+      throw new Error(`openModal() 應該只被呼叫 1 次（來自「新增學生」這次），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已經放棄的舊 editStudent() 請求仍然重新彈出了 Modal`);
   });
 
   return results;

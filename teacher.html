@@ -1689,6 +1689,10 @@ let db, firebase_funcs;
 // 與 onAuthStateChanged 的對應修改）。
 let _loginHandling = false;
 let _currentCommentJournal = null;
+// 2026-09-06 新增：add-student-modal 開啟競態防護（editStudent()／openAddStudentModal()
+// 共用）。完整背景見 editStudent() 上方註解，跟 openCommentModal()/
+// _openCommentModalWithUid() 的 requestToken 手法同一套設計。
+let _addStudentModalRequestToken = null;
 let _batchReviewJournals = [];
 let _activeRosterSemester = null;
 let _studentTermInitialized = false;
@@ -3687,6 +3691,11 @@ async function removeBindingInline(docId, email) {
 }
 
 function openAddStudentModal() {
+  // 2026-09-06 補修：換一個新的 requestToken，讓任何還在飛行中的 editStudent() 非同步
+  // 回呼作廢——若老師先點了某位學生的「編輯」（getRosterForSelectedTerm() 尚未回來），
+  // 又點「新增學生」想改填一筆新資料，稍後才回來的舊 editStudent() 資料不該把這個乾淨的
+  // 新增表單悄悄覆蓋掉。完整理由見 editStudent() 上方註解。
+  _addStudentModalRequestToken = {};
   ['add-seat','add-student-id','add-name','add-company','add-google-email'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   const modal = document.getElementById('add-student-modal');
   modal.dataset.editId = '';
@@ -3697,8 +3706,21 @@ function openAddStudentModal() {
   openModal('add-student-modal');
 }
 
+// 2026-09-06 補修（開啟競態）：這裡有一段 await getRosterForSelectedTerm() 的非同步空窗
+// ——若老師快速連點兩位不同學生的「編輯」（或改點「新增學生」），較慢回來的那個請求會
+// 無條件覆寫表單欄位，可能把使用者正在編輯中途的輸入悄悄蓋掉。這不是「存錯人」等級的
+// 問題（saveStudent() 直接讀 add-seat 輸入框當下的值，不依賴這裡設定的
+// modal.dataset.editId，且 dataset.editId 全檔案從未被讀取過），但覆寫使用者輸入本身
+// 仍是真實的資料遺失風險。比照 openCommentModal()/_openCommentModalWithUid() 的
+// requestToken 手法：每次呼叫 editStudent() 或 openAddStudentModal() 都換一個新的
+// requestToken（每次都是全新物件參考，天生唯一），await 結束後先確認
+// _addStudentModalRequestToken 是否仍是自己那個 token——不是的話代表已經被更新的請求
+// （或「新增學生」）取代，直接放棄，不寫入已經過期的表單內容、也不重新彈出 Modal。
 async function editStudent(seatNo) {
+  const requestToken = {};
+  _addStudentModalRequestToken = requestToken;
   const roster = await getRosterForSelectedTerm();
+  if (_addStudentModalRequestToken !== requestToken) return; // 已被更新的請求取代，放棄
   const s = roster.find(x => x.seatNo === seatNo);
   if (!s) return;
   document.getElementById('add-seat').value = s.seatNo;
