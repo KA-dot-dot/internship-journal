@@ -1,7 +1,42 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v43
+ * 學生端自動化測試 v44
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v44 修正（2026-09-05）：v43 修好「切換分頁前」的過期快取競態後，使用者重新檢視同一個
+ * saveJournal() 函式，發現一個範圍更廣、性質不同的第二個缺口——「使用者確認覆蓋」的
+ * window.confirm() 對話框本身，期間完全沒有任何現查。data（含 entries 整欄覆蓋，
+ * merge:true 對陣列是整欄取代不是逐筆合併）在 confirm() 彈出之前就已經定案；confirm()
+ * 是阻塞在使用者身上的對話框（會清掉老師評語的重要警告，猶豫十幾秒到幾十秒很自然），
+ * 窗口量級遠大於 v43 處理的「網路延遲那幾百毫秒」，且觸發面比「已審閱」更廣——只要
+ * cached?.exists 為真（這個月份已有月記存在，不限於已審閱）任何一次重新儲存都會經過
+ * 這個窗口，是很常見的使用模式（學生分好幾次填寫同一個月份）。情境重現：Tab A 現查後
+ * 組好 data、跳出 confirm()，使用者猶豫期間 Tab B 已經存檔完成，Tab A 才點確定，直接
+ * setDoc() 把 Tab B 剛存的內容整個覆蓋掉，雙方都以為存檔成功，是一次無聲的資料遺失。
+ * 修法：confirmed===true、showLoading() 之後、setDoc() 之前，再現查一次伺服器目前的
+ * updatedAt（已在 v43 的快取結構裡，不需要新欄位），跟 confirm() 彈出前讀到的
+ * cached.updatedAt 不同（或文件已被刪除）就中止並提示使用者重新整理，不靜默覆蓋。這次
+ * 現查本身失敗時，刻意跟函式開頭那次「失敗不擋、沿用舊值」的既有原則相反：改成保守
+ * 擋下——因為這道防線的失效恰好最可能發生在真的有並發寫入的網路不穩情境，若查不到仍
+ * 放行，等於讓這道專門防止「confirm() 期間資料被覆蓋」的防護在它最該發揮作用的情境下
+ * 直接失效。
+ *   S-SEC-65  靜態比對 saveJournal()：鎖定「confirm() 彈出」到「setDoc() 寫入」這段
+ *             區間（避免命中 S-SEC-32 已覆蓋的函式開頭那次現查），確認①存在第二次
+ *             await getDoc(journalRef)；②比對邏輯用 recheckUpdatedAt !== cached.
+ *             updatedAt；③staleOverwrite = true 在「比對不符」與「現查失敗」兩條路徑
+ *             都出現（缺一即代表 catch 分支被改回失敗不擋，跟開頭那次現查的既有原則
+ *             混淆）；④存在 if (staleOverwrite) { ... return; } 真正中止存檔，不是
+ *             算出結果卻放著不管；⑤中止時清空 window._currentJournalCache。未比照
+ *             S-SEC-58/59 等改用真執行——理由與 S-SEC-32 相同：saveJournal() 會動到
+ *             Firestore，共用測試頁面之後還有其他測試依賴登入狀態，貿然覆寫風險不
+ *             成比例。
+ * 開發階段已用 Node 直接抽取（括號配對，非天真 regex）修法前／後兩版 saveJournal()
+ * 原始碼，把新斷言分別跑在兩版上交叉驗證：修好版本 6 項檢查全部通過；原始（v43）
+ * 版本正確在「找不到第二次 getDoc」等 5 項判定失敗；另外模擬兩種局部回退情境驗證
+ * 斷言的鑑別力——①只把 catch 分支改回「失敗不擋」（console.warn 後不設
+ * staleOverwrite）：staleOverwriteSetCount 從2降為1，正確判定失敗；②保留比對邏輯但
+ * 拿掉中止用的 return：hasAbortReturn 正確判定失敗。**以上沙盒驗證無法取代使用者
+ * 本機 Step2_RunTests.bat 對已部署正式網站的真實執行結果，待其確認。**
  *
  * v43 修正（2026-09-04）：saveJournal() 的「快取新鮮度檢查」有跨裝置/跨分頁競態
  * 條件——2026-07-13 版本只在偵測到「快取的 sem/month 跟目前選定不一致」時才現查一次
@@ -4125,6 +4160,69 @@ async function runStudentTests(page, browserContext, log) {
     });
   });
 
+
+  // ════════════════════════════════════════
+  // S-SEC-65  2026-09-05 新增：saveJournal() 的「使用者確認覆蓋」對話框（window.confirm()）
+  // 期間缺少二次現查。confirm() 是阻塞在使用者身上的對話框（猶豫十幾秒到幾十秒很自然），
+  // 跟 S-SEC-32 修的「切換分頁前」機器對機器毫秒級競態窗口不是同一類，且觸發面更廣——
+  // 只要 cached?.exists 為真（月記已存在，不限於已審閱）任何一次重新儲存都會經過這個
+  // 窗口。情境重現：Tab A 現查後組好 data（含 entries 整欄覆蓋）、跳出 confirm()，使用者
+  // 猶豫期間 Tab B 已經存檔完成，Tab A 才點確定，直接 setDoc() 把 Tab B 剛存的內容整個
+  // 覆蓋掉，雙方都以為存檔成功，是一次無聲的資料遺失。修法：confirmed===true、
+  // showLoading() 之後、setDoc() 之前，再現查一次伺服器目前的 updatedAt，跟 confirm()
+  // 彈出前讀到的 cached.updatedAt 不同（或文件已被刪除）就中止並提示重新整理；這次
+  // 現查本身失敗時刻意跟函式開頭那次「失敗不擋、沿用舊值」的原則相反——保守擋下，理由：
+  // 這道防線的失效恰好最可能發生在真的有並發寫入的網路不穩情境。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-65 saveJournal() 在使用者確認覆蓋（confirm()）後、真正寫入（setDoc()）前，會再次現查 updatedAt 是否被別的裝置/分頁動過，不一致則中止且不放行', async () => {
+    const result = await page.evaluate(() => {
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!saveFnStr) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const saveCode = codeOnly(saveFnStr);
+
+      // 鎖定「confirm() 彈出」到「真正 setDoc()」這段區間，只在這段裡找新增的二次
+      // 現查邏輯——避免命中函式開頭那次現查（S-SEC-32 已經覆蓋）或其解釋性註解。
+      const confirmedIdx = saveCode.indexOf('const confirmed = window.confirm');
+      const setDocIdx = saveCode.indexOf('await setDoc(journalRef, data');
+      const segmentFound = confirmedIdx !== -1 && setDocIdx !== -1 && confirmedIdx < setDocIdx;
+      const segment = segmentFound ? saveCode.slice(confirmedIdx, setDocIdx) : '';
+
+      const hasRecheckGetDoc = /await\s+getDoc\s*\(\s*journalRef\s*\)/.test(segment);
+      const hasUpdatedAtComparison = /recheckUpdatedAt\s*!==\s*cached\.updatedAt/.test(segment);
+      // 正常路徑（比對不符）與現查失敗的 catch 路徑都必須把 staleOverwrite 設成
+      // true——只找到1次代表 catch 分支被改回「失敗不擋」，等於這道防線在網路不穩、
+      // 最可能真的有並發寫入的情況下失去保護力。
+      const staleOverwriteSetCount = (segment.match(/staleOverwrite\s*=\s*true/g) || []).length;
+      const hasAbortReturn = /if\s*\(staleOverwrite\)\s*\{[\s\S]*?return;/.test(segment);
+      const abortClearsCache = /if\s*\(staleOverwrite\)\s*\{[\s\S]*?_currentJournalCache\s*=\s*null[\s\S]*?return;/.test(segment);
+
+      return {
+        skip: false,
+        segmentFound,
+        hasRecheckGetDoc,
+        hasUpdatedAtComparison,
+        staleOverwriteSetCount,
+        hasAbortReturn,
+        abortClearsCache,
+      };
+    });
+    if (result.skip) return;
+    if (!result.segmentFound)
+      throw new Error('saveJournal() 找不到「confirm() 彈出」到「setDoc() 寫入」這段區間，函式結構可能已大幅改動，需要重新確認二次現查邏輯是否還在');
+    if (!result.hasRecheckGetDoc)
+      throw new Error('saveJournal() 的 confirm() 之後、setDoc() 之前找不到第二次 await getDoc(journalRef)——使用者確認覆蓋後、真正寫入前的二次現查可能被移除，confirm() 期間的資料被覆蓋風險會重新出現');
+    if (!result.hasUpdatedAtComparison)
+      throw new Error('saveJournal() 找不到「recheckUpdatedAt !== cached.updatedAt」這個比對，二次現查即使還在呼叫，也可能已經不再拿結果跟 confirm() 前的 baseline 比對，形同沒有防護');
+    if (result.staleOverwriteSetCount < 2)
+      throw new Error(`staleOverwrite 應該在「比對不符」與「現查失敗」兩條路徑都被設成 true，實際只找到 ${result.staleOverwriteSetCount} 次——可能是現查失敗的 catch 分支被改回「失敗不擋」，讓這道防線在網路不穩、最可能真的有並發寫入的情況下失去保護力`);
+    if (!result.hasAbortReturn)
+      throw new Error('saveJournal() 找不到「if (staleOverwrite) { ... return; }」中止邏輯——即使有偵測到資料被動過，也可能沒有真的擋下這次存檔，只是算出結果卻繼續往下執行到 setDoc()');
+    if (!result.abortClearsCache)
+      throw new Error('saveJournal() 中止覆蓋時找不到 window._currentJournalCache = null——沒有清空快取，可能讓使用者在同一分頁重試時繼續沿用這份已知過期的快取');
+  });
 
   return results;
 }

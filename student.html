@@ -4116,10 +4116,43 @@ async function saveJournal() {
         return;
       }
       showLoading();
+      // 2026-09-05 新增：上面這個 confirm() 是阻塞在「使用者」身上的對話框（會清掉老師
+      // 評語的重要警告，使用者猶豫十幾秒到幾十秒是很自然的事），窗口量級遠大於「網路
+      // 延遲那幾百毫秒」，不能比照下面「現查失敗不擋、沿用舊值」的既有原則帶過。data
+      // （含 entries 整欄覆蓋，merge:true 對陣列是整欄取代不是逐筆合併）在 confirm()
+      // 彈出之前就已經定案；confirm() 期間若同一份月記被別的裝置/分頁存過，直接
+      // setDoc() 會把對方剛存的內容整個覆蓋掉、雙方都以為存檔成功，是一次無聲的資料
+      // 遺失。這裡在使用者按下確定「之後」、真正寫入「之前」，再核對一次伺服器目前的
+      // updatedAt（每次真正存檔都會更新，見下方 data.updatedAt）是否還跟 confirm()
+      // 彈出「之前」讀到的 cached.updatedAt 一致，不一致（或文件已被刪除）就中止這次
+      // 存檔，不靜默覆蓋。
+      let staleOverwrite = false;
+      try {
+        const recheckSnap = await getDoc(journalRef);
+        const recheckUpdatedAt = recheckSnap.exists() ? recheckSnap.data().updatedAt : null;
+        if (recheckUpdatedAt !== cached.updatedAt) staleOverwrite = true;
+      } catch (e) {
+        // 這是「使用者確認覆蓋後、真正寫入前」的最後一道防線，刻意跟下面「現查失敗
+        // 不擋」的既有原則相反：那個原則保護的是「查不到就假設沒變」，頂多讓
+        // isFirstSubmit 誤判，其餘機制仍有兜底；這裡若查不到仍放行，等於讓這道專門
+        // 防止「confirm() 期間資料被覆蓋」的防護，在網路本身不穩、反而更可能真的有
+        // 並發寫入的情況下直接失效，因此改成保守擋下，要求使用者重新整理後再試。
+        console.warn('儲存前二次核對失敗，保守擋下避免覆蓋他人資料', e);
+        staleOverwrite = true;
+      }
+      if (staleOverwrite) {
+        window._currentJournalCache = null; // 強制下次重新現查，不留可能已過期的快取
+        hideLoading();
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+        toast('⚠️ 這份月記剛剛被更新過（可能來自你的其他裝置或分頁），為避免覆蓋，請重新整理頁面後再試一次', 'error');
+        return;
+      }
     }
-    // 2026-07-13 更新：正常情況下快取已在上面（isFirstSubmit 計算前）確認過新鮮，
-    // 不符則已現查更新，這裡幾乎不會再遇到「快取無效」；僅在上面的現查因網路問題
-    // 失敗時才會殘留舊/空快取，此時仍正常儲存、不擋（比照截止日查詢失敗的既有處理原則）
+    // 2026-09-05 更新：正常情況下快取已在函式開頭（isFirstSubmit 計算前）與剛才
+    // （confirm() 之後、setDoc() 之前）各確認過一次新鮮；上面兩次現查若因網路問題
+    // 失敗，皆已改為保守處理（開頭失敗沿用舊值繼續、confirm()後失敗直接擋下退出），
+    // 執行到這裡代表兩次核對皆已通過或本來就不需要核對（cached.exists 為 false，
+    // 即這是第一次繳交，本來就沒有「被別人覆蓋」的風險）。
     await setDoc(journalRef, data, { merge: true }); // merge: true；data 已包含 teacher 欄位歸零，確保重新儲存時清除舊評語
     window._currentJournalCache = null; // 儲存後清除快取，下次切換回此月份時重新讀取
     clearCurrentWriteDraft();
