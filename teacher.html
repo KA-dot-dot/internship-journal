@@ -6825,6 +6825,25 @@ function toggleLocDetail(subId) {
 // ===== 老師評語功能 ==========================================
 // ============================================================
 
+// 2026-09-06 補修（開啟競態）：老師快速切換兩位不同學生的「留評語」時，這裡原本
+// 同步立刻把 _currentCommentJournal（saveTeacherComment() 存檔時實際會用到的目標：
+// seatNo／semester／month／ownerUid）蓋成最新一次點擊的學生，但
+// _openCommentModalWithUid() 的 getDoc().then() 回呼原本無條件覆寫畫面（標題／
+// 學生姓名／評語文字框／學生回覆區），用的是呼叫當下閉包住的參數，不會重新確認
+// _currentCommentJournal 是否還是自己這次。情境：老師點了座號01的「留評語」（查詢
+// 中）→ 很快改點座號02（_currentCommentJournal 立刻變成02）→ 若座號01那個先發出
+// 的查詢反而比較晚回來，畫面最終顯示座號01的資訊，但 _currentCommentJournal 已經
+// 是座號02——老師畫面上看到的是01，按下儲存卻會寫進02的月記，評語存錯人。
+// openCommentModal() 從點擊到 Modal 真正跳出來之間沒有任何 loading 提示或按鈕
+// 鎖定，老師「以為沒反應、改點別行」是很自然會發生的操作，容易真的觸發。
+// 修法：requestToken 每次呼叫都是全新物件參考（天生唯一，用參考比較），直接存進
+// _currentCommentJournal 本身；_openCommentModalWithUid() 的 .then()／.catch() 寫
+// 畫面前都先確認 _currentCommentJournal?.requestToken 是否仍是自己這次拿到的那個
+// ——不是的話代表已經被更新的請求取代，直接放棄，不寫畫面、也不彈出 Modal。
+// 跟 add-student-modal 的 _addStudentModalRequestToken 是同一套設計，差異只在於
+// 這裡把 token 直接放進既有的 _currentCommentJournal 物件裡（不另開一個全域變數），
+// 因為「這次點擊的目標」與「這次點擊的 token」本來就是同一時間點產生、天生綁在一起
+// 的一組資訊。
 function openCommentModal(seatNo, semester, month, knownOwnerUid) {
   const semLabel = semester.replace('-1','第1學期').replace('-2','第2學期');
   // 優先用傳入的 ownerUid；其次從快取取；都沒有才顯示錯誤
@@ -6834,13 +6853,15 @@ function openCommentModal(seatNo, semester, month, knownOwnerUid) {
     toast('⏳ 系統正在同步資料，請稍候片刻再試', 'warning');
     return;
   }
-  _currentCommentJournal = { seatNo, semester, month, ownerUid };
-  _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel);
+  const requestToken = {};
+  _currentCommentJournal = { seatNo, semester, month, ownerUid, requestToken };
+  _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel, requestToken);
 }
 
-function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
+function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel, requestToken) {
   const { doc, getDoc } = firebase_funcs;
   getDoc(doc(db, 'users', ownerUid, 'journals', teacherJournalKey(seatNo, semester, month))).then(snap => {
+    if (_currentCommentJournal?.requestToken !== requestToken) return; // 已被更新的請求取代，放棄
     const data = snap.exists() ? snap.data() : {};
     // 2026-07-11 清理：原本這裡會設定 _currentCommentJournal.oldComment（搭配
     // seatNo/semester/month 三重身份比對，防同分頁快速切換月記時設錯舊評語），
@@ -6864,6 +6885,7 @@ function _openCommentModalWithUid(seatNo, semester, month, ownerUid, semLabel) {
     }
     openModal('comment-modal');
   }).catch(() => {
+    if (_currentCommentJournal?.requestToken !== requestToken) return; // 已被更新的請求取代，放棄
     // 2026-07-11 清理：原本這裡會把 _currentCommentJournal.oldComment 設為空字串，
     // 理由同上方 .then() 分支的說明——saveTeacherComment() 已不再讀這個欄位，一併移除。
     document.getElementById('comment-modal-textarea').value = '';

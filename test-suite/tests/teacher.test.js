@@ -1,13 +1,49 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v42
+ * 老師端自動化測試 v43
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v43 修正（2026-09-06）：補上 v42 changelog 遺留的一個文件準確性錯誤，並實際修正
+ * comment-modal 本身——v42 那次的敘述寫「（comment-modal）該處已用 requestToken 手法
+ * 修過（本輪之前）」，但查證後確認這句話**不正確**：comment-modal 當時只有分析與建議
+ * 修法，程式碼裡從未真的被實作過（`grep requestToken` 在 `openCommentModal()`／
+ * `_openCommentModalWithUid()` 完全沒有命中）；v42 只把同一套手法套用到
+ * `add-student-modal`，卻在敘述裡誤用「comment-modal 已經修好」當參照點。這次連本輪
+ * 一併把 comment-modal 本身也修正，兩件事一起記錄。
+ *
+ * 修法：`openCommentModal()` 每次呼叫都建立一個新的 `requestToken`（全新物件參考，
+ * 天生唯一），直接存進 `_currentCommentJournal` 本身（不像 `add-student-modal` 另開
+ * 一個獨立全域變數，因為「這次點擊的目標」跟「這次點擊的 token」本來就是同一時間點
+ * 產生、天生綁在一起的一組資訊）；`_openCommentModalWithUid()` 新增第六個參數
+ * `requestToken`，`.then()`／`.catch()` 兩個分支寫畫面前都先確認
+ * `_currentCommentJournal?.requestToken` 是否仍是自己這次拿到的那個——不是的話代表
+ * 已經被更新的請求取代，直接放棄，不寫畫面、也不彈出 Modal。`saveTeacherComment()`
+ * 不需要異動——它本來就是解構 `_currentCommentJournal` 讀 `seatNo`/`semester`/
+ * `month`/`ownerUid`，多一個 `requestToken` 欄位不影響解構結果。
+ *   T-SEC-79  真執行 openCommentModal()：暫時覆寫 firebase_funcs.getDoc（比照既有
+ *             T-SEC-69 對 firebase_funcs.deleteDoc 的做法）用呼叫次數控制回應延遲，
+ *             模擬老師快速連點「座號__t79a__留評語」（60ms才回）緊接著「座號__t79b__」
+ *             （10ms就回）：驗證 `_currentCommentJournal` 與畫面最終都正確停在
+ *             __t79b__、openModal() 只被呼叫1次。
+ *   T-SEC-80  真執行 openCommentModal()：驗證 `.catch()` 分支也有同一道守門（不是
+ *             只補了 `.then()`）——先點的座號__t80a__查詢刻意讓它60ms後失敗
+ *             （reject），後點的座號__t80b__10ms後成功並顯示評語/回覆內容，驗證
+ *             __t80a__較慢回來的失敗回呼不會把__t80b__已經顯示的內容清空。
+ * 開發階段用 jsdom 直接從修好後與修法前兩份 teacher.html 逐字抽取
+ * `openCommentModal()`／`_openCommentModalWithUid()` 本體交叉驗證：修好版本兩情境
+ * （`.then()`搶跑／`.catch()`搶跑）皆正確通過；原始版本兩情境皆正確重現「畫面顯示
+ * 座號01、但`_currentCommentJournal`已經是座號02」（Scenario A）與「較快的成功顯示
+ * 被較慢的失敗回呼清空」（Scenario B）的症狀並使斷言失敗，確認斷言有鑑別力。這只是
+ * 沙盒層級驗證，仍待使用者本機 `Step2_RunTests.bat` 的真實執行結果確認。
+ * `student_test.js` 本輪未異動——comment-modal 只存在於 `teacher.html`。
  *
  * v42 修正（2026-09-06）：使用者稽核 comment-modal（老師留評語）發現一個「開兩次之間
  * 互相搶跑」的競態——openCommentModal() 同步立刻把 _currentCommentJournal（存檔目標）
  * 蓋成最新一次點擊的學生，但 _openCommentModalWithUid() 的 getDoc().then() 回呼無條件
  * 覆寫畫面（標題/姓名/評語文字框），若「先點但後回」的舊請求晚到，畫面顯示的學生會跟
- * 實際存檔目標不一致，評語可能存錯人。該處已用 requestToken 手法修過（本輪之前）。
+ * 實際存檔目標不一致，評語可能存錯人。**⚠️ 2026-09-06（v43）事後訂正：這裡當時寫「該處
+ * 已用 requestToken 手法修過（本輪之前）」是不正確的敘述——comment-modal 當時只有
+ * 分析／建議，程式碼從未真的被修正過，直到 v43 才實際修正，見上方 v43 條目。**
  * 使用者接著要求比照同一個角度，把其餘四個 Modal（photo-modal／add-student-modal／
  * t-batch-delete-modal／import-modal）也逐一查一遍是否有同款問題。逐一讀原始碼後確認：
  * - photo-modal（openPhotoModal()）：全程同步，無 await，不受影響。
@@ -4654,6 +4690,158 @@ async function runTeacherTests(page, log) {
       throw new Error(`modal.dataset.editId 應維持空字串（新增學生，不是編輯），實際是「${result.editId}」`);
     if (result.openModalCalls.length !== 1)
       throw new Error(`openModal() 應該只被呼叫 1 次（來自「新增學生」這次），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已經放棄的舊 editStudent() 請求仍然重新彈出了 Modal`);
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-79／T-SEC-80  2026-09-06 新增：comment-modal（openCommentModal()／
+  // _openCommentModalWithUid()）開啟競態修復——這輪稽核最初的起點，這裡才是
+  // 真正補上修法與測試的地方（T-SEC-77／T-SEC-78 是查其餘 Modal 時，比照這裡
+  // 同一套手法先補的 add-student-modal）。完整背景見 AI_CONTEXT_狀態.md 第
+  // 三十五節。
+  // ════════════════════════════════════════
+  // openCommentModal() 點擊當下同步把 _currentCommentJournal（saveTeacherComment()
+  // 存檔時實際會用到的目標）蓋成最新一次點擊的學生，但 _openCommentModalWithUid()
+  // 的 getDoc().then()／.catch() 回呼原本無條件覆寫畫面。已改用 requestToken 手法
+  // ——token 直接存進 _currentCommentJournal 本身，.then()／.catch() 寫畫面前都先
+  // 比對 _currentCommentJournal?.requestToken 是否仍是自己這次拿到的那個。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-79 openCommentModal() 快速切換兩位不同學生時，較慢回來的舊查詢不會覆蓋較快回來的新選擇（避免評語存錯人）', async () => {
+    // 測試手法：暫時覆寫 firebase_funcs.getDoc（比照既有 T-SEC-69 對
+    // firebase_funcs.deleteDoc 的做法），用呼叫次數控制回應延遲——第一次呼叫
+    // （對應「先點、座號__t79a__」）刻意回應較慢（60ms），第二次呼叫（對應
+    // 「後點、座號__t79b__」）回應較快（10ms），模擬「先點的請求反而晚到」這個
+    // 最容易觸發 bug 的順序。用真正的 firebase_funcs.doc() 建構的 DocumentReference
+    // 的 .path 判斷這次查詢是哪位學生，不用另外重寫比對邏輯。同時覆寫
+    // window.openModal 記錄呼叫次數，確認舊查詢真的完全放棄、不會連「重新彈出
+    // Modal」都做了一次。
+    const result = await page.evaluate(async () => {
+      if (typeof openCommentModal !== 'function' || typeof _openCommentModalWithUid !== 'function') return { skip: true };
+      if (typeof firebase_funcs === 'undefined' || !firebase_funcs.getDoc || typeof db === 'undefined') return { skip: true };
+      const infoEl = document.getElementById('comment-modal-info');
+      const textareaEl = document.getElementById('comment-modal-textarea');
+      if (!infoEl || !textareaEl) return { skip: true };
+
+      const savedCurrentCommentJournal = _currentCommentJournal;
+      const savedInfoHtml = infoEl.innerHTML;
+      const savedTextarea = textareaEl.value;
+      const origGetDoc = firebase_funcs.getDoc;
+      const origOpenModal = window.openModal;
+
+      try {
+        const openModalCalls = [];
+        window.openModal = (id) => { openModalCalls.push(id); };
+
+        let callCount = 0;
+        firebase_funcs.getDoc = (ref) => {
+          callCount++;
+          const delay = callCount === 1 ? 60 : 10;
+          const isFirstStudent = ref && typeof ref.path === 'string' && ref.path.includes('__t79uidA__');
+          const data = isFirstStudent
+            ? { studentName: '學生甲T79', teacherComment: '', studentReply: '' }
+            : { studentName: '學生乙T79', teacherComment: '', studentReply: '' };
+          return new Promise(resolve => setTimeout(() => resolve({ exists: () => true, data: () => data }), delay));
+        };
+
+        // 模擬老師快速連點：先點座號__t79a__的「留評語」（60ms才回），緊接著點
+        // 座號__t79b__（10ms就回）
+        openCommentModal('__t79a__', '999-1', 1, '__t79uidA__');
+        openCommentModal('__t79b__', '999-1', 1, '__t79uidB__');
+
+        // 等最慢的那個（60ms）也有機會回來
+        await new Promise(r => setTimeout(r, 150));
+
+        return {
+          skip: false,
+          infoHtml: infoEl.innerHTML,
+          targetSeatNo: _currentCommentJournal ? _currentCommentJournal.seatNo : null,
+          openModalCalls,
+        };
+      } finally {
+        firebase_funcs.getDoc = origGetDoc;
+        window.openModal = origOpenModal;
+        _currentCommentJournal = savedCurrentCommentJournal;
+        infoEl.innerHTML = savedInfoHtml;
+        textareaEl.value = savedTextarea;
+      }
+    });
+    if (result.skip) return;
+    if (result.targetSeatNo !== '__t79b__')
+      throw new Error(`_currentCommentJournal 應該是最新一次點擊的座號 __t79b__（實際存檔目標），實際是「${result.targetSeatNo}」`);
+    if (!result.infoHtml.includes('學生乙T79') || result.infoHtml.includes('學生甲T79'))
+      throw new Error(`畫面顯示的學生資訊應該是座號__t79b__（學生乙T79），較慢回來的座號__t79a__舊查詢不該覆蓋畫面——實際畫面內容：${result.infoHtml}`);
+    if (result.openModalCalls.length !== 1)
+      throw new Error(`openModal() 應該只被呼叫 1 次（來自座號__t79b__這次成功查詢），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已經放棄的舊查詢仍然重新彈出了 Modal`);
+  });
+
+  await test('T-SEC-80 openCommentModal() 較慢的舊查詢失敗（.catch()分支）時，不會清空已經由較快的新查詢顯示出來的內容', async () => {
+    // 驗證 .catch() 分支也有同一道 requestToken 守門，不是只有 .then() 分支有
+    // 補（兩個分支各自獨立判斷，其中一個漏補，這條測試才抓得到）。手法：第一次
+    // getDoc() 呼叫（座號__t80a__，先點）刻意讓它 60ms 後「失敗」（reject，模擬
+    // 網路錯誤/逾時）；第二次呼叫（座號__t80b__，後點）10ms 後成功，帶有評語文字
+    // 與學生回覆內容。等座號__t80a__那個較慢、最終會失敗的查詢也回來後，驗證畫面
+    // 沒有被它的 .catch() 分支清空。
+    const result = await page.evaluate(async () => {
+      if (typeof openCommentModal !== 'function' || typeof _openCommentModalWithUid !== 'function') return { skip: true };
+      if (typeof firebase_funcs === 'undefined' || !firebase_funcs.getDoc || typeof db === 'undefined') return { skip: true };
+      const textareaEl = document.getElementById('comment-modal-textarea');
+      const replyBlock = document.getElementById('comment-modal-student-reply');
+      if (!textareaEl || !replyBlock) return { skip: true };
+
+      const savedCurrentCommentJournal = _currentCommentJournal;
+      const savedTextarea = textareaEl.value;
+      const savedReplyDisplay = replyBlock.style.display;
+      const savedReplyHtml = replyBlock.innerHTML;
+      const origGetDoc = firebase_funcs.getDoc;
+      const origOpenModal = window.openModal;
+
+      try {
+        const openModalCalls = [];
+        window.openModal = (id) => { openModalCalls.push(id); };
+
+        let callCount = 0;
+        firebase_funcs.getDoc = (ref) => {
+          callCount++;
+          if (callCount === 1) {
+            // 座號__t80a__（先點）：60ms後查詢「失敗」
+            return new Promise((resolve, reject) => setTimeout(() => reject(new Error('模擬查詢失敗（測試用，非真實錯誤）')), 60));
+          }
+          // 座號__t80b__（後點）：10ms後查詢成功，帶評語與學生回覆
+          return new Promise(resolve => setTimeout(() => resolve({
+            exists: () => true,
+            data: () => ({ studentName: '學生乙T80', teacherComment: '既有評語內容T80', studentReply: '學生的回覆內容T80' })
+          }), 10));
+        };
+
+        // 老師點了座號__t80a__的「留評語」（尚未回來），很快改點座號__t80b__
+        openCommentModal('__t80a__', '999-1', 1, '__t80uidA__');
+        openCommentModal('__t80b__', '999-1', 1, '__t80uidB__');
+
+        // 等座號__t80a__那個較慢、最終會失敗的查詢也有機會回來
+        await new Promise(r => setTimeout(r, 150));
+
+        return {
+          skip: false,
+          textareaValue: textareaEl.value,
+          replyDisplay: replyBlock.style.display,
+          openModalCalls,
+        };
+      } finally {
+        firebase_funcs.getDoc = origGetDoc;
+        window.openModal = origOpenModal;
+        _currentCommentJournal = savedCurrentCommentJournal;
+        textareaEl.value = savedTextarea;
+        replyBlock.style.display = savedReplyDisplay;
+        replyBlock.innerHTML = savedReplyHtml;
+      }
+    });
+    if (result.skip) return;
+    if (result.textareaValue !== '既有評語內容T80')
+      throw new Error(`座號__t80a__查詢失敗（.catch()分支）不該把已經由座號__t80b__成功顯示的評語文字清空——實際文字框內容：「${result.textareaValue}」`);
+    if (result.replyDisplay !== 'block')
+      throw new Error(`座號__t80a__的 .catch() 分支不該把已經由座號__t80b__成功顯示出來的學生回覆區塊隱藏——實際 display 為「${result.replyDisplay}」`);
+    if (result.openModalCalls.length !== 1)
+      throw new Error(`openModal() 應該只被呼叫 1 次（來自座號__t80b__成功查詢），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已放棄的舊查詢的 .catch() 分支仍然重新彈出了 Modal`);
   });
 
   return results;
