@@ -1,7 +1,47 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v45
+ * 學生端自動化測試 v46
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v46 修正（2026-09-06）：使用者稽核 saveJournal() 發現一個雙擊/快速重複點擊重入問題——
+ * saveBtn.disabled = true 原本要等到函式執行到「所有同步驗證都通過」之後才會設定（原本
+ * 在函式中段，工作照片驗證通過之後），但函式一開始就有一個 await（截止日查詢
+ * deadlineSnap）——這是真正會把控制權還給瀏覽器事件迴圈的讓權點。若使用者在按鈕還沒被
+ * 鎖住之前快速點兩下（雙擊在人類操作上很常見，尤其手機螢幕誤觸），第二次 click 事件會
+ * 在第一次呼叫卡在這個 await 中途時被瀏覽器處理，等於整個 saveJournal() 被重新呼叫
+ * 一次、跟第一次同時執行。AI 助手逐行核對程式碼後確認回報屬實，但同時發現回報描述本身
+ * 有一處跟實際程式碼不符：回報把「2026-09-04 那次修法新增的 await getDoc(journalRef)
+ * 現查」也算成第二個「在按鈕鎖住前」的 await 缺口，但實際程式碼裡這次現查發生在按鈕鎖住
+ * （原本的中段位置）之後，不在鎖住前的窗口內——真正在鎖住前的 await 只有截止日查詢這
+ * 一個。這個訂正不影響「該不該修」的結論，只影響對窗口範圍的精確描述。
+ * 實際後果：uploadPendingWorkPhotos() 直接讀當下畫面上的照片節點決定要上傳哪些照片，
+ * 兩次呼叫前後腳跑到那裡會讓同一張照片被上傳到 Cloudinary 兩次（浪費一次API額度，兩次
+ * 呼叫的最終目標是同一份文件、同一個學生自己的資料，不會存錯人也不會外洩，嚴重度比照
+ * 監聽器疊加類bug，見 v45 的 S-SEC-66）。
+ * 修法：把鎖按鈕搬到函式最前面（第一個 await 之前），並用它本身當重入防護
+ * （if (saveBtn?.disabled) return）；原本散落在各個 early return／catch 路徑上（工作
+ * 照片上傳失敗、資料過大、月份無效、staleOverwrite）各自手動解鎖按鈕的程式碼已移除，
+ * 改由函式最外層新增的 try/finally 統一保證解鎖恰好執行一次。原本函式中段第二次
+ * `const saveBtn = document.getElementById(...)` 宣告已移除，改為沿用函式開頭已宣告的
+ * 同一個變數。
+ *   S-SEC-67  靜態比對 saveJournal()：確認重入防護 guard clause 存在且出現在第一個
+ *             await 之前、saveBtn.disabled = true 本身也出現在第一個 await 之前（核心
+ *             修法所在，不只 guard 要早，鎖的動作本身也要早）、guard 出現在鎖之前、
+ *             disabled=true 全函式只出現一次（鎖點沒有分裂）、disabled=false 全函式只
+ *             出現一次且落在最後一個 finally 裡（解鎖真的收斂成外層統一處理，沒有任何
+ *             early return 分支各自為政）。開發階段已用 Node 直接抽取（括號配對，非
+ *             天真 regex）修法前／後兩版 saveJournal() 原始碼交叉驗證：修好版本6項全部
+ *             通過，原始版本正確在多項同時判定失敗；另外模擬三種未來可能的局部回退
+ *             （重新加回一處散落解鎖、拿掉guard只留鎖、把鎖搬回中段重演原始bug確切模式）
+ *             驗證斷言鑑別力，三者皆正確判定失敗。並用最小化 mock（uploadPendingWorkPhotos／
+ *             getDoc／setDoc 皆可控制延遲）在 jsdom 裡實際重播雙擊情境本身：修好版本雙擊
+ *             只真正呼叫 uploadPendingWorkPhotos()／setDoc() 各一次；還原成回報前的版本，
+ *             雙擊確實各呼叫兩次，精確重現回報描述的症狀。比照既有 S-SEC-32/49/51/65 對
+ *             saveJournal() 的既有取捨，維持靜態比對，不真執行——這個函式會動到
+ *             Firestore，共用測試頁面之後還有其他測試依賴真實登入狀態，貿然覆寫風險不
+ *             成比例。
+ * 開發階段沙盒交叉驗證無法取代使用者本機 Step2_RunTests.bat 對已部署正式網站的真實
+ * 執行結果，待其確認。
  *
  * v45 修正（2026-09-05）：使用者自行稽核找到一組監聽器疊加 bug，橫跨 student.html／
  * teacher.html 共4處，皆為同一種模式——renderStudentWorkTypeChart()／
@@ -4355,6 +4395,112 @@ async function runStudentTests(page, browserContext, log) {
       if (!r.latestHidden)
         throw new Error(`${fnName}: 點擊 container 背景沒有正確收起「最新一次」render 的 tooltip（可能被改成只綁定第一次的旗標寫法，對當下畫面的 tooltip 靜默失效）`);
     }
+  });
+
+  // ════════════════════════════════════════
+  // S-SEC-67  2026-09-06 新增：saveJournal() 雙擊/快速重複點擊重入防護
+  // 背景：使用者稽核發現 saveBtn.disabled = true 原本要等到函式執行到「所有同步驗證
+  // 都通過」之後才會設定（原本在函式中段，工作照片驗證通過之後），但函式一開始就有
+  // 一個 await（截止日查詢 deadlineSnap）——這是真正會把控制權還給瀏覽器事件迴圈的
+  // 讓權點。若使用者在按鈕還沒被鎖住之前快速點兩下（雙擊在人類操作上很常見，尤其
+  // 手機螢幕誤觸），第二次 click 事件會在第一次呼叫卡在這個 await 中途時被瀏覽器
+  // 處理，等於整個 saveJournal() 被重新呼叫一次、跟第一次同時執行。實際後果：
+  // uploadPendingWorkPhotos() 直接讀當下畫面上的照片節點決定要上傳哪些照片，兩次
+  // 呼叫前後腳跑到那裡會讓同一張照片被上傳到 Cloudinary 兩次（浪費一次API額度，
+  // 兩次呼叫的最終目標是同一份文件、同一個學生自己的資料，不會存錯人也不會外洩，
+  // 嚴重度比照監聽器疊加類bug，見 S-SEC-66）。
+  // 修法：把鎖按鈕搬到函式最前面（第一個 await 之前），並用它本身當重入防護
+  // （if (saveBtn?.disabled) return）；原本散落在各個 early return／catch 路徑上
+  // （工作照片上傳失敗、資料過大、月份無效、staleOverwrite）各自手動解鎖按鈕的程式碼
+  // 已移除，改由函式最外層新增的 try/finally 統一保證解鎖恰好執行一次，不論函式從
+  // 哪個 return 離開——跟 showLoading()/hideLoading() 既有的 try/catch/finally 準則
+  // 一致。原本函式中段第二次 `const saveBtn = document.getElementById(...)` 宣告已
+  // 移除，改為沿用函式開頭已宣告的同一個變數。
+  // 驗證六項特徵（缺一即代表修法可能已被回退或局部回退）：
+  //   1. 重入防護 guard clause 存在（saveBtn?.disabled 為真時 return）
+  //   2. guard clause 出現在函式第一個 await 之前
+  //   3. saveBtn.disabled = true 這行也出現在函式第一個 await 之前（不只 guard 本身
+  //      要早，鎖的動作本身也要早——這是修法的核心，guard 沒用如果鎖還是設得太晚）
+  //   4. guard clause 出現在鎖的動作之前（順序要對：先檢查是否重入，再鎖住）
+  //   5. `saveBtn.disabled = true` 全函式只出現一次（確認鎖點沒有分裂成兩處，例如
+  //      不小心在中段又加回一次）
+  //   6. `saveBtn.disabled = false` 全函式只出現一次，且落在全函式「最後一個」
+  //      finally 區塊裡（確認解鎖真的收斂成外層統一處理，沒有任何 early return 分支
+  //      偷偷加回自己的手動解鎖——只要有任何一處還在各自為政，就代表這個分支若未來
+  //      被改動，解鎖邏輯可能又跟外層脫鉤）
+  // 開發階段已用 Node 直接抽取（括號配對，非天真 regex）修法前／後兩版 saveJournal()
+  // 原始碼，把新斷言分別跑在兩版上交叉驗證：修好版本 6 項全部通過；原始版本正確在
+  // 「guard clause 不存在」「guard/鎖皆晚於第一個await」「解鎖分散在5處」等多項同時
+  // 判定失敗。另外模擬三種未來可能的局部回退情境驗證斷言鑑別力：①重新加回一處散落
+  // 的手動解鎖（例如「資料過大」分支）→ unlockFalseCount 從1變2，正確判定失敗；
+  // ②拿掉重入防護只留鎖 → hasGuard/guardBeforeFirstAwait/guardBeforeLock 三項一起
+  // 判定失敗；③把鎖搬回中段（模擬有人不小心把 disabled=true 移到工作照片驗證通過
+  // 之後，重演原始bug的確切模式）→ lockBeforeFirstAwait 正確判定失敗，這是最關鍵的
+  // 一項，直接對應回報的bug本身。並用最小化 mock（uploadPendingWorkPhotos／getDoc／
+  // setDoc 皆可控制延遲）在 jsdom 裡實際重播「雙擊」情境本身：修好版本雙擊只真正
+  // 呼叫 uploadPendingWorkPhotos()／setDoc() 各一次；還原成回報前的版本，雙擊確實
+  // 各呼叫兩次，精確重現回報描述的症狀。比照既有 S-SEC-32/49/51/65 對 saveJournal()
+  // 的既有取捨，維持靜態比對，不真執行——這個函式會動到 Firestore，共用測試頁面之後
+  // 還有其他測試依賴真實登入狀態，貿然覆寫風險不成比例。
+  // 開發階段沙盒交叉驗證無法取代使用者本機 Step2_RunTests.bat 對已部署正式網站的
+  // 真實執行結果，待其確認。
+  // ════════════════════════════════════════
+
+  await test('S-SEC-67 saveJournal() 按鈕鎖搬到第一個await之前，具備雙擊重入防護', async () => {
+    const result = await page.evaluate(() => {
+      const saveFnStr = (typeof saveJournal === 'function') ? saveJournal.toString() : '';
+      if (!saveFnStr) return { skip: true };
+
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const saveCode = codeOnly(saveFnStr);
+
+      const firstAwaitIdx = saveCode.search(/\bawait\b/);
+      const guardMatch = /saveBtn\?\.disabled\)\s*return/.exec(saveCode);
+      const guardIdx = guardMatch ? guardMatch.index : -1;
+      const lockMatch = /saveBtn\.disabled\s*=\s*true/.exec(saveCode);
+      const lockIdx = lockMatch ? lockMatch.index : -1;
+
+      const hasGuard = guardIdx !== -1;
+      const hasLock = lockIdx !== -1;
+      const guardBeforeFirstAwait = hasGuard && firstAwaitIdx !== -1 && guardIdx < firstAwaitIdx;
+      const lockBeforeFirstAwait = hasLock && firstAwaitIdx !== -1 && lockIdx < firstAwaitIdx;
+      const guardBeforeLock = hasGuard && hasLock && guardIdx < lockIdx;
+
+      const lockTrueCount = (saveCode.match(/saveBtn\.disabled\s*=\s*true/g) || []).length;
+      const unlockFalseCount = (saveCode.match(/saveBtn\.disabled\s*=\s*false/g) || []).length;
+      const lastFinallyIdx = saveCode.lastIndexOf('finally');
+      const unlockAfterLastFinally = lastFinallyIdx !== -1 &&
+        saveCode.indexOf('saveBtn.disabled = false', lastFinallyIdx) !== -1;
+
+      return {
+        skip: false,
+        hasGuard,
+        hasLock,
+        guardBeforeFirstAwait,
+        lockBeforeFirstAwait,
+        guardBeforeLock,
+        lockTrueCount,
+        unlockFalseCount,
+        unlockAfterLastFinally,
+      };
+    });
+    if (result.skip) return;
+    if (!result.hasGuard)
+      throw new Error('saveJournal() 找不到重入防護 guard clause（saveBtn?.disabled 為真時 return），雙擊/快速重複點擊可能會重新呼叫整個函式');
+    if (!result.hasLock)
+      throw new Error('saveJournal() 找不到 saveBtn.disabled = true 這行，按鈕鎖定機制可能已被移除');
+    if (!result.guardBeforeFirstAwait)
+      throw new Error('saveJournal() 的重入防護 guard clause 沒有出現在第一個 await 之前，雙擊時第二次呼叫可能在防護生效前就已經通過檢查');
+    if (!result.lockBeforeFirstAwait)
+      throw new Error('saveJournal() 的 saveBtn.disabled = true 沒有出現在第一個 await 之前——這是本次修法要解決的核心問題，代表鎖按鈕的時機又被搬回驗證通過之後的上傳流程中段，重演「雙擊時第二次點擊在按鈕還沒被鎖住前就已通過」的原始bug');
+    if (!result.guardBeforeLock)
+      throw new Error('saveJournal() 的重入防護 guard clause 沒有出現在鎖定按鈕之前，順序可能顛倒（應先檢查是否已在存檔中，再鎖住按鈕）');
+    if (result.lockTrueCount !== 1)
+      throw new Error(`saveJournal() 的 saveBtn.disabled = true 應該全函式只出現一次，實際出現 ${result.lockTrueCount} 次，鎖點可能分裂成兩處各自判斷`);
+    if (result.unlockFalseCount !== 1)
+      throw new Error(`saveJournal() 的 saveBtn.disabled = false 應該全函式只出現一次（收斂在外層統一的 finally），實際出現 ${result.unlockFalseCount} 次，代表可能有 early return 分支又加回自己的手動解鎖，跟外層 finally 各自為政`);
+    if (!result.unlockAfterLastFinally)
+      throw new Error('saveJournal() 找不到「唯一一處解鎖」落在全函式最後一個 finally 區塊裡的證據，統一解鎖機制可能已被改壞');
   });
 
   return results;

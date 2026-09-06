@@ -3805,6 +3805,26 @@ async function handleSalaryPhoto(event) {
 }
 
 async function saveJournal() {
+  // 2026-09-06 補修（雙擊重入防護）：saveBtn.disabled = true 原本要等到函式執行到
+  // 「所有同步驗證都通過」之後才會設定（原本在函式中段，工作照片驗證通過之後），但
+  // 函式一開始就有一個 await（下面的截止日查詢 deadlineSnap）——這是真正會把控制權
+  // 還給瀏覽器事件迴圈的讓權點。若使用者在按鈕還沒被鎖住之前快速點兩下（雙擊在人類
+  // 操作上很常見，尤其手機螢幕誤觸），第二次 click 事件會在第一次呼叫卡在這個 await
+  // 中途時被瀏覽器處理，等於整個 saveJournal() 被重新呼叫一次、跟第一次同時執行。
+  // 實際後果：uploadPendingWorkPhotos() 直接讀當下畫面上 img[data-pending-upload="1"]
+  // 節點決定要上傳哪些照片，兩次呼叫前後腳跑到那裡會讓同一張照片被上傳到 Cloudinary
+  // 兩次（浪費一次API額度，imgEl.src/dataset.base64 最終以較晚完成的那次為準）。跟
+  // comment-modal／saveJournal 現查那兩個「畫面跟實際存檔目標不一致」等級的bug不同，
+  // 這裡兩次執行的最終目標是同一份文件、同一個學生自己的資料，不會存錯人也不會有
+  // 隱私外洩，嚴重度比照監聽器疊加類bug（浪費資源，非資料錯置/遺失）。
+  // 修法：把鎖按鈕搬到函式最前面（第一個 await 之前），並用它本身當重入防護；原本
+  // 散落在各個 early return／catch 路徑上手動解鎖按鈕的程式碼已移除，改由這裡的外層
+  // try/finally 統一保證解鎖恰好執行一次，跟 showLoading()/hideLoading() 既有的
+  // try/catch/finally 準則一致——不論函式從哪個 return 離開，按鈕最終都會被正確解鎖。
+  const saveBtn = document.getElementById('save-journal-btn');
+  if (saveBtn?.disabled) return; // 防重入：已在存檔中（或按鈕因其他原因被鎖住，例如尚未開放），忽略這次點擊
+  if (saveBtn) saveBtn.disabled = true;
+  try {
   const sem = document.getElementById('write-semester').value;
   const month = parseInt(document.getElementById('write-month').value);
   const { doc, getDoc, setDoc } = firebase_funcs;
@@ -3936,8 +3956,9 @@ async function saveJournal() {
     });
     return;
   }
-  const saveBtn = document.getElementById('save-journal-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ 上傳照片中...'; }
+  // 2026-09-06 補修：saveBtn 已在函式最前面宣告並鎖住（見開頭註解），這裡不再重複
+  // 宣告／設定 disabled，只更新文字提示（驗證已全數通過，即將開始上傳照片）。
+  if (saveBtn) saveBtn.textContent = '⏳ 上傳照片中...';
   showLoading();
   try {
     await uploadPendingWorkPhotos(sem);
@@ -3948,7 +3969,8 @@ async function saveJournal() {
     });
   } catch(e) {
     hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    // 2026-09-06 補修：不再手動解鎖 saveBtn，交由函式最外層的 try/finally 統一處理
+    // （見開頭註解），避免多處各自維護解鎖邏輯又脫鉤。
     return toast('⚠️ ' + (e.message || '工作照片上傳失敗，請稍後再試'), 'error');
   }
   // 2026-07 新增：是否為「這份月記第一次被儲存」，跟 submittedAt 的判斷條件完全共用
@@ -4105,13 +4127,12 @@ async function saveJournal() {
   };
   if (JSON.stringify(data).length > 900000) {
     hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+    // 2026-09-06 補修：不再手動解鎖 saveBtn，交由函式最外層的 try/finally 統一處理。
     return toast('資料太大（照片過多），請減少照片後再儲存', 'error');
   }
   // 防呆：月份必須為 1–12 的有效整數，避免 month=0 或 NaN 被寫入 Firestore
   if (!month || month < 1 || month > 12) {
     hideLoading();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
     return toast('月份選擇無效，請重新選擇月份後再儲存', 'error');
   }
   if (saveBtn) saveBtn.textContent = '⏳ 儲存中...';
@@ -4165,7 +4186,7 @@ async function saveJournal() {
       if (staleOverwrite) {
         window._currentJournalCache = null; // 強制下次重新現查，不留可能已過期的快取
         hideLoading();
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
+        // 2026-09-06 補修：不再手動解鎖 saveBtn，交由函式最外層的 try/finally 統一處理。
         toast('⚠️ 這份月記剛剛被更新過（可能來自你的其他裝置或分頁），為避免覆蓋，請重新整理頁面後再試一次', 'error');
         return;
       }
@@ -4184,6 +4205,11 @@ async function saveJournal() {
     toast('❌ 儲存失敗：' + (e.message || '請確認網路連線'), 'error');
   } finally {
     hideLoading();
+  }
+  } finally {
+    // 2026-09-06 補修：對應函式最前面的鎖（見開頭註解），不論函式從哪個 return 離開
+    // （包含這裡以上任何一個 return，以及還沒進到這個 try 之前的重入防護 return 除外，
+    // 那條在鎖住按鈕之前就先行返回，不需要也不應該解鎖），都統一在這裡解鎖一次。
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 儲存月記'; }
   }
 }
