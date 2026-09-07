@@ -1,7 +1,79 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v43
+ * 老師端自動化測試 v44
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v44 修正（2026-09-07）：稽核發現另外兩個跟已修復的 saveJournal()（student.html）
+ * 架構完全相同的雙擊重入問題——showLoading() 都要等到第一個 await 之後才呼叫，這段
+ * 窗口完全沒有鎖，快速雙擊會讓函式被重新呼叫一次、跟第一次同時執行：
+ * - saveStudent()（「新增/編輯學生」Modal「💾 儲存」按鈕）：await
+ *   getActiveRosterSemester() 在 showLoading() 之前。雙擊時兩次呼叫讀到的表單值
+ *   相同，updateSelectedTermSnapshot() 的 mutator 是純函式，最終寫入內容仍會收斂
+ *   一致，不會存錯人，但會多打兩次 Firestore 讀寫（資源浪費類問題）。
+ * - batchImportPhotos()（「批次匯入大頭照」「⬆️ 開始上傳」按鈕）：await
+ *   getRosterForSelectedTerm() 在 showLoading() 之前，且 input.value 要等到函式
+ *   結尾才清空。雙擊會讓同一批檔案被壓縮、上傳到 Cloudinary 兩次（浪費API額度）；
+ *   更值得注意的是 Phase 2 對 students/{id} 的逐筆 updateDoc 跟對 roster 快照的
+ *   整包覆寫是兩條各自獨立的非同步路徑，雙擊時兩邊各自產生一個新的 Cloudinary URL
+ *   （同一張圖重新上傳不會沿用舊網址），這兩條路徑交錯完成的話，students 文件跟
+ *   roster 快照對「這個學生的照片網址」可能出現短暫不一致——雖然照片內容相同、
+ *   使用者看不出來，但已經是兩份本該同步的資料來源真的分岔，不只是多做白工。
+ * 修法：比照 saveJournal() 同一套模式——把鎖（saveBtn.disabled／importBtn.disabled）
+ * 搬到函式最前面，第一個 await 之前（甚至同步驗證之前，反正驗證失敗一樣會在 finally
+ * 解鎖），用它本身當重入防護（if(btn?.disabled) return;）；外層 try/finally 統一
+ * 保證解鎖恰好執行一次，不論函式從哪個 return 離開。兩個按鈕原本都沒有 id，已分別
+ * 補上 save-student-btn／batch-import-btn 供測試與程式碼定位。
+ * 這兩個發現是在查完 saveJournal() 修復後，使用者要求「檢查其他存檔/送出按鈕是否有
+ * 同一種問題」時，系統性掃描所有綁定在 onclick 上的 async 函式（比較「最早的保護
+ * 動作——disabled 鎖或 showLoading()」跟「第一個 await」的原始碼位置先後）找到的；
+ * 同一輪掃描也發現 activateSelectedTermRoster()／copyPreviousTermRoster()（同一種
+ * 漏洞但前面卡著 confirm() 對話框，雙擊只會連續跳出兩次確認對話框，不會靜默重複
+ * 寫入，嚴重度較低）與 saveStorageUsage()／saveStorageThreshold()（完全沒有鎖，但
+ * 寫入的是冪等的單一數值，風險很低）——這三類經使用者確認後判定先不處理，本輪只修
+ * saveStudent()／batchImportPhotos() 這兩個跟 saveJournal() 最像的案例。
+ * updateSelectedTermSnapshot()／saveTermRosterSnapshot() 本身「整包讀出陣列→本地
+ * 修改→整包寫回」的非原子性架構問題（跟本次雙擊重入是不同類、更深層的競態——就算
+ * 修好單顆按鈕的雙擊防護，同一分頁內「動作A的鎖還沒生效時使用者去點了動作B」這個
+ * 窗口依然存在，因為A、B兩顆按鈕各自的鎖是獨立的）本輪不處理，除非未來真的有多老師
+ * 同時管理名單的情境才需要在 updateSelectedTermSnapshot() 本身加版本比對。
+ *   T-SEC-81  真執行 saveStudent()：暫時覆寫 getActiveRosterSemester()／
+ *             updateSelectedTermSnapshot()／syncActiveRootFromRoster()（皆避免真正
+ *             碰 Firestore）與 closeModal()／loadStudentsTable()／
+ *             loadExportStudents()（no-op，避免不需要的畫面副作用），填入合法表單
+ *             值後同步呼叫兩次 saveStudent()（模擬雙擊），驗證：①第一次呼叫後
+ *             save-student-btn.disabled 已同步變 true（鎖在第一個 await 之前，不是
+ *             函式中段）；②updateSelectedTermSnapshot() 只被呼叫 1 次（第二次呼叫
+ *             被 guard 擋下）；③兩次呼叫都結束後 disabled 恢復 false（finally 正確
+ *             解鎖）。
+ *   T-SEC-82  真執行 batchImportPhotos()：用 DataTransfer 模擬選取一個檔名
+ *             「97.jpg」的檔案，暫時覆寫 getRosterForSelectedTerm()／
+ *             compressImageFile()／uploadToCloudinary()／firebase_funcs.updateDoc()／
+ *             updateSelectedTermSnapshot()（皆避免真正壓縮/連線Cloudinary/寫入
+ *             Firestore，並各自計數呼叫次數），同步呼叫兩次 batchImportPhotos()
+ *             （模擬雙擊），驗證：①鎖在第一個 await 之前就同步生效；②Phase 1
+ *             （compressImageFile／uploadToCloudinary）與 Phase 2（updateDoc／
+ *             updateSelectedTermSnapshot）皆只各執行 1 次，不是 2 次（不只驗證鎖
+ *             本身生效，也直接驗證「Cloudinary 重複上傳」與「兩份資料來源短暫不
+ *             一致」這兩個實際後果確實被消除）；③兩次呼叫都結束後 disabled 恢復
+ *             false。
+ * 開發階段已用 acorn AST 掃描（同一套用來找出這兩個bug的工具）重新掃描修復後的
+ * teacher.html，確認 saveStudent()／batchImportPhotos() 皆變成
+ * protected(before-1st-await)，其餘所有 onclick 綁定的 async 函式狀態與修復前
+ * 完全相同（含刻意不處理的 activateSelectedTermRoster() 等），確認沒有動到不該動
+ * 的地方；4 個 <script> 區塊皆重新通過 acorn 語法解析。另外用 jsdom + Node vm，
+ * 從修法前／後兩版 teacher.html 逐字抽取這兩個函式本體，把跟 T-SEC-81／T-SEC-82
+ * 完全相同的斷言分別跑在兩版上交叉驗證：修好版本兩者皆
+ * disabledRightAfterFirstCall=true、寫入類呼叫次數皆為1、disabledAfterBothSettle=
+ * false；原始版本兩者皆 disabledRightAfterFirstCall=false，且 saveStudent() 的
+ * updateSelectedTermSnapshot() 呼叫2次、batchImportPhotos() 的
+ * compressImageFile()／uploadToCloudinary()／updateDoc()／
+ * updateSelectedTermSnapshot() 皆各呼叫2次——精確重現雙擊會讓整個流程重複跑一次的
+ * 症狀，確認斷言真的有鑑別力，不是巧合通過。這只是沙盒層級驗證，仍待使用者本機
+ * `Step2_RunTests.bat` 的真實執行結果確認。
+ * 具名呼叫點：96→**98**；執行時項數：103→**105**（T-SEC-81／T-SEC-82 皆非迴圈
+ * 產生，各自 +1）。
+ * `student_test.js` 本輪未異動——這兩個bug只存在於 `teacher.html`（student.html
+ * 的 saveJournal() 已在先前修過）。
  *
  * v43 修正（2026-09-06）：補上 v42 changelog 遺留的一個文件準確性錯誤，並實際修正
  * comment-modal 本身——v42 那次的敘述寫「（comment-modal）該處已用 requestToken 手法
@@ -4842,6 +4914,190 @@ async function runTeacherTests(page, log) {
       throw new Error(`座號__t80a__的 .catch() 分支不該把已經由座號__t80b__成功顯示出來的學生回覆區塊隱藏——實際 display 為「${result.replyDisplay}」`);
     if (result.openModalCalls.length !== 1)
       throw new Error(`openModal() 應該只被呼叫 1 次（來自座號__t80b__成功查詢），實際被呼叫 ${result.openModalCalls.length} 次——多出來的呼叫代表已放棄的舊查詢的 .catch() 分支仍然重新彈出了 Modal`);
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-81／T-SEC-82  2026-09-07 新增：saveStudent()／batchImportPhotos() 雙擊
+  // 重入防護（跟已修復的 saveJournal() 架構完全相同的問題，見檔頭 v44 changelog）
+  // ════════════════════════════════════════
+  // 兩者原本都是 showLoading() 要等到第一個 await 之後才呼叫，這段窗口完全沒有鎖。
+  // 已比照 saveJournal() 的修法，把鎖（saveBtn.disabled／importBtn.disabled）搬到
+  // 函式最前面、第一個 await 之前，外層 try/finally 統一保證解鎖恰好執行一次。
+  // ════════════════════════════════════════
+
+  await test('T-SEC-81 saveStudent() 快速連續呼叫兩次（模擬雙擊）時，鎖在第一個 await 之前就同步生效，第二次呼叫被防重入guard擋下、不會重複寫入', async () => {
+    // 測試手法：暫時覆寫 getActiveRosterSemester()／updateSelectedTermSnapshot()／
+    // syncActiveRootFromRoster()（皆為全域函式，避免真正碰 Firestore），並覆寫
+    // closeModal()／loadStudentsTable()／loadExportStudents() 為 no-op（避免觸發
+    // 不需要的畫面副作用，比照 T-SEC-77 覆寫 openModal() 的做法）。填入合法表單值
+    // 後，同步呼叫兩次 saveStudent()（模擬雙擊，兩次呼叫之間不 await），驗證：
+    // ①第一次呼叫後 saveBtn.disabled 立刻（同一個同步執行區塊內）變成 true——確認
+    // 鎖真的在第一個 await 之前，不是函式中段；②updateSelectedTermSnapshot() 只被
+    // 呼叫 1 次——第二次呼叫應該在進入任何 await 之前就被 guard 擋下，不會重複跑完
+    // 整個讀取roster→組資料→寫入的流程；③兩次呼叫都結束後 saveBtn.disabled 恢復
+    // false——確認外層 finally 正確解鎖，不會卡死在鎖住狀態。
+    const result = await page.evaluate(async () => {
+      if (typeof saveStudent !== 'function') return { skip: true };
+      const btn = document.getElementById('save-student-btn');
+      const fieldIds = ['add-seat', 'add-student-id', 'add-name', 'add-company', 'add-google-email'];
+      if (!btn || fieldIds.some(id => !document.getElementById(id))) return { skip: true };
+      if (typeof getActiveRosterSemester !== 'function' || typeof updateSelectedTermSnapshot !== 'function' ||
+          typeof syncActiveRootFromRoster !== 'function' || typeof closeModal !== 'function') return { skip: true };
+
+      const orig = {
+        getActiveRosterSemester: window.getActiveRosterSemester,
+        updateSelectedTermSnapshot: window.updateSelectedTermSnapshot,
+        syncActiveRootFromRoster: window.syncActiveRootFromRoster,
+        closeModal: window.closeModal,
+        loadStudentsTable: window.loadStudentsTable,
+        loadExportStudents: window.loadExportStudents,
+      };
+      const savedValues = {};
+      fieldIds.forEach(id => { savedValues[id] = document.getElementById(id).value; });
+      const savedDisabled = btn.disabled;
+
+      try {
+        document.getElementById('add-seat').value = '97';
+        document.getElementById('add-student-id').value = 'T81';
+        document.getElementById('add-name').value = '測試學生T81';
+        document.getElementById('add-company').value = '測試公司T81';
+        document.getElementById('add-google-email').value = '';
+
+        let snapshotCallCount = 0;
+        window.getActiveRosterSemester = () => new Promise(resolve => setTimeout(() => resolve('999-1'), 30));
+        window.updateSelectedTermSnapshot = (mutator) => {
+          snapshotCallCount++;
+          return new Promise(resolve => setTimeout(() => resolve(mutator([])), 30));
+        };
+        window.syncActiveRootFromRoster = () => Promise.resolve();
+        window.closeModal = () => {};
+        window.loadStudentsTable = () => {};
+        window.loadExportStudents = () => {};
+
+        // 模擬雙擊：同步、幾乎同時呼叫兩次，兩次呼叫之間完全不 await
+        const p1 = saveStudent();
+        const disabledRightAfterFirstCall = btn.disabled;
+        const p2 = saveStudent();
+        await Promise.all([p1, p2]);
+
+        return {
+          skip: false,
+          disabledRightAfterFirstCall,
+          snapshotCallCount,
+          disabledAfterBothSettle: btn.disabled,
+        };
+      } finally {
+        window.getActiveRosterSemester = orig.getActiveRosterSemester;
+        window.updateSelectedTermSnapshot = orig.updateSelectedTermSnapshot;
+        window.syncActiveRootFromRoster = orig.syncActiveRootFromRoster;
+        window.closeModal = orig.closeModal;
+        window.loadStudentsTable = orig.loadStudentsTable;
+        window.loadExportStudents = orig.loadExportStudents;
+        fieldIds.forEach(id => { document.getElementById(id).value = savedValues[id]; });
+        btn.disabled = savedDisabled;
+      }
+    });
+    if (result.skip) return;
+    if (!result.disabledRightAfterFirstCall)
+      throw new Error('saveStudent() 呼叫後應立刻（第一個 await 之前）同步鎖住 save-student-btn，實際仍是 disabled=false——鎖可能被搬回函式中段，重演修復前的bug');
+    if (result.snapshotCallCount !== 1)
+      throw new Error(`updateSelectedTermSnapshot() 應該只被呼叫 1 次（第二次呼叫應被防重入guard擋下），實際被呼叫 ${result.snapshotCallCount} 次——代表雙擊會讓兩次呼叫都跑完整個寫入流程`);
+    if (result.disabledAfterBothSettle !== false)
+      throw new Error('兩次呼叫都結束後，save-student-btn.disabled 應該恢復為 false，實際仍是鎖住狀態——外層 finally 解鎖可能沒有正確執行');
+  });
+
+  await test('T-SEC-82 batchImportPhotos() 快速連續呼叫兩次（模擬雙擊）時，鎖在第一個 await 之前就同步生效，第二次呼叫被防重入guard擋下、不會重複上傳與寫入', async () => {
+    // 測試手法：用 DataTransfer 模擬選取一個檔名為「97.jpg」的檔案（純數字檔名，
+    // 對應座號97；刻意不用真實座號，避免跟正式名單混淆——反正 getRosterForSelectedTerm()
+    // 已整個被覆寫成合成資料，跟真實名單無關）。暫時覆寫 getRosterForSelectedTerm()
+    // （回傳含座號97的合成名單）、compressImageFile()／uploadToCloudinary()（避免真正
+    // 壓縮/連線 Cloudinary）、firebase_funcs.updateDoc()／updateSelectedTermSnapshot()
+    // （避免真正寫入 Firestore），並各自計數呼叫次數。同步呼叫兩次 batchImportPhotos()
+    // （模擬雙擊），驗證：①鎖在第一個 await（await getRosterForSelectedTerm()）之前就
+    // 同步生效；②Phase 1（compressImageFile／uploadToCloudinary）與 Phase 2
+    // （updateDoc／updateSelectedTermSnapshot）皆只各執行 1 次，不是 2 次——不只驗證
+    // 鎖本身生效，也直接驗證修法動機提到的兩個實際後果（「同一張圖被上傳到 Cloudinary
+    // 兩次」／「students 文件跟 roster 快照可能短暫不一致」）確實被消除，不只是「程式碼
+    // 長得對」；③兩次呼叫都結束後 batch-import-btn.disabled 恢復 false。
+    const result = await page.evaluate(async () => {
+      if (typeof batchImportPhotos !== 'function' || typeof getRosterForSelectedTerm !== 'function') return { skip: true };
+      if (typeof compressImageFile !== 'function' || typeof uploadToCloudinary !== 'function') return { skip: true };
+      if (typeof updateSelectedTermSnapshot !== 'function') return { skip: true };
+      if (typeof firebase_funcs === 'undefined' || !firebase_funcs.updateDoc || typeof db === 'undefined') return { skip: true };
+      if (typeof DataTransfer === 'undefined' || typeof File === 'undefined') return { skip: true };
+      const btn = document.getElementById('batch-import-btn');
+      const input = document.getElementById('batch-photo-input');
+      const progressEl = document.getElementById('batch-photo-progress');
+      const resultEl = document.getElementById('batch-photo-result');
+      if (!btn || !input || !progressEl || !resultEl) return { skip: true };
+
+      const orig = {
+        getRosterForSelectedTerm: window.getRosterForSelectedTerm,
+        compressImageFile: window.compressImageFile,
+        uploadToCloudinary: window.uploadToCloudinary,
+        updateSelectedTermSnapshot: window.updateSelectedTermSnapshot,
+        updateDoc: firebase_funcs.updateDoc,
+      };
+      const savedDisabled = btn.disabled;
+      const savedProgressClass = progressEl.className;
+      const savedResultHtml = resultEl.innerHTML;
+      const savedInputValue = input.value;
+
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(new File(['fake'], '97.jpg', { type: 'image/jpeg' }));
+        input.files = dt.files;
+
+        let compressCallCount = 0, uploadCallCount = 0, updateDocCallCount = 0, snapshotCallCount = 0;
+        window.getRosterForSelectedTerm = () => new Promise(resolve => setTimeout(() => resolve([{ seatNo: '97', name: '測試學生T82' }]), 30));
+        window.compressImageFile = () => { compressCallCount++; return Promise.resolve(new Blob(['fake'], { type: 'image/jpeg' })); };
+        window.uploadToCloudinary = () => { uploadCallCount++; return Promise.resolve('https://res.cloudinary.com/fake/t82.jpg'); };
+        firebase_funcs.updateDoc = () => { updateDocCallCount++; return Promise.resolve(); };
+        window.updateSelectedTermSnapshot = (mutator) => {
+          snapshotCallCount++;
+          return new Promise(resolve => setTimeout(() => resolve(mutator([])), 30));
+        };
+
+        // 模擬雙擊：同步、幾乎同時呼叫兩次，兩次呼叫之間完全不 await
+        const p1 = batchImportPhotos();
+        const disabledRightAfterFirstCall = btn.disabled;
+        const p2 = batchImportPhotos();
+        await Promise.all([p1, p2]);
+
+        return {
+          skip: false,
+          disabledRightAfterFirstCall,
+          compressCallCount,
+          uploadCallCount,
+          updateDocCallCount,
+          snapshotCallCount,
+          disabledAfterBothSettle: btn.disabled,
+        };
+      } finally {
+        window.getRosterForSelectedTerm = orig.getRosterForSelectedTerm;
+        window.compressImageFile = orig.compressImageFile;
+        window.uploadToCloudinary = orig.uploadToCloudinary;
+        window.updateSelectedTermSnapshot = orig.updateSelectedTermSnapshot;
+        firebase_funcs.updateDoc = orig.updateDoc;
+        btn.disabled = savedDisabled;
+        progressEl.className = savedProgressClass;
+        resultEl.innerHTML = savedResultHtml;
+        input.value = savedInputValue;
+      }
+    });
+    if (result.skip) return;
+    if (!result.disabledRightAfterFirstCall)
+      throw new Error('batchImportPhotos() 呼叫後應立刻（第一個 await 之前）同步鎖住 batch-import-btn，實際仍是 disabled=false——鎖可能被搬回函式中段，重演修復前的bug');
+    if (result.compressCallCount !== 1)
+      throw new Error(`compressImageFile() 應該只被呼叫 1 次（第二次呼叫應被防重入guard擋下），實際被呼叫 ${result.compressCallCount} 次——代表同一張圖被雙擊重複壓縮`);
+    if (result.uploadCallCount !== 1)
+      throw new Error(`uploadToCloudinary() 應該只被呼叫 1 次，實際被呼叫 ${result.uploadCallCount} 次——代表同一張圖被上傳到 Cloudinary 兩次，浪費額度`);
+    if (result.updateDocCallCount !== 1)
+      throw new Error(`firebase_funcs.updateDoc() 應該只被呼叫 1 次，實際被呼叫 ${result.updateDocCallCount} 次`);
+    if (result.snapshotCallCount !== 1)
+      throw new Error(`updateSelectedTermSnapshot() 應該只被呼叫 1 次，實際被呼叫 ${result.snapshotCallCount} 次——代表 students 文件與 roster 快照可能各自被兩條交錯的路徑寫入，出現短暫不一致`);
+    if (result.disabledAfterBothSettle !== false)
+      throw new Error('兩次呼叫都結束後，batch-import-btn.disabled 應該恢復為 false，實際仍是鎖住狀態——外層 finally 解鎖可能沒有正確執行');
   });
 
   return results;

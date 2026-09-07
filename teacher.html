@@ -1522,7 +1522,7 @@ tr:last-child td { border-bottom: none; }
         <div id="add-student-photo-status" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
       </div>
       <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="saveStudent()">💾 儲存</button>
+        <button class="btn btn-primary" id="save-student-btn" onclick="saveStudent()">💾 儲存</button>
         <button class="btn btn-secondary" onclick="closeModal('add-student-modal')">取消</button>
       </div>
     </div>
@@ -1560,7 +1560,7 @@ tr:last-child td { border-bottom: none; }
         <p style="font-size:12px;color:var(--text2);margin-bottom:12px">選擇多張圖片，系統依<strong>純數字檔名</strong>對應座號（例：<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">1.jpg</code> → 01號，<code style="background:var(--bg3);padding:1px 5px;border-radius:4px">10.png</code> → 10號）。</p>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
           <input type="file" id="batch-photo-input" multiple accept="image/*" style="font-size:13px;flex:1;min-width:0;color:var(--text)">
-          <button class="btn btn-primary btn-sm" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
+          <button class="btn btn-primary btn-sm" id="batch-import-btn" onclick="batchImportPhotos()">⬆️ 開始上傳</button>
         </div>
         <div id="batch-photo-progress" class="hidden" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);margin-bottom:6px">
           <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span>
@@ -3773,37 +3773,55 @@ function removeStudentPhoto() {
 }
 
 async function saveStudent() {
-  const seat = document.getElementById('add-seat').value.trim().padStart(2,'0');
-  const name = document.getElementById('add-name').value.trim();
-  if (!seat || !name) return toast('座號和姓名為必填', 'error');
-  const googleEmail = normalizeEmail(document.getElementById('add-google-email')?.value || '');
-  if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
-  const semester = getSelectedStudentSemester();
-  const active = await getActiveRosterSemester();
-  const photoUrl = document.getElementById('add-student-modal')?.dataset.photoUrl || '';
-  const data = normalizeRosterStudent({
-    seatNo: seat,
-    studentId: document.getElementById('add-student-id').value.trim(),
-    name,
-    company: document.getElementById('add-company').value.trim(),
-    email: googleEmail,
-    photoUrl
-  }, semester);
-  showLoading();
+  // 2026-09-07 補修（雙擊重入防護，比照 saveJournal() 同一套修法）：showLoading() 原本
+  // 要等到 seat/name/googleEmail 同步驗證通過、且 await getActiveRosterSemester() 完成
+  // 之後才會呼叫——這個 await 是真正會把控制權還給瀏覽器事件迴圈的讓權點，快速雙擊
+  // 「儲存」時，第二次 click 會在第一次呼叫卡在這個 await 中途被瀏覽器處理，等於整個
+  // saveStudent() 被重新呼叫一次、跟第一次同時執行。因為兩次讀到的表單值相同（雙擊
+  // 之間使用者不可能改到表單），updateSelectedTermSnapshot() 的 mutator 又是純函式，
+  // 最終寫入內容仍會收斂一致，不會存錯人，但會多打兩次 Firestore 讀寫，屬資源浪費
+  // 類問題，跟 saveJournal() 修復前的等級相同。修法：把鎖搬到函式最前面（第一個
+  // await 之前，甚至同步驗證之前——反正驗證失敗一樣會在 finally 解鎖），用它本身當
+  // 重入防護；外層 try/finally 統一保證解鎖恰好執行一次，不論函式從哪個 return 離開。
+  const saveBtn = document.getElementById('save-student-btn');
+  if (saveBtn?.disabled) return; // 防重入：已在存檔中，忽略這次點擊
+  if (saveBtn) saveBtn.disabled = true;
   try {
-    const next = await updateSelectedTermSnapshot(roster => {
-      const others = roster.filter(s => s.seatNo !== seat);
-      return [...others, data].sort((a,b) => a.seatNo.localeCompare(b.seatNo));
-    });
-    if (semester === active) await syncActiveRootFromRoster(semester, next);
-    hideLoading();
-    closeModal('add-student-modal');
-    toast('學生資料已儲存', 'success');
-    loadStudentsTable();
-    loadExportStudents();
-  } catch(e) {
-    toast('儲存失敗：' + e.message, 'error');
-    hideLoading();
+    const seat = document.getElementById('add-seat').value.trim().padStart(2,'0');
+    const name = document.getElementById('add-name').value.trim();
+    if (!seat || !name) return toast('座號和姓名為必填', 'error');
+    const googleEmail = normalizeEmail(document.getElementById('add-google-email')?.value || '');
+    if (googleEmail && !googleEmail.endsWith('@' + SCHOOL_DOMAIN)) return toast(`Google 帳號須為 @${SCHOOL_DOMAIN}`, 'error');
+    const semester = getSelectedStudentSemester();
+    const active = await getActiveRosterSemester();
+    const photoUrl = document.getElementById('add-student-modal')?.dataset.photoUrl || '';
+    const data = normalizeRosterStudent({
+      seatNo: seat,
+      studentId: document.getElementById('add-student-id').value.trim(),
+      name,
+      company: document.getElementById('add-company').value.trim(),
+      email: googleEmail,
+      photoUrl
+    }, semester);
+    showLoading();
+    try {
+      const next = await updateSelectedTermSnapshot(roster => {
+        const others = roster.filter(s => s.seatNo !== seat);
+        return [...others, data].sort((a,b) => a.seatNo.localeCompare(b.seatNo));
+      });
+      if (semester === active) await syncActiveRootFromRoster(semester, next);
+      hideLoading();
+      closeModal('add-student-modal');
+      toast('學生資料已儲存', 'success');
+      loadStudentsTable();
+      loadExportStudents();
+    } catch(e) {
+      toast('儲存失敗：' + e.message, 'error');
+      hideLoading();
+    }
+  } finally {
+    // 對應函式最前面的鎖，不論函式從哪個 return 離開，都統一在這裡解鎖一次。
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 async function deleteStudent(seatNo, name) {
@@ -3933,102 +3951,120 @@ async function importStudents() {
 }
 
 async function batchImportPhotos() {
-  const input = document.getElementById('batch-photo-input');
-  if (!input || !input.files.length) return toast('請先選擇圖片檔案', 'error');
-
-  const files = Array.from(input.files);
-  const semester = getSelectedStudentSemester();
-  const roster = await getRosterForSelectedTerm();
-  const rosterSeats = new Set(roster.map(s => s.seatNo));
-
-  // ── 解析檔名 → 座號 ──
-  const toProcess = [], skipped = [];
-  for (const file of files) {
-    const base = file.name.replace(/\.[^.]+$/, '');          // 去副檔名
-    if (!/^\d+$/.test(base)) {
-      skipped.push(`「${file.name}」（檔名非純數字）`);
-      continue;
-    }
-    const num = parseInt(base, 10);
-    if (num <= 0 || num > 99) {
-      skipped.push(`「${file.name}」（座號超出範圍 1–99）`);
-      continue;
-    }
-    const seatNo = String(num).padStart(2, '0');
-    if (!rosterSeats.has(seatNo)) {
-      skipped.push(`「${file.name}」（座號 ${seatNo} 不在 ${semesterLabel(semester)} 名單）`);
-      continue;
-    }
-    toProcess.push({ file, seatNo });
-  }
-
-  if (!toProcess.length) {
-    const msg = skipped.length ? `沒有可處理的照片：${skipped[0]}` : '沒有可處理的照片，請確認檔名為純數字';
-    return toast(msg, 'error');
-  }
-
-  const progressEl = document.getElementById('batch-photo-progress');
-  const progressText = document.getElementById('batch-photo-progress-text');
-  const resultEl = document.getElementById('batch-photo-result');
-  progressEl.classList.remove('hidden');
-  resultEl.innerHTML = '';
-  showLoading();
-
-  const { doc, updateDoc } = firebase_funcs;
-  const photoUrlMap = {};  // seatNo → cloudinary url
-  const failed = [];
-
+  // 2026-09-07 補修（雙擊重入防護，比照 saveJournal()／saveStudent() 同一套修法）：
+  // 第一個 await（await getRosterForSelectedTerm()）發生在 showLoading() 之前，這段
+  // 窗口完全沒有任何鎖或遮罩保護，且 input.value 要等到函式結尾才清空。快速雙擊「開始
+  // 上傳」會讓同一批檔案被壓縮、上傳到 Cloudinary 兩次（浪費API額度）；更值得注意的
+  // 是 Phase 2 對 students/{id} 的逐筆 updateDoc 跟對 roster 快照的整包覆寫是兩條各自
+  // 獨立的非同步路徑，雙擊時兩邊各自產生一個新的 Cloudinary URL（同一張圖重新上傳
+  // 不會沿用舊網址），這兩條路徑交錯完成的話，students 文件跟 roster 快照對「這個
+  // 學生的照片網址」可能出現短暫不一致——雖然照片內容相同、使用者看不出來，但已經是
+  // 兩份本該同步的資料來源真的分岔，不只是多做白工。修法：把鎖搬到函式最前面（第一個
+  // await 之前），用它本身當重入防護；外層 try/finally 統一保證解鎖恰好執行一次。
+  const importBtn = document.getElementById('batch-import-btn');
+  if (importBtn?.disabled) return; // 防重入：已在上傳中，忽略這次點擊
+  if (importBtn) importBtn.disabled = true;
   try {
-    // ── Phase 1：逐一壓縮 → 上傳 Cloudinary ──
-    for (let i = 0; i < toProcess.length; i++) {
-      const { file, seatNo } = toProcess[i];
-      if (progressText) progressText.textContent = `上傳第 ${i + 1}/${toProcess.length} 張：座號 ${seatNo}`;
-      try {
-        const blob = await compressImageFile(file, 800);
-        const url = await uploadToCloudinary(blob, 'tcivs-photos');
-        if (!url) throw new Error('Cloudinary 回傳空 URL');
-        photoUrlMap[seatNo] = url;
-      } catch(e) {
-        failed.push(`座號 ${seatNo}：${e.message}`);
+    const input = document.getElementById('batch-photo-input');
+    if (!input || !input.files.length) return toast('請先選擇圖片檔案', 'error');
+
+    const files = Array.from(input.files);
+    const semester = getSelectedStudentSemester();
+    const roster = await getRosterForSelectedTerm();
+    const rosterSeats = new Set(roster.map(s => s.seatNo));
+
+    // ── 解析檔名 → 座號 ──
+    const toProcess = [], skipped = [];
+    for (const file of files) {
+      const base = file.name.replace(/\.[^.]+$/, '');          // 去副檔名
+      if (!/^\d+$/.test(base)) {
+        skipped.push(`「${file.name}」（檔名非純數字）`);
+        continue;
       }
+      const num = parseInt(base, 10);
+      if (num <= 0 || num > 99) {
+        skipped.push(`「${file.name}」（座號超出範圍 1–99）`);
+        continue;
+      }
+      const seatNo = String(num).padStart(2, '0');
+      if (!rosterSeats.has(seatNo)) {
+        skipped.push(`「${file.name}」（座號 ${seatNo} 不在 ${semesterLabel(semester)} 名單）`);
+        continue;
+      }
+      toProcess.push({ file, seatNo });
     }
 
-    // ── Phase 2：批次寫入 Firestore（students doc + roster snapshot）──
+    if (!toProcess.length) {
+      const msg = skipped.length ? `沒有可處理的照片：${skipped[0]}` : '沒有可處理的照片，請確認檔名為純數字';
+      return toast(msg, 'error');
+    }
+
+    const progressEl = document.getElementById('batch-photo-progress');
+    const progressText = document.getElementById('batch-photo-progress-text');
+    const resultEl = document.getElementById('batch-photo-result');
+    progressEl.classList.remove('hidden');
+    resultEl.innerHTML = '';
+    showLoading();
+
+    const { doc, updateDoc } = firebase_funcs;
+    const photoUrlMap = {};  // seatNo → cloudinary url
+    const failed = [];
+
+    try {
+      // ── Phase 1：逐一壓縮 → 上傳 Cloudinary ──
+      for (let i = 0; i < toProcess.length; i++) {
+        const { file, seatNo } = toProcess[i];
+        if (progressText) progressText.textContent = `上傳第 ${i + 1}/${toProcess.length} 張：座號 ${seatNo}`;
+        try {
+          const blob = await compressImageFile(file, 800);
+          const url = await uploadToCloudinary(blob, 'tcivs-photos');
+          if (!url) throw new Error('Cloudinary 回傳空 URL');
+          photoUrlMap[seatNo] = url;
+        } catch(e) {
+          failed.push(`座號 ${seatNo}：${e.message}`);
+        }
+      }
+
+      // ── Phase 2：批次寫入 Firestore（students doc + roster snapshot）──
+      const uploaded = Object.keys(photoUrlMap);
+      if (uploaded.length) {
+        if (progressText) progressText.textContent = '寫入資料庫中...';
+        await Promise.all(
+          uploaded.map(seatNo =>
+            updateDoc(doc(db, 'students', `${semester}_${seatNo}`), { photoUrl: photoUrlMap[seatNo] })
+          )
+        );
+        await updateSelectedTermSnapshot(roster =>
+          roster.map(s => photoUrlMap[s.seatNo] ? { ...s, photoUrl: photoUrlMap[s.seatNo] } : s)
+        );
+      }
+    } catch(e) {
+      toast('上傳過程發生錯誤：' + e.message, 'error');
+    } finally {
+      progressEl.classList.add('hidden');
+      hideLoading();
+    }
+
+    // ── 結果顯示 ──
     const uploaded = Object.keys(photoUrlMap);
-    if (uploaded.length) {
-      if (progressText) progressText.textContent = '寫入資料庫中...';
-      await Promise.all(
-        uploaded.map(seatNo =>
-          updateDoc(doc(db, 'students', `${semester}_${seatNo}`), { photoUrl: photoUrlMap[seatNo] })
-        )
-      );
-      await updateSelectedTermSnapshot(roster =>
-        roster.map(s => photoUrlMap[s.seatNo] ? { ...s, photoUrl: photoUrlMap[s.seatNo] } : s)
-      );
+    let html = `<div style="color:var(--accent-green);font-weight:600">✅ 成功上傳 ${uploaded.length} / ${toProcess.length} 張</div>`;
+    if (skipped.length) {
+      html += `<div style="color:var(--text2);margin-top:6px;font-size:12px">⏭ 跳過 ${skipped.length} 個：${skipped.map(s => escapeHtml(s)).join('、')}</div>`;
     }
-  } catch(e) {
-    toast('上傳過程發生錯誤：' + e.message, 'error');
+    if (failed.length) {
+      html += `<div style="color:var(--accent-red);margin-top:6px;font-size:12px">❌ 失敗：${failed.map(s => escapeHtml(s)).join('<br>')}</div>`;
+    }
+    resultEl.innerHTML = html;
+
+    if (uploaded.length > 0) {
+      toast(`✅ 成功上傳 ${uploaded.length} 張大頭照`, 'success');
+      loadStudentsTable();
+    }
+    input.value = '';
   } finally {
-    progressEl.classList.add('hidden');
-    hideLoading();
+    // 對應函式最前面的鎖，不論函式從哪個 return 離開，都統一在這裡解鎖一次。
+    if (importBtn) importBtn.disabled = false;
   }
-
-  // ── 結果顯示 ──
-  const uploaded = Object.keys(photoUrlMap);
-  let html = `<div style="color:var(--accent-green);font-weight:600">✅ 成功上傳 ${uploaded.length} / ${toProcess.length} 張</div>`;
-  if (skipped.length) {
-    html += `<div style="color:var(--text2);margin-top:6px;font-size:12px">⏭ 跳過 ${skipped.length} 個：${skipped.map(s => escapeHtml(s)).join('、')}</div>`;
-  }
-  if (failed.length) {
-    html += `<div style="color:var(--accent-red);margin-top:6px;font-size:12px">❌ 失敗：${failed.map(s => escapeHtml(s)).join('<br>')}</div>`;
-  }
-  resultEl.innerHTML = html;
-
-  if (uploaded.length > 0) {
-    toast(`✅ 成功上傳 ${uploaded.length} 張大頭照`, 'success');
-    loadStudentsTable();
-  }
-  input.value = '';
 }
 async function loadDeadlinesTable() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
