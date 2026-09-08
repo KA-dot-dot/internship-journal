@@ -283,11 +283,13 @@ async function collectAdminTokenDocs() {
   return valid;
 }
 
-async function checkReplies() {
-  const [snap, adminTokenDocs] = await Promise.all([
-    db.collectionGroup('journals').where('studentReplyUnread', '==', true).get(),
-    collectAdminTokenDocs(),
-  ]);
+// 2026-09 修正：adminTokenDocs 改由呼叫端（main()）算好一次後傳入，不再自己呼叫
+// collectAdminTokenDocs()——原本這裡跟 checkNewJournals() 各自獨立呼叫一次，因為
+// main() 是依序 await（不是平行），第二次呼叫會把「掃描全部 fcmTokens」「掃描
+// admins 集合」「孤兒 token 比對」整套重跑一次，純粹浪費（第一次已經把孤兒清乾淨，
+// 第二次不會清錯，只是白讀一次）。完整理由見 main() 內對應註解。
+async function checkReplies(adminTokenDocs) {
+  const snap = await db.collectionGroup('journals').where('studentReplyUnread', '==', true).get();
 
   let sent = 0;
   for (const docSnap of snap.docs) {
@@ -393,11 +395,11 @@ async function checkReplies() {
 // run-tests.js 的版本banner字串上踩過三次「忘記同步手動常數」的坑，這裡刻意選一個
 // 完全不需要記住任何日期的做法）。第一次執行前，記得檢查這個查詢是否也跳出「需要建立
 // 索引」的錯誤（見檔案最上方的一次性前置作業說明第 2 點）。
-async function checkNewJournals() {
-  const [snap, adminTokenDocs] = await Promise.all([
-    db.collectionGroup('journals').where('journalSubmitNotifiedAt', '==', null).get(),
-    collectAdminTokenDocs(),
-  ]);
+// 2026-09 修正：adminTokenDocs 改由呼叫端（main()）傳入，理由同 checkReplies() 開頭
+// 註解——避免跟 checkReplies() 各自獨立呼叫 collectAdminTokenDocs()，重複整套
+// fcmTokens／admins 掃描與孤兒 token 清理。
+async function checkNewJournals(adminTokenDocs) {
+  const snap = await db.collectionGroup('journals').where('journalSubmitNotifiedAt', '==', null).get();
 
   let sent = 0;
   for (const docSnap of snap.docs) {
@@ -491,6 +493,18 @@ async function checkOverdue() {
 // 主流程：四項檢查各自獨立 try/catch，其中一個因缺索引等原因失敗時，
 // 其餘仍會照常執行；只要任一項失敗，整體以非 0 結束碼結束，
 // 讓 GitHub Actions 的 Actions 分頁能看到這次執行標記為失敗（方便注意到）。
+//
+// 2026-09 修正：checkReplies()／checkNewJournals() 都需要「目前有效的老師/管理員
+// token 清單」，原本各自獨立呼叫一次 collectAdminTokenDocs()——因為這裡是依序
+// await 執行、不是平行，第二次呼叫會把「掃描全部 fcmTokens」「掃描 admins 集合」
+// 「孤兒 token 比對」整套重跑一次，純粹浪費。改成在這裡呼叫一次、結果共用給兩者，
+// 並比照其餘四項檢查的既有慣例包一層獨立的 try/catch：失敗時記錄錯誤、
+// hadError 設為 true（讓整體結束碼仍會是非 0，不會被靜默吞掉），adminTokenDocs
+// 保留空陣列——checkReplies()／checkNewJournals() 仍會照常執行，只是因為收到空
+// 陣列，對每一筆命中的文件都會在各自迴圈裡安靜跳過（見兩者內部既有的
+// `!adminTokenDocs.length` 判斷式，這個判斷式的語意本來就涵蓋「沒有 token 可以
+// 通知」，不需要另外分辨是不是因為上游查詢失敗），不會讓整支腳本中斷、也不影響
+// 不依賴這份清單的 checkComments()／checkOverdue()。
 // ---------------------------------------------------------------------------
 (async () => {
   let hadError = false;
@@ -502,15 +516,23 @@ async function checkOverdue() {
     console.error('checkComments 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);
   }
 
+  let adminTokenDocs = [];
   try {
-    await checkReplies();
+    adminTokenDocs = await collectAdminTokenDocs();
+  } catch (e) {
+    hadError = true;
+    console.error('collectAdminTokenDocs 失敗（checkReplies／checkNewJournals 本輪將收不到任何老師/管理員通知）：', e);
+  }
+
+  try {
+    await checkReplies(adminTokenDocs);
   } catch (e) {
     hadError = true;
     console.error('checkReplies 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);
   }
 
   try {
-    await checkNewJournals();
+    await checkNewJournals(adminTokenDocs);
   } catch (e) {
     hadError = true;
     console.error('checkNewJournals 失敗（若訊息提到需要建立索引，點開錯誤裡附的連結建立即可）：', e);

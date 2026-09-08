@@ -122,7 +122,15 @@ async function checkOverdueCore({ db, sendToTokenDocs, now, seatWhitelist, siteB
         const flagKey = `${semester}-${month}`;
         if (alreadyMap[flagKey]) continue; // 這位學生這個月已經通知過，不重複通知
 
-        const journalId = `${seatNo}-${semester}-${month}`;
+        // 2026-09 調整：改用上面已經算好的 seatNoStr（而不是原始 seatNo）組
+        // journalId，純粹是可讀性/一致性考量——這裡跟其餘用到座號的地方
+        // （result.skipped／result.notified）統一用同一個「字串形式」的座號，
+        // 不是修正一個實際會發生的錯誤：JS 樣板字串的 `${x}` 內插對任何
+        // Firestore 能存的原始值（string／number）本來就會做出跟 String(x)
+        // 完全相同的字串轉換，兩種寫法在這裡從頭到尾都會組出一模一樣的
+        // journalId，經實測驗證過（含 seatNo 存成數字型別的情境）沒有任何
+        // 輸入會讓兩者產生不同結果。
+        const journalId = `${seatNoStr}-${semester}-${month}`;
         const journalSnap = await db.collection(`users/${binding.uid}/journals`).doc(journalId).get();
         const entriesCount =
           journalSnap.exists && Array.isArray(journalSnap.data().entries) ? journalSnap.data().entries.length : 0;
