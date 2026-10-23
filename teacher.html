@@ -200,6 +200,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 
 .main-content { flex: 1; padding: 28px; overflow-y: auto; max-width: 1200px; margin-left: 220px; min-height: calc(100vh - 60px); }
 
+/* 2026-10-23 補修：置中疊字 .sel-center-text 只在手機版（見下方 @media 內的 .sel-center 規則）才需要顯示。
+   原本這個 span 沒有桌機預設值，網頁版會在原生 select 下方多出一行重複文字；預設隱藏，手機版規則再覆蓋成 flex。 */
+.sel-center-text { display: none; }
+
 @media (max-width: 768px) {
   html, body, #app { width: 100%; max-width: 100%; overflow-x: hidden; }
   .app-body { display: block; width: 100%; min-width: 0; }
