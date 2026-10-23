@@ -215,10 +215,13 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
   .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
   input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
-/* 2026-10-23：排序／工作類型下拉選單的目前選項文字置中，與日期欄位一致。text-align-last 讓單行 select 在 Chrome／Firefox 也能置中；
-   展開後的選項清單：電腦瀏覽器會跟著置中，iPhone／Android 是系統原生選單，網頁樣式無法更動。 */
-#s-history-type-filter, #s-history-sort { text-align: center; text-align-last: center; }
-#s-history-type-filter option, #s-history-sort option { text-align: center; }
+/* 2026-10-23：下拉選單目前選項文字置中。iPhone Safari 不會依 CSS 置中原生 select 的顯示文字，
+   改成在「文字透明的 select」上疊一層置中文字（.sel-center-text，由 initCenteredSelect() 同步內容）。
+   點下去仍是原生選單，展開後的選項清單樣式維持系統預設。 */
+.sel-center { position: relative; display: block; }
+.sel-center > select { color: transparent; }
+.sel-center > select option { color: var(--text); }
+.sel-center-text { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0 14px; box-sizing: border-box; color: var(--text); white-space: nowrap; overflow: hidden; pointer-events: none; }
   .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 48px; }
   .mobile-nav-item .icon { font-size: 22px; }
@@ -783,9 +786,12 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
           </div>
           <div class="filter-type">
             <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">工作類型</label>
-            <select id="s-history-type-filter" style="width:100%">
-              <option value="">全部類型</option>
-            </select>
+            <div class="sel-center">
+              <select id="s-history-type-filter" style="width:100%">
+                <option value="">全部類型</option>
+              </select>
+              <span class="sel-center-text" aria-hidden="true"></span>
+            </div>
           </div>
           <div class="filter-end">
             <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">結束日期</label>
@@ -793,12 +799,15 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
           </div>
           <div class="filter-sort">
             <label for="s-history-sort" style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">排序</label>
-            <select id="s-history-sort" onchange="resortStudentHistory()" style="width:100%">
-              <option value="month-desc" selected>月份倒序</option>
-              <option value="month-asc">月份順序</option>
-              <option value="updated">最近更新</option>
-              <option value="submitted">最近繳交</option>
-            </select>
+            <div class="sel-center">
+              <select id="s-history-sort" onchange="resortStudentHistory()" style="width:100%">
+                <option value="month-desc" selected>月份倒序</option>
+                <option value="month-asc">月份順序</option>
+                <option value="updated">最近更新</option>
+                <option value="submitted">最近繳交</option>
+              </select>
+              <span class="sel-center-text" aria-hidden="true"></span>
+            </div>
           </div>
           <button class="btn btn-primary btn-sm filter-btn" onclick="loadStudentHistory()" style="justify-content:center">🔍 查詢</button>
         </div>
@@ -1108,6 +1117,29 @@ function sortJournalsBy(journals, mode) {
     default:           return arr.sort((a, b) => sem(b, a) || mon(b, a) || seat(a, b));
   }
 }
+
+// 2026-10-23 新增：讓下拉選單「目前選項」文字置中（見 .sel-center 樣式說明）。span 與 select 皆為永久節點，
+// sync 每次都讀當下的選取狀態與字型，所以只綁一次不會過期。選項被程式重建（innerHTML）時由 MutationObserver 同步。
+function initCenteredSelect(sel) {
+  if (!sel || sel.dataset.centered === '1') return;
+  const span = sel.parentElement && sel.parentElement.querySelector('.sel-center-text');
+  if (!span) return;
+  sel.dataset.centered = '1';
+  const sync = () => {
+    const cs = getComputedStyle(sel);
+    span.style.fontSize = cs.fontSize; span.style.fontFamily = cs.fontFamily; span.style.fontWeight = cs.fontWeight;
+    const opt = sel.options[sel.selectedIndex];
+    span.textContent = opt ? opt.text : '';
+  };
+  sel.addEventListener('change', sync);
+  window.addEventListener('resize', sync);
+  new MutationObserver(sync).observe(sel, { childList: true, subtree: true, characterData: true });
+  sync();
+}
+(function () {
+  const run = () => ['s-history-type-filter','s-history-sort'].forEach(id => initCenteredSelect(document.getElementById(id)));
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+})();
 
 function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);

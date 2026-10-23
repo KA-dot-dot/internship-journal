@@ -206,10 +206,13 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
   .main-content { padding: 14px; padding-bottom: 80px; width: 100%; max-width: none; min-width: 0; margin-left: 0; box-sizing: border-box; }
   input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
-/* 2026-10-23：排序／工作類型下拉選單的目前選項文字置中，與日期欄位一致。text-align-last 讓單行 select 在 Chrome／Firefox 也能置中；
-   展開後的選項清單：電腦瀏覽器會跟著置中，iPhone／Android 是系統原生選單，網頁樣式無法更動。 */
-#t-journals-sort { text-align: center; text-align-last: center; }
-#t-journals-sort option { text-align: center; }
+/* 2026-10-23：下拉選單目前選項文字置中。iPhone Safari 不會依 CSS 置中原生 select 的顯示文字，
+   改成在「文字透明的 select」上疊一層置中文字（.sel-center-text，由 initCenteredSelect() 同步內容）。
+   點下去仍是原生選單，展開後的選項清單樣式維持系統預設。 */
+.sel-center { position: relative; display: block; }
+.sel-center > select { color: transparent; }
+.sel-center > select option { color: var(--text); }
+.sel-center-text { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0 14px; box-sizing: border-box; color: var(--text); white-space: nowrap; overflow: hidden; pointer-events: none; }
   .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 4px; flex: 1; }
   .mobile-nav-item .icon { font-size: 22px; }
@@ -334,6 +337,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .t-journals-date-field label { margin-bottom: 0 !important; }
   .t-journals-date-field input { width: 100% !important; min-width: 0 !important; }
   .t-journals-date-field select { width: 100% !important; min-width: 0 !important; }
+  .t-journals-date-field .sel-center { width: 100% !important; }
   .t-journals-action-row { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; width: 100% !important; }
   .t-journals-action-row .btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #t-journals-search-row { display: flex !important; flex: unset !important; width: 100% !important; gap: 10px !important; align-items: center !important; }
@@ -1340,13 +1344,16 @@ tr:last-child td { border-bottom: none; }
             </div>
             <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center;flex-shrink:0">
               <label for="t-journals-sort" style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">排序</label>
-              <select id="t-journals-sort" onchange="resortTeacherJournals()" style="width:120px;box-sizing:border-box">
-                <option value="month-desc" selected>月份倒序</option>
-                <option value="month-asc">月份順序</option>
-                <option value="seat">座號→月份</option>
-                <option value="updated">最近更新</option>
-                <option value="submitted">最近繳交</option>
-              </select>
+              <div class="sel-center" style="width:120px;flex-shrink:0">
+                <select id="t-journals-sort" onchange="resortTeacherJournals()" style="width:100%;box-sizing:border-box">
+                  <option value="month-desc" selected>月份倒序</option>
+                  <option value="month-asc">月份順序</option>
+                  <option value="seat">座號→月份</option>
+                  <option value="updated">最近更新</option>
+                  <option value="submitted">最近繳交</option>
+                </select>
+                <span class="sel-center-text" aria-hidden="true"></span>
+              </div>
             </div>
             <div class="t-journals-action-row" style="display:flex;gap:10px;flex-shrink:0">
               <button class="btn btn-primary btn-sm" onclick="queryJournals()">🔍 查詢</button>
@@ -1827,6 +1834,29 @@ function sortJournalsBy(journals, mode) {
     default:           return arr.sort((a, b) => sem(b, a) || mon(b, a) || seat(a, b));
   }
 }
+
+// 2026-10-23 新增：讓下拉選單「目前選項」文字置中（見 .sel-center 樣式說明）。span 與 select 皆為永久節點，
+// sync 每次都讀當下的選取狀態與字型，所以只綁一次不會過期。選項被程式重建（innerHTML）時由 MutationObserver 同步。
+function initCenteredSelect(sel) {
+  if (!sel || sel.dataset.centered === '1') return;
+  const span = sel.parentElement && sel.parentElement.querySelector('.sel-center-text');
+  if (!span) return;
+  sel.dataset.centered = '1';
+  const sync = () => {
+    const cs = getComputedStyle(sel);
+    span.style.fontSize = cs.fontSize; span.style.fontFamily = cs.fontFamily; span.style.fontWeight = cs.fontWeight;
+    const opt = sel.options[sel.selectedIndex];
+    span.textContent = opt ? opt.text : '';
+  };
+  sel.addEventListener('change', sync);
+  window.addEventListener('resize', sync);
+  new MutationObserver(sync).observe(sel, { childList: true, subtree: true, characterData: true });
+  sync();
+}
+(function () {
+  const run = () => ['t-journals-sort'].forEach(id => initCenteredSelect(document.getElementById(id)));
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+})();
 
 function populateSemesterSelects(selectId) {
   const el = document.getElementById(selectId);
