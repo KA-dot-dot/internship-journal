@@ -180,7 +180,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 
 /* ===== 主應用佈局 ===== */
 #app { display: none; min-height: 100vh; min-height: 100dvh; background: var(--bg); }
-.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; min-height: 60px; height: 60px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.top-header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; padding-top: env(safe-area-inset-top); min-height: calc(60px + env(safe-area-inset-top)); height: auto; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo { width: 36px; height: 36px; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
 .header-title { font-size: 15px; font-weight: 700; }
@@ -191,7 +191,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .user-role { font-size: 11px; color: var(--text2); }
 .app-body { display: flex; min-height: calc(100vh - 60px); }
 
-.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: fixed; top: 60px; left: 0; height: calc(100vh - 60px); overflow-y: auto; z-index: 50; }
+.sidebar { width: 220px; min-width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: fixed; top: calc(60px + env(safe-area-inset-top)); left: 0; height: calc(100vh - 60px - env(safe-area-inset-top)); overflow-y: auto; z-index: 50; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; text-align: left; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
@@ -210,7 +210,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 4px; flex: 1; }
   .mobile-nav-item .icon { font-size: 22px; }
   .mobile-nav-item.active { color: var(--accent); }
-  .top-header { padding: 0 14px; }
+  .top-header { padding: 0 14px; padding-top: env(safe-area-inset-top); }
   .header-title { font-size: 13px; }
   .header-subtitle { display: none; }
   .user-name { font-size: 12px; }
@@ -1342,6 +1342,16 @@ tr:last-child td { border-bottom: none; }
               <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
             </div>
           </div>
+          <div class="t-journals-sort-row" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <label for="t-journals-sort" style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">排序</label>
+            <select id="t-journals-sort" onchange="resortTeacherJournals()" style="width:auto;max-width:100%;min-width:0;box-sizing:border-box">
+              <option value="month-desc" selected>月份倒序（最新月份在前）</option>
+              <option value="month-asc">月份順序（上學期7→1、下學期2→6）</option>
+              <option value="seat">座號→月份</option>
+              <option value="updated">最近更新（最新在前）</option>
+              <option value="submitted">最近繳交（最新在前）</option>
+            </select>
+          </div>
           <div id="t-journals-review-hint" style="display:none;font-size:12px;color:var(--text2);padding:2px 0;margin-top:6px">ℹ️ 審閱模式中，先按「✕ 結束」退出才能搜尋其他學生</div>
         </div>
         <!-- 審閱隊列導覽列（從主頁未審閱名單進入時顯示）-->
@@ -1784,6 +1794,33 @@ function monthOrderInSemester(semester, month) {
   const order = getSemesterMonths(String(semester || ''));
   const idx = order.indexOf(Number(month));
   return idx === -1 ? 99 : idx;
+}
+
+// 2026-10-23 新增：座號數字序比較（01<02<…<10），供老師首頁各名單排序用。
+function compareSeatNo(a, b) {
+  return String(a == null ? '' : a).localeCompare(String(b == null ? '' : b), 'zh-Hant', { numeric: true });
+}
+
+// 2026-10-23 新增：月記排序共用純函式（student.html／teacher.html 各自獨立一份，內容相同）。
+// mode：'month-desc'（預設，學期新→舊、月份倒序、同月依座號）／'month-asc'（學期舊→新、
+// 月份依學期順序：上學期7→1、下學期2→6）／'seat'（學期→座號→月份，老師端原本的排序）／
+// 'updated'（最近更新在前，updatedAt 缺資料退回 submittedAt）／'submitted'（最近繳交在前）。
+// updatedAt／submittedAt 皆為 localISOStr() 格式（YYYY-MM-DDTHH:mm:ss），可直接字串比較。
+function sortJournalsBy(journals, mode) {
+  const seat = (a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), 'zh-Hant', { numeric: true });
+  const sem = (a, b) => String(a.semester || '').localeCompare(String(b.semester || ''));
+  const mon = (a, b) => monthOrderInSemester(a.semester, a.month) - monthOrderInSemester(b.semester, b.month);
+  const tm = (j, k) => String((k === 'updated' ? (j.updatedAt || j.submittedAt) : j.submittedAt) || '');
+  const tDesc = (a, b, k) => { const x = tm(a, k), y = tm(b, k); return x < y ? 1 : (x > y ? -1 : 0); };
+  const arr = [...(journals || [])];
+  switch (mode) {
+    case 'month-asc':  return arr.sort((a, b) => sem(a, b) || mon(a, b) || seat(a, b));
+    case 'seat':       return arr.sort((a, b) => sem(a, b) || seat(a, b) || mon(a, b));
+    case 'updated':    return arr.sort((a, b) => tDesc(a, b, 'updated') || sem(b, a) || mon(b, a) || seat(a, b));
+    case 'submitted':  return arr.sort((a, b) => tDesc(a, b, 'submitted') || sem(b, a) || mon(b, a) || seat(a, b));
+    case 'month-desc':
+    default:           return arr.sort((a, b) => sem(b, a) || mon(b, a) || seat(a, b));
+  }
 }
 
 function populateSemesterSelects(selectId) {
@@ -2886,7 +2923,8 @@ async function loadTeacherDashboard() {
   ]);
   // 只取目前學期的新格式 {semester}_{seatNo}
   const semPrefix = sem + '_';
-  const activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix));
+  const activeStuDocs = stuSnap.docs.filter(d => d.id.startsWith(semPrefix))
+    .sort((a, b) => compareSeatNo(a.data().seatNo || a.id.slice(semPrefix.length), b.data().seatNo || b.id.slice(semPrefix.length))); // 2026-10-23：明確依座號排序
   const activeSeatNos = new Set(activeStuDocs.map(d => d.data().seatNo || d.id.slice(semPrefix.length)));
   const total = activeStuDocs.length;
   document.getElementById('stat-total-students').textContent = total;
@@ -2900,7 +2938,8 @@ async function loadTeacherDashboard() {
   // activeJournals：本月「有存檔」的月記（不論篇數多寡），供審閱／評語等既有統計沿用，
   // 這些統計看的是「老師有沒有東西可審閱」，跟本次新增的「篇數是否達標」是不同維度，
   // 不因篇數多寡而改變原本定義。
-  const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth);
+  const activeJournals = userJournalData(jSnap).filter(j => activeSeatNos.has(j.seatNo) && j.semester === sem && j.month === thisMonth)
+    .sort((a, b) => compareSeatNo(a.seatNo, b.seatNo)); // 2026-10-23：已繳／審閱／評語等名單與審閱隊列依座號排序
   // 2026-07-16 新增：本月「已完成」改為篇數需達到 minEntries 才算，不再是「有存檔就算」——
   // 只交1篇但規定要2篇的學生，這裡不算完成，會落入下方的未繳名單（含篇數註記）。
   const requiredThisMonth = resolveMinEntries(deadlineDataMap[`${sem}-${thisMonth}`]);
@@ -2929,7 +2968,8 @@ async function loadTeacherDashboard() {
   const unreviewed = Math.max(activeJournals.length - reviewed, 0);
   // 全班所有月記中有學生未讀回覆的（不限本月，老師隨時要能看到）
   const allJournals = userJournalData(jSnap);
-  const studentReplies = allJournals.filter(j => j.studentReplyUnread);
+  const studentReplies = allJournals.filter(j => j.studentReplyUnread)
+    .sort((a, b) => compareSeatNo(a.seatNo, b.seatNo) || String(b.semester || '').localeCompare(String(a.semester || '')) || monthOrderInSemester(a.semester, a.month) - monthOrderInSemester(b.semester, b.month)); // 2026-10-23：座號→學期新到舊→月份
   document.getElementById('stat-submitted').textContent = submitted;
   document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-rate').textContent = total ? Math.round(submitted/total*100) + '%' : '0%';
@@ -3071,7 +3111,7 @@ async function loadTeacherDashboard() {
   const crossMonthJournals = userJournalData(jSnap).filter(j =>
     !j.teacherReviewed &&
     !(j.semester === sem && j.month === thisMonth)
-  );
+  ).sort((a, b) => compareSeatNo(a.seatNo, b.seatNo)); // 2026-10-23：各月份分組內依座號排序（分組本身順序不變）
   const crossMonthMap = {};
   crossMonthJournals.forEach(j => {
     const key = `${j.semester}-${j.month}`;
@@ -5831,12 +5871,12 @@ async function fetchJournalsFromServer() {
 }
 
 // 篩選 + 排序（在前端執行，不走網路）
-function filterAndSortJournals(journals, startStr, endStr, search) {
+function filterAndSortJournals(journals, startStr, endStr, search, sortMode) {
   let result = [...journals];
   if (startStr && endStr) result = result.filter(j => journalMonthInRange(j, startStr, endStr));
   if (search) result = result.filter(j => (j.seatNo||'').includes(search) || (j.studentName||'').toLowerCase().includes(search) || (j.company||'').toLowerCase().includes(search));
-  result.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
-  return result;
+  // 2026-10-23：改由 sortJournalsBy() 依「排序」下拉選單排序，預設月份倒序（最新月份在前）
+  return sortJournalsBy(result, sortMode || document.getElementById('t-journals-sort')?.value || 'month-desc');
 }
 
 async function loadTeacherJournals(forceRefresh) {
@@ -6335,6 +6375,12 @@ function setCacheIndicator(state, ts, count) {
   } else {
     el.innerHTML = '';
   }
+}
+
+// 2026-10-23 新增：切換排序只在前端重排目前已顯示的月記，不重新讀 Firestore。
+function resortTeacherJournals() {
+  const mode = document.getElementById('t-journals-sort')?.value || 'month-desc';
+  renderJournalListUI(sortJournalsBy(window._teacherJournalsCache || [], mode));
 }
 
 function renderJournalListUI(journals) {

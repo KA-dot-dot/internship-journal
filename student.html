@@ -786,6 +786,15 @@ body.light-mode .write-progress-float-label { color: var(--text2); }
           </div>
           <button class="btn btn-primary btn-sm filter-btn" onclick="loadStudentHistory()" style="justify-content:center">🔍 查詢</button>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;margin:2px 0 10px">
+          <label for="s-history-sort" style="font-size:12px;color:var(--text2);white-space:nowrap;margin-bottom:0">排序</label>
+          <select id="s-history-sort" onchange="resortStudentHistory()" style="width:auto;max-width:100%;min-width:0;box-sizing:border-box">
+            <option value="month-desc" selected>月份倒序（最新月份在前）</option>
+            <option value="month-asc">月份順序（上學期7→1、下學期2→6）</option>
+            <option value="updated">最近更新（最新在前）</option>
+            <option value="submitted">最近繳交（最新在前）</option>
+          </select>
+        </div>
         <!-- 批次選取工具列 -->
         <div id="s-batch-toolbar">
           <label>
@@ -1069,6 +1078,28 @@ function monthOrderInSemester(semester, month) {
   const order = getSemesterMonths(String(semester || ''));
   const idx = order.indexOf(Number(month));
   return idx === -1 ? 99 : idx;
+}
+
+// 2026-10-23 新增：月記排序共用純函式（student.html／teacher.html 各自獨立一份，內容相同）。
+// mode：'month-desc'（預設，學期新→舊、月份倒序、同月依座號）／'month-asc'（學期舊→新、
+// 月份依學期順序：上學期7→1、下學期2→6）／'seat'（學期→座號→月份，老師端原本的排序）／
+// 'updated'（最近更新在前，updatedAt 缺資料退回 submittedAt）／'submitted'（最近繳交在前）。
+// updatedAt／submittedAt 皆為 localISOStr() 格式（YYYY-MM-DDTHH:mm:ss），可直接字串比較。
+function sortJournalsBy(journals, mode) {
+  const seat = (a, b) => String(a.seatNo || '').localeCompare(String(b.seatNo || ''), 'zh-Hant', { numeric: true });
+  const sem = (a, b) => String(a.semester || '').localeCompare(String(b.semester || ''));
+  const mon = (a, b) => monthOrderInSemester(a.semester, a.month) - monthOrderInSemester(b.semester, b.month);
+  const tm = (j, k) => String((k === 'updated' ? (j.updatedAt || j.submittedAt) : j.submittedAt) || '');
+  const tDesc = (a, b, k) => { const x = tm(a, k), y = tm(b, k); return x < y ? 1 : (x > y ? -1 : 0); };
+  const arr = [...(journals || [])];
+  switch (mode) {
+    case 'month-asc':  return arr.sort((a, b) => sem(a, b) || mon(a, b) || seat(a, b));
+    case 'seat':       return arr.sort((a, b) => sem(a, b) || seat(a, b) || mon(a, b));
+    case 'updated':    return arr.sort((a, b) => tDesc(a, b, 'updated') || sem(b, a) || mon(b, a) || seat(a, b));
+    case 'submitted':  return arr.sort((a, b) => tDesc(a, b, 'submitted') || sem(b, a) || mon(b, a) || seat(a, b));
+    case 'month-desc':
+    default:           return arr.sort((a, b) => sem(b, a) || mon(b, a) || seat(a, b));
+  }
 }
 
 function populateSemesterSelects(selectId) {
@@ -4258,7 +4289,8 @@ async function loadStudentHistory() {
         return normalised === typeFilter;
       }));
     }
-    journals.sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month));
+    // 2026-10-23：改由 sortJournalsBy() 依「排序」下拉選單排序，預設月份倒序（最新月份在前）
+    journals = sortJournalsBy(journals, document.getElementById('s-history-sort')?.value || 'month-desc');
     window._studentHistoryJournals = journals;
     const toolbar = document.getElementById('s-batch-toolbar');
     if (toolbar) toolbar.style.display = 'none';
@@ -4308,6 +4340,20 @@ async function loadStudentHistory() {
   } finally {
     hideLoading();
   }
+}
+
+// 2026-10-23 新增：切換排序只在前端重排已載入的月記，不重新讀 Firestore。
+function resortStudentHistory() {
+  const list = window._studentHistoryJournals;
+  if (!Array.isArray(list)) return;
+  const sorted = sortJournalsBy(list, document.getElementById('s-history-sort')?.value || 'month-desc');
+  window._studentHistoryJournals = sorted;
+  const allCb = document.getElementById('s-select-all-cb');
+  if (allCb) allCb.checked = false;
+  document.getElementById('s-history-list').innerHTML = sorted.length
+    ? sorted.map(j => renderJournalCardSelectable(j)).join('')
+    : '<div class="empty-state"><div class="icon">📭</div><p>尚無月記資料</p></div>';
+  updateHistoryBatchBar();
 }
 
 // 有 checkbox 的歷史月記卡（僅歷史頁使用）
