@@ -312,20 +312,20 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
 .stat-detail-row .journal-updated-read-badge { position: static !important; min-width: 72px; justify-content: center; flex-shrink: 0; margin: 0 !important; }
 .stat-detail-empty { color: var(--text2); font-size: 12px; }
 
-/* 歷史月記篩選格：手機（<600px）兩欄——第1排 起始日｜結束日、第2排 工作類型｜排序、第3排 查詢；
-   電腦（≥600px）四欄——起始日｜結束日｜工作類型｜排序，查詢按鈕獨立一排。日期區間與工作類型為兩組獨立篩選條件。 */
+/* 歷史月記篩選格：手機（<600px）兩欄——第1排 起始日｜結束日、第2排 排序｜工作類型、第3排 查詢；
+   電腦（≥600px）四欄——起始日｜結束日｜排序｜工作類型，查詢按鈕獨立一排。日期區間與工作類型為兩組獨立篩選條件。 */
 .s-history-filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; align-items:end; }
 .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
 .s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
-.s-history-filter-grid > .filter-type  { grid-column:1; grid-row:2; }
-.s-history-filter-grid > .filter-sort  { grid-column:2; grid-row:2; }
+.s-history-filter-grid > .filter-sort  { grid-column:1; grid-row:2; }
+.s-history-filter-grid > .filter-type  { grid-column:2; grid-row:2; }
 .s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:3; }
 @media (min-width:600px) {
   .s-history-filter-grid { grid-template-columns:1fr 1fr 1fr 1fr; }
   .s-history-filter-grid > .filter-start { grid-column:1; grid-row:1; }
   .s-history-filter-grid > .filter-end   { grid-column:2; grid-row:1; }
-  .s-history-filter-grid > .filter-type  { grid-column:3; grid-row:1; }
-  .s-history-filter-grid > .filter-sort  { grid-column:4; grid-row:1; }
+  .s-history-filter-grid > .filter-sort  { grid-column:3; grid-row:1; }
+  .s-history-filter-grid > .filter-type  { grid-column:4; grid-row:1; }
   .s-history-filter-grid > .filter-btn   { grid-column:1/-1; grid-row:2; }
 }
 /* 圖表卡片 */
