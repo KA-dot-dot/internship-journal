@@ -329,6 +329,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .t-journals-date-field { display: grid !important; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 8px; width: 100% !important; }
   .t-journals-date-field label { margin-bottom: 0 !important; }
   .t-journals-date-field input { width: 100% !important; min-width: 0 !important; }
+  .t-journals-date-field select { width: 100% !important; min-width: 0 !important; }
   .t-journals-action-row { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px; width: 100% !important; }
   .t-journals-action-row .btn { width: 100% !important; min-width: 0 !important; justify-content: center; }
   #t-journals-search-row { display: flex !important; flex: unset !important; width: 100% !important; gap: 10px !important; align-items: center !important; }
@@ -1324,7 +1325,7 @@ tr:last-child td { border-bottom: none; }
         <div class="page-title">📖 月記總覽</div>
         <div class="page-subtitle">瀏覽所有學生的月記內容（學生刪除後需重新查詢）</div>
         <div class="t-journals-controls" style="margin-bottom:14px">
-          <div class="t-journals-filter-row" style="display:flex;gap:10px;align-items:center;flex-wrap:nowrap">
+          <div class="t-journals-filter-row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center;flex-shrink:0">
               <label style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">起始日期</label>
               <input type="date" id="t-journals-date-start" style="width:138px;box-sizing:border-box">
@@ -1333,24 +1334,24 @@ tr:last-child td { border-bottom: none; }
               <label style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">結束日期</label>
               <input type="date" id="t-journals-date-end" style="width:138px;box-sizing:border-box">
             </div>
+            <div class="t-journals-date-field" style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+              <label for="t-journals-sort" style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">排序</label>
+              <select id="t-journals-sort" onchange="resortTeacherJournals()" style="width:120px;box-sizing:border-box">
+                <option value="month-desc" selected>月份倒序</option>
+                <option value="month-asc">月份順序</option>
+                <option value="seat">座號→月份</option>
+                <option value="updated">最近更新</option>
+                <option value="submitted">最近繳交</option>
+              </select>
+            </div>
             <div class="t-journals-action-row" style="display:flex;gap:10px;flex-shrink:0">
               <button class="btn btn-primary btn-sm" onclick="queryJournals()">🔍 查詢</button>
               <button class="btn btn-secondary btn-sm" onclick="queryJournals(true)" title="跳過快取，直接從伺服器重新拉取">🔄 強制更新</button>
             </div>
-            <div id="t-journals-search-row" style="display:flex;flex:1;min-width:0;gap:10px;align-items:center">
+            <div id="t-journals-search-row" style="display:flex;flex:1 1 150px;min-width:0;gap:10px;align-items:center">
               <input type="text" id="t-journals-search" placeholder="搜尋座號／姓名／公司" style="flex:1;min-width:0;box-sizing:border-box" oninput="loadTeacherJournals()">
               <button class="btn btn-sm t-journals-review-btn" style="white-space:nowrap;flex-shrink:0;background:rgba(34,197,94,0.15);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)" onclick="openBatchReviewModal()">✅ 批次已審閱</button>
             </div>
-          </div>
-          <div class="t-journals-sort-row" style="display:flex;gap:8px;align-items:center;margin-top:8px">
-            <label for="t-journals-sort" style="font-size:13px;color:var(--text2);white-space:nowrap;margin-bottom:0">排序</label>
-            <select id="t-journals-sort" onchange="resortTeacherJournals()" style="width:auto;max-width:100%;min-width:0;box-sizing:border-box">
-              <option value="month-desc" selected>月份倒序（最新月份在前）</option>
-              <option value="month-asc">月份順序（上學期7→1、下學期2→6）</option>
-              <option value="seat">座號→月份</option>
-              <option value="updated">最近更新（最新在前）</option>
-              <option value="submitted">最近繳交（最新在前）</option>
-            </select>
           </div>
           <div id="t-journals-review-hint" style="display:none;font-size:12px;color:var(--text2);padding:2px 0;margin-top:6px">ℹ️ 審閱模式中，先按「✕ 結束」退出才能搜尋其他學生</div>
         </div>

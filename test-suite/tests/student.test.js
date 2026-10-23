@@ -1,7 +1,16 @@
 /**
  * tests/student.test.js
- * 學生端自動化測試 v46
+ * 學生端自動化測試 v47
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-06）與 AI_推播系統說明.md（截至 2026-07-10）
+ *
+ * v47 修正（2026-10-23）：歷史月記新增「排序」下拉選單，預設「月份倒序」（最新月份在前），
+ * loadStudentHistory() 改呼叫新增的共用純函式 sortJournalsBy()，不再內嵌
+ * monthOrderInSemester(a...)-monthOrderInSemester(b...) 比較式。S-SEC-64 原本要求
+ * loadStudentHistory() 原始碼直接含該比較式，改後會誤報；已改為接受「呼叫
+ * sortJournalsBy()，且 sortJournalsBy() 本體含該比較式」，保護力不變（月份排序仍必須
+ * 走 monthOrderInSemester）。
+ *   S-SEC-68  真執行 sortJournalsBy()：四種模式順序、缺時間資料的退回規則、不更動傳入
+ *             陣列；並確認 #s-history-sort 的選項清單與預設選項（month-desc）。
  *
  * v46 修正（2026-09-06）：使用者稽核 saveJournal() 發現一個雙擊/快速重複點擊重入問題——
  * saveBtn.disabled = true 原本要等到函式執行到「所有同步驗證都通過」之後才會設定（原本
@@ -4220,16 +4229,23 @@ async function runStudentTests(page, browserContext, log) {
     // 這四個函式會讀 Firestore／依賴 currentUser 登入狀態，比照 S-SEC-49 既有取捨，
     // 不貿然真執行覆寫全域函式，改用靜態原始碼比對（codeOnly() 過濾註解，同陷阱19
     // 既有做法，避免命中函式內解釋性註解裡也會出現的文字）。
+    // v47：loadStudentHistory() 改委派給 sortJournalsBy()，故接受兩種寫法之一：
+    //   ①函式本身含 monthOrderInSemester(a...)-monthOrderInSemester(b...) 比較式；
+    //   ②函式呼叫 sortJournalsBy()，且 sortJournalsBy() 本體含同一個比較式。
     const result = await page.evaluate(() => {
       const fnNames = ['loadStudentDashboard', 'loadStudentStats', 'loadStudentHistory', 'exportMyPDF'];
       if (fnNames.some(name => typeof window[name] !== 'function')) return { skip: true };
       const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const CMP = /monthOrderInSemester\s*\(\s*a\.semester\s*,\s*a\.month\s*\)\s*-\s*monthOrderInSemester\s*\(\s*b\.semester\s*,\s*b\.month\s*\)/;
+      const NAIVE = /\(a\.month\s*\|\|\s*0\)\s*-\s*\(b\.month\s*\|\|\s*0\)/;
+      const sortStr = typeof window.sortJournalsBy === 'function' ? codeOnly(window.sortJournalsBy.toString()) : '';
+      const sortOk = CMP.test(sortStr) && !NAIVE.test(sortStr);
       const report = {};
       fnNames.forEach(name => {
         const fnStr = codeOnly(window[name].toString());
         report[name] = {
-          usesMonthOrderInSemester: /monthOrderInSemester\s*\(\s*a\.semester\s*,\s*a\.month\s*\)\s*-\s*monthOrderInSemester\s*\(\s*b\.semester\s*,\s*b\.month\s*\)/.test(fnStr),
-          hasNaiveMonthSub: /\(a\.month\s*\|\|\s*0\)\s*-\s*\(b\.month\s*\|\|\s*0\)/.test(fnStr),
+          usesMonthOrderInSemester: CMP.test(fnStr) || (/sortJournalsBy\s*\(/.test(fnStr) && sortOk),
+          hasNaiveMonthSub: NAIVE.test(fnStr),
         };
       });
       return { skip: false, report };
@@ -4237,10 +4253,39 @@ async function runStudentTests(page, browserContext, log) {
     if (result.skip) return;
     Object.entries(result.report).forEach(([name, r]) => {
       if (!r.usesMonthOrderInSemester)
-        throw new Error(`${name}() 找不到 monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month) 排序比較式，月份排序可能又退回裸數字比較`);
+        throw new Error(`${name}() 找不到 monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month) 排序比較式（也沒有委派給含該比較式的 sortJournalsBy()），月份排序可能又退回裸數字比較`);
       if (r.hasNaiveMonthSub)
         throw new Error(`${name}() 仍殘留舊版 (a.month||0)-(b.month||0) 裸數字排序寫法`);
     });
+  });
+
+  await test('S-SEC-68 sortJournalsBy() 四種模式順序正確、缺時間資料有退回規則、不更動傳入陣列，且排序選單選項與預設值正確', async () => {
+    // 純函式，不碰 Firestore，可安全真執行。合成資料刻意讓四種模式的結果兩兩不同：
+    //   A 115-1/9月 更新10-02  B 115-1/7月 無updatedAt（退回繳交07-20）  C 115-1/12月 更新09-10
+    //   D 114-2/6月 更新10-15（舊月份最近被改）  E 115-1/8月 兩種時間都沒有（排最後）
+    const result = await page.evaluate(() => {
+      if (typeof sortJournalsBy !== 'function') return { skip: true };
+      const J = [
+        { id: 'A', semester: '115-1', month: 9,  seatNo: '02', submittedAt: '2026-09-05T10:00:00', updatedAt: '2026-10-02T10:00:00' },
+        { id: 'B', semester: '115-1', month: 7,  seatNo: '01', submittedAt: '2026-07-20T10:00:00' },
+        { id: 'C', semester: '115-1', month: 12, seatNo: '10', submittedAt: '2026-12-01T10:00:00', updatedAt: '2026-09-10T10:00:00' },
+        { id: 'D', semester: '114-2', month: 6,  seatNo: '01', submittedAt: '2026-08-30T10:00:00', updatedAt: '2026-10-15T10:00:00' },
+        { id: 'E', semester: '115-1', month: 8,  seatNo: '03' }
+      ];
+      const run = mode => sortJournalsBy(J, mode).map(j => j.id).join(',');
+      const sel = document.getElementById('s-history-sort');
+      const defOpt = sel ? sel.querySelector('option[selected]') : null;
+      return { skip: false, desc: run('month-desc'), asc: run('month-asc'), updated: run('updated'), submitted: run('submitted'), dflt: run(undefined), input: J.map(j => j.id).join(','),
+        opts: sel ? Array.from(sel.options).map(o => o.value).join(',') : null, defaultOpt: defOpt ? defOpt.value : null };
+    });
+    if (result.skip) return;
+    const exp = { desc: 'C,A,E,B,D', asc: 'D,B,E,A,C', updated: 'D,A,C,B,E', submitted: 'C,A,D,B,E' };
+    for (const k of Object.keys(exp))
+      if (result[k] !== exp[k]) throw new Error(`sortJournalsBy 模式 ${k} 應為 ${exp[k]}，實際：${result[k]}`);
+    if (result.dflt !== exp.desc) throw new Error(`未指定模式時應等同 month-desc（${exp.desc}），實際：${result.dflt}`);
+    if (result.input !== 'A,B,C,D,E') throw new Error(`sortJournalsBy 不應更動傳入的陣列，實際順序變成：${result.input}`);
+    if (result.opts !== 'month-desc,month-asc,updated,submitted') throw new Error(`#s-history-sort 選項應為 month-desc,month-asc,updated,submitted，實際：${result.opts}`);
+    if (result.defaultOpt !== 'month-desc') throw new Error(`#s-history-sort 預設選項應為 month-desc，實際：${result.defaultOpt}`);
   });
 
 
