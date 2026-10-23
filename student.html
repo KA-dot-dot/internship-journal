@@ -215,6 +215,10 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 5px; display: block
   .sidebar { display: none !important; width: 0; min-width: 0; padding: 0; }
   .main-content { padding: 14px; padding-bottom: 80px; width: 100%; min-width: 0; }
   input[type="date"] { display: block !important; width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; -webkit-appearance: none !important; appearance: none !important; }
+/* 2026-10-23：排序／工作類型下拉選單的目前選項文字置中，與日期欄位一致。text-align-last 讓單行 select 在 Chrome／Firefox 也能置中；
+   展開後的選項清單：電腦瀏覽器會跟著置中，iPhone／Android 是系統原生選單，網頁樣式無法更動。 */
+#s-history-type-filter, #s-history-sort { text-align: center; text-align-last: center; }
+#s-history-type-filter option, #s-history-sort option { text-align: center; }
   .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0; z-index: 100; }
   .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: var(--text2); font-size: 11px; cursor: pointer; padding: 6px 10px; min-width: 48px; }
   .mobile-nav-item .icon { font-size: 22px; }
