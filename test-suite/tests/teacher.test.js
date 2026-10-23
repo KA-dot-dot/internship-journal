@@ -1,7 +1,18 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v45
+ * 老師端自動化測試 v46
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v46 修正（2026-10-23）：T-SEC-40（copyMissingList() 複製文字不含姓名）第三次修正「時好時壞」。
+ * 前兩次（2026-07-18／2026-07-23）修的是「copyMissingList() 當時為 async、讀取全域資料前夾著
+ * await getDoc()，背景 loadTeacherDashboard() 會蓋掉合成資料」的競態，做法是先觸發 dashboard
+ * 載入再等它完成。但 2026-08-04 起 copyMissingList() 已改為單純同步函式，該競態已不存在，
+ * 殘留的「等 window._missingWithCount 變回陣列（最多 15 秒）」反而成為唯一失敗來源——
+ * loadTeacherDashboard() 三個 Firestore 查詢任一個超過 5 秒 withTimeout 就會進 catch、永遠
+ * 不寫入該變數，測試便空等逾時。本次改為完全不觸發也不等待 loadTeacherDashboard()，同一個
+ * 同步回合內覆寫合成資料並呼叫 copyMissingList()；並新增前提檢查（copyMissingList() 不得含
+ * async／await），日後若又變回非同步版本會明確失敗而非變成新的間歇性失敗。
+ * 測試項數不變（只修改既有 T-SEC-40，未新增／刪除測項）。
  *
  * v45 修正（2026-10-23）：月記總覽新增「排序」下拉選單，預設改為「月份倒序」（最新月份在前）；
  * filterAndSortJournals() 新增第5參數 sortMode，並新增共用純函式 sortJournalsBy()。
@@ -2666,39 +2677,34 @@ async function runTeacherTests(page, log) {
     const hasFn = await page.evaluate(() => typeof copyMissingList === 'function');
     if (!hasFn) return;
 
-    // 2026-07-23 修正（T-SEC-40 間歇性失敗的第二次修正，2026-07-18 那次修法本身不夠）：
-    // 先清空 window._missingWithCount，再觸發 showPage('t-dashboard')。理由見下方等待
-    // 邏輯的註解——這一步是讓下面「等它變回陣列」的檢查有意義的前提。
-    await page.evaluate(() => {
-      window._missingWithCount = undefined;
-      if (typeof showPage === 'function') showPage('t-dashboard');
-    });
-    await waitForPage(page, 't-dashboard', 6000);
-
-    // 2026-07-18 第一次修正（真實 bug，非 copyMissingList() 本身的問題）：showPage('t-dashboard')
-    // 內部呼叫 loadTeacherDashboard() 是 fire-and-forget（loaders[pageId]() 沒有 await，
-    // 見 teacher.html showPage()），waitForPage() 只確認 DOM 的 .hidden class 被拿掉，
-    // 完全不保證 loadTeacherDashboard() 的三個 Firestore 集合查詢（Promise.all）已經跑完。
-    // 當時的修法是等待 #loading-overlay 重新變回 hidden，才繼續往下設定合成資料。
-    //
-    // 2026-07-23 第二次修正：上面那個修法本身仍不夠可靠，才是「時好時壞、遇到很多次」的
-    // 真正原因——`hideLoading()` 是全站共用同一個 #loading-overlay 元素，全檔至少 52 處
-    // 呼叫，任何跟這次 dashboard 載入無關的背景動作（甚至只是先前某次操作殘留、剛好還沒
-    // 被下一次 showLoading() 蓋掉的「hidden」狀態）都可能讓這個快照式檢查一開始就通過，
-    // 完全沒有真的等到「這次」showPage() 觸發的 loadTeacherDashboard() 跑完——這是比
-    // 「完全沒等」更隱蔽的競態，多數情況下巧合仍會等到足夠久，只有少數情況才會提早通過
-    // 而失敗，符合使用者回報的「時好時壞」現象。
-    // 修法：改成直接等待 window._missingWithCount 本身變回真正的陣列。因為上面已經先把它
-    // 清空成 undefined，只有 loadTeacherDashboard() 內部真正執行到寫入這個全域變數那一行
-    // （teacher.html 全檔只有這一處會寫入它）才會讓它變回陣列，不會被其他無關函式的
-    // loading 遮罩開關誤觸發，也不會被「巧合殘留的舊值」騙過去。
-    try {
-      await page.waitForFunction(() => Array.isArray(window._missingWithCount), { timeout: 15000 });
-    } catch (e) {
-      throw new Error('等待 loadTeacherDashboard() 真正完成逾時（window._missingWithCount 15 秒內未變回陣列），可能是背景載入本身卡住或逾時，非本測試邏輯問題');
-    }
-
+    // 2026-10-23 第三次修正（直接拿掉「等待 loadTeacherDashboard()」這整個步驟，而不是再調整
+    // 等待條件）。這條測試先前兩次「時好時壞」的修法（2026-07-18 等 #loading-overlay 隱藏、
+    // 2026-07-23 改等 window._missingWithCount 變回陣列）要防的都是同一個競態：當時的
+    // copyMissingList() 是 async 函式，在讀取 window._missingWithCount 之前還夾著一次
+    // await getDoc()（讀當月截止日），這個 await 空檔會讓背景 fire-and-forget 的
+    // loadTeacherDashboard()（showPage('t-dashboard') 觸發）有機會完成，並用真實班級資料蓋掉
+    // 測試注入的合成資料，所以測試才必須先等 dashboard 載入完。
+    // 但 2026-08-04 起 copyMissingList() 已改成單純同步函式（不含任何 await，截止日字串改由
+    // loadTeacherDashboard() 預先算好存進 window._missingDeadlineStr，見 teacher.html 該函式
+    // 上方註解），下方「覆寫合成資料 → 呼叫 copyMissingList()」整段在同一個同步執行回合內
+    // 完成，JS 單執行緒下沒有任何背景任務能插進來覆寫——原本要防的競態已經不存在。
+    // 此後保留「先 showPage('t-dashboard')、再等 _missingWithCount 變回陣列」反而成為這條測試
+    // 唯一的失敗來源：loadTeacherDashboard() 要平行讀 students／collectionGroup(journals)／
+    // deadlines 三個集合，各自套 5 秒 withTimeout，任一個逾時就直接進 catch、只會 toast
+    // 「主頁資料載入失敗」，window._missingWithCount 永遠不會被寫入，測試便空等滿 15 秒後失敗
+    // ——測試結果取決於「真實 Firestore 當下夠不夠快」，跟 copyMissingList() 本身對不對無關
+    // （2026-10-23 報告中的 T-SEC-40 失敗即為此現象：15 秒內未變回陣列）。
+    // 修法：不再觸發、也不再等待 loadTeacherDashboard()，這條測試完全不依賴真實資料載入。
+    // 為避免「同步」這個前提日後悄悄失效（copyMissingList() 若又變回含 await 的非同步版本，
+    // 舊的競態就會回來），下方改為先確認它仍是同步函式；不是的話明確失敗並說明原因，
+    // 而不是靜默變成新的間歇性失敗。
     const result = await page.evaluate(async () => {
+      // 比照陷阱19：先濾掉整行註解再搜尋，避免命中函式內解釋性文字
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const fnStr = codeOnly(copyMissingList.toString());
+      const isSync = !/^\s*async\b/.test(fnStr) && !/\bawait\b/.test(fnStr);
+      if (!isSync) return { isSync, captured: null };
+
       let captured = null;
       const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
       // 攔截剪貼簿寫入：copyMissingList() 呼叫 navigator.clipboard.writeText(text) 時
@@ -2719,9 +2725,11 @@ async function runTeacherTests(page, log) {
       } finally {
         navigator.clipboard.writeText = originalWriteText;
       }
-      return { captured };
+      return { isSync, captured };
     });
 
+    if (!result.isSync)
+      throw new Error('copyMissingList() 又變回含 async／await 的非同步函式——本測試「同一個同步回合內覆寫合成資料並呼叫」的前提失效，背景的 loadTeacherDashboard() 可能再次在 await 空檔蓋掉合成資料；請重新評估是否要恢復「先觸發並等待 loadTeacherDashboard() 真正寫入 window._missingWithCount」的步驟（見本測試上方 2026-10-23 說明與陷阱21／23）');
     if (!result.captured)
       throw new Error('copyMissingList() 沒有呼叫 navigator.clipboard.writeText()，可能執行中拋出例外');
     if (result.captured.includes('測試學生甲'))
