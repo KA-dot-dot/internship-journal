@@ -1,7 +1,16 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v44
+ * 老師端自動化測試 v45
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v45 修正（2026-10-23）：月記總覽新增「排序」下拉選單，預設改為「月份倒序」（最新月份在前）；
+ * filterAndSortJournals() 新增第5參數 sortMode，並新增共用純函式 sortJournalsBy()。
+ * T-SEC-72 原本不帶模式呼叫、預期 7,12,1，依賴的是舊預設（座號→月份順序）；新預設下
+ * 實際回傳 1,12,7 是預期行為（學期時序的遞減，裸數字遞減會是 12,7,1），不是退回裸數字
+ * 比較。已改為明確傳入 month-asc／month-desc／seat 三種模式分別斷言，並確認選單 markup
+ * 的預設選項是 month-desc（不依賴執行當下頁面上選單的狀態）。
+ *   T-SEC-83  真執行 sortJournalsBy()：month-desc／month-asc／updated／submitted 四種
+ *             模式的順序、updatedAt 缺資料退回 submittedAt、兩者皆缺排最後、不更動傳入陣列。
  *
  * v44 修正（2026-09-07）：稽核發現另外兩個跟已修復的 saveJournal()（student.html）
  * 架構完全相同的雙擊重入問題——showLoading() 都要等到第一個 await 之後才呼叫，這段
@@ -4421,19 +4430,53 @@ async function runTeacherTests(page, log) {
       throw new Error(`整個第1學期(7~1月)全選時範圍標籤應為「2026/7~2027/1，共7筆」，實際：「${result.fullSemLabel}」`);
   });
 
-  await test('T-SEC-72 filterAndSortJournals()（月記總覽）在學期橫跨12月與隔年1月時，排序時序正確', async () => {
-    // filterAndSortJournals(journals, startStr, endStr, search) 是純函式（函式本身
-    // 註解已明確標示「篩選 + 排序（在前端執行，不走網路）」），不碰 Firestore，可安全
-    // 直接呼叫本體驗證。
+  await test('T-SEC-72 filterAndSortJournals()（月記總覽）在學期橫跨12月與隔年1月時，各排序模式的月份時序正確', async () => {
+    // filterAndSortJournals(journals, startStr, endStr, search, sortMode) 不碰 Firestore，可安全
+    // 直接呼叫本體驗證。v45 起預設模式為 month-desc，這裡一律明確傳入模式，不依賴頁面當下
+    // 選單狀態。三組斷言各自能區分「依學期時序」與「裸數字／字串比較」：
+    //   month-asc  7,12,1（裸數字遞增會是 1,7,12）
+    //   month-desc 1,12,7（裸數字遞減會是 12,7,1）
+    //   seat       同座號時依月份時序 7,12,1
     const result = await page.evaluate(() => {
       if (typeof filterAndSortJournals !== 'function') return { skip: true };
       const journals = [7, 12, 1].map(m => ({ semester: '999-1', seatNo: '01', month: m }));
-      const sorted = filterAndSortJournals(journals, '', '', '');
-      return { skip: false, order: sorted.map(j => j.month) };
+      const run = mode => filterAndSortJournals(journals, '', '', '', mode).map(j => j.month).join(',');
+      const defOpt = document.querySelector('#t-journals-sort option[selected]');
+      return { skip: false, asc: run('month-asc'), desc: run('month-desc'), seat: run('seat'), defaultOpt: defOpt ? defOpt.value : null };
     });
     if (result.skip) return;
-    if (result.order.join(',') !== '7,12,1')
-      throw new Error(`filterAndSortJournals() 同一學期內應依時序排序為 7,12,1，實際：${result.order.join(',')}——若1月排最前面，代表又退回裸數字/字串比較`);
+    if (result.asc !== '7,12,1')
+      throw new Error(`month-asc 同一學期內應依時序排序為 7,12,1，實際：${result.asc}——若為 1,7,12 代表退回裸數字比較`);
+    if (result.desc !== '1,12,7')
+      throw new Error(`month-desc 同一學期內應依時序倒序為 1,12,7，實際：${result.desc}——若為 12,7,1 代表退回裸數字比較`);
+    if (result.seat !== '7,12,1')
+      throw new Error(`seat 模式同座號時應依月份時序排序為 7,12,1，實際：${result.seat}`);
+    if (result.defaultOpt !== 'month-desc')
+      throw new Error(`排序選單的預設選項應為 month-desc（最新月份在前），實際：${result.defaultOpt}`);
+  });
+
+  await test('T-SEC-83 sortJournalsBy() 四種模式順序正確、缺時間資料有退回規則、不更動傳入陣列', async () => {
+    // 純函式，不碰 Firestore／DOM，可安全真執行。合成資料刻意讓四種模式的結果兩兩不同：
+    //   A 115-1/9月 更新10-02  B 115-1/7月 無updatedAt（退回繳交07-20）  C 115-1/12月 更新09-10
+    //   D 114-2/6月 更新10-15（舊月份最近被改）  E 115-1/8月 兩種時間都沒有（排最後）
+    const result = await page.evaluate(() => {
+      if (typeof sortJournalsBy !== 'function') return { skip: true };
+      const J = [
+        { id: 'A', semester: '115-1', month: 9,  seatNo: '02', submittedAt: '2026-09-05T10:00:00', updatedAt: '2026-10-02T10:00:00' },
+        { id: 'B', semester: '115-1', month: 7,  seatNo: '01', submittedAt: '2026-07-20T10:00:00' },
+        { id: 'C', semester: '115-1', month: 12, seatNo: '10', submittedAt: '2026-12-01T10:00:00', updatedAt: '2026-09-10T10:00:00' },
+        { id: 'D', semester: '114-2', month: 6,  seatNo: '01', submittedAt: '2026-08-30T10:00:00', updatedAt: '2026-10-15T10:00:00' },
+        { id: 'E', semester: '115-1', month: 8,  seatNo: '03' }
+      ];
+      const run = mode => sortJournalsBy(J, mode).map(j => j.id).join(',');
+      return { skip: false, desc: run('month-desc'), asc: run('month-asc'), updated: run('updated'), submitted: run('submitted'), dflt: run(undefined), input: J.map(j => j.id).join(',') };
+    });
+    if (result.skip) return;
+    const exp = { desc: 'C,A,E,B,D', asc: 'D,B,E,A,C', updated: 'D,A,C,B,E', submitted: 'C,A,D,B,E' };
+    for (const k of Object.keys(exp))
+      if (result[k] !== exp[k]) throw new Error(`sortJournalsBy 模式 ${k} 應為 ${exp[k]}，實際：${result[k]}`);
+    if (result.dflt !== exp.desc) throw new Error(`未指定模式時應等同 month-desc（${exp.desc}），實際：${result.dflt}`);
+    if (result.input !== 'A,B,C,D,E') throw new Error(`sortJournalsBy 不應更動傳入的陣列，實際順序變成：${result.input}`);
   });
 
   await test('T-SEC-73 renderSalaryStatsFromCache()「薪資明細」表格在同一學生橫跨12月與隔年1月時，月份排序時序正確', async () => {
