@@ -19,7 +19,10 @@ jobs:
     # Actions 該次執行頁面的「Summary」分頁，不用點進 log 就看得到），永遠反映
     # 「這次真的跑出來的結果」，不再需要也不應該手動維護在這裡。
     name: 完整自動化測試（學生端 + 老師端）
-    runs-on: ubuntu-latest
+    # 2026-11-17 起釘在 ubuntu-24.04：GitHub 把 ubuntu-latest 指向 26.04 後，Playwright 1.60.0
+    # 尚未支援，「安裝 Chromium」那步會直接失敗（Canary #533／#534）。待 Playwright 正式支援
+    # ubuntu 26.04 後，再評估是否改回 ubuntu-latest。
+    runs-on: ubuntu-24.04
     steps:
       - name: 取得程式碼
         uses: actions/checkout@v4
