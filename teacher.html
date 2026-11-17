@@ -3317,8 +3317,14 @@ function copySalaryMissingList() {
   }
   const blocks = [];
   if (filteredSalaryGroups.length) {
-    const sections = filteredSalaryGroups.map(g => `【${g.semester}　${g.month}月】\n${g.students.map(s => s.sno).join('\n')}`);
-    blocks.push(`【薪資缺漏提醒】\n以下同學的月記尚未填寫薪資，請儘速補齊：\n\n${sections.join('\n\n')}`);
+    // 2026-11-17：該月完全沒繳月記的同學（notSubmitted）座號後加註「（未繳月記）」，並在說明
+    // 文字補一句，讓同一份提醒同時涵蓋兩種狀況：已交月記但薪資空白／整份月記都還沒繳。
+    const sections = filteredSalaryGroups.map(g => `【${g.semester}　${g.month}月】\n${g.students.map(s => s.notSubmitted ? `${s.sno}（未繳月記）` : s.sno).join('\n')}`);
+    const hasNotSubmitted = filteredSalaryGroups.some(g => g.students.some(s => s.notSubmitted));
+    const lead = hasNotSubmitted
+      ? '以下同學的月記尚未填寫薪資（標註「未繳月記」者為該月月記尚未繳交），請儘速補齊：'
+      : '以下同學的月記尚未填寫薪資，請儘速補齊：';
+    blocks.push(`【薪資缺漏提醒】\n${lead}\n\n${sections.join('\n\n')}`);
   }
   if (filteredPhotoGroups.length) {
     const sections = filteredPhotoGroups.map(g => `【${g.semester}　${g.month}月】\n${g.students.map(s => s.sno).join('\n')}`);
@@ -5376,7 +5382,9 @@ function computeSalaryMissingGroups(missingSalary, stuCompanyMap) {
     // 金額本來就沒有可顯示的值；現在同一個函式也拿來組「薪資單未上傳（金額已填、缺
     // 照片）」的分組資料，把金額一併帶出來，讓 renderSalaryMissingPhotoGroupedHtml()
     // 可以在項目說明裡顯示「已填 $XXXX」，讓老師一眼看出這位同學不是完全沒交代金額。
-    groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company, salary: j.salary });
+    // 2026-11-17 新增 notSubmitted：該月完全沒有月記文件、由 loadSalaryStats() 依名冊＋已過期
+    // 截止日合成的「薪資缺漏」項目（見 loadSalaryStats() 的 notSubmittedJournals 說明）。
+    groupMap[key].students.push({ sno: j.seatNo || '-', name: j.studentName || '-', company, salary: j.salary, notSubmitted: !!j.notSubmitted });
   });
   const groups = Object.values(groupMap).sort((a, b) => (b.year - a.year) || (b.month - a.month));
   groups.forEach(g => g.students.sort((a, b) => String(a.sno).localeCompare(String(b.sno), 'zh-Hant', { numeric: true })));
@@ -5395,7 +5403,9 @@ function renderSalaryMissingGroupedHtml(groups) {
       // 2026-08-15 拆成左右分面板後，這行紅色跟隔壁「薪資單尚未上傳」面板的紫色
       // 分屬不同面板背景，理由改成單純標示「完全沒填」的嚴重程度，不再是為了跟
       // 同一個箱子裡的紫色標籤做對比。
-      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong style="color:var(--accent-red)">未填</strong></div>`
+      // 2026-11-17：該月完全沒繳月記的學生（notSubmitted）標籤改顯示「未繳月記」，跟
+      // 「月記已交、只是薪資欄空白」的「未填」區分，老師一眼看得出是哪一種狀況。
+      `<div class="salary-alert-item"><div><div class="salary-alert-main">${escapeHtml(s.sno)} ${escapeHtml(s.name)}</div><div class="salary-alert-note">${escapeHtml(s.company)}</div></div><strong style="color:var(--accent-red)">${s.notSubmitted ? '未繳月記' : '未填'}</strong></div>`
     ).join('');
     return `<div class="salary-missing-group"><div class="salary-missing-month-header">📅 ${escapeHtml(g.semester)}　${g.month}月（${g.students.length}筆）</div>${items}</div>`;
   }).join('');
@@ -5424,21 +5434,29 @@ function renderSalaryMissingPhotoGroupedHtml(groups) {
   }).join('');
 }
 
-function renderSalaryAlerts({ studentList, companyList, allActiveJournals, classAvg, stuCompanyMap }) {
+// 2026-11-17 修正「學生月記沒繳交就無法複製薪資缺漏」：
+// ①新增 notSubmittedJournals 參數——該月完全沒有月記文件、但該月截止日已過的學生（由
+//   loadSalaryStats() 依名冊＋/deadlines 合成，見該函式說明），併入「薪資缺漏」名單。原本
+//   missingSalary 只從 allActiveJournals（＝已經存檔的月記）篩「薪資空白」，沒繳月記的學生
+//   根本沒有月記文件，永遠不會出現在清單裡，也就複製不到。
+// ②原本 classAvg 為 0（查詢範圍內沒有任何人填過薪資）時，這個函式一開頭就提早 return，連
+//   「薪資缺漏」名單一起清空（還只重設 _salaryMissingGroups、漏掉 _salaryMissingPhotoGroups
+//   造成殘留舊資料）——偏偏「全班都還沒填薪資／都沒繳」正是最需要複製提醒的情境。改成先
+//   算缺漏名單、永遠渲染缺漏箱，只有「低於平均／高於平均／公司落差」這三個真的需要平均值
+//   的箱子才在沒有平均值時改顯示空狀態說明。
+function renderSalaryAlerts({ studentList, companyList, allActiveJournals, notSubmittedJournals = [], classAvg, stuCompanyMap }) {
   const el = document.getElementById('salary-alerts-container');
   if (!el) return;
-  if (!classAvg) {
-    el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><p>尚無薪資資料可判斷</p></div>';
-    window._salaryMissingGroups = [];
-    return;
-  }
 
-  const lowThreshold = Math.round(classAvg * 0.8);
-  const highThreshold = Math.round(classAvg * 1.3);
-  const lowStudents = studentList.filter(s => s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg);
-  const highStudents = studentList.filter(s => s.avg > highThreshold).sort((a,b)=>b.avg-a.avg);
-  const missingSalary = allActiveJournals
-    .filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary)));
+  const lowThreshold = classAvg ? Math.round(classAvg * 0.8) : 0;
+  const highThreshold = classAvg ? Math.round(classAvg * 1.3) : 0;
+  const lowStudents = classAvg ? studentList.filter(s => s.avg < lowThreshold).sort((a,b)=>a.avg-b.avg) : [];
+  const highStudents = classAvg ? studentList.filter(s => s.avg > highThreshold).sort((a,b)=>b.avg-a.avg) : [];
+  // 已存檔但薪資空白的月記＋該月完全沒繳月記（合成項目，notSubmitted:true）。
+  const missingSalary = [
+    ...allActiveJournals.filter(j => j.salary == null || j.salary === '' || !Number.isFinite(Number(j.salary))),
+    ...notSubmittedJournals
+  ];
   // 2026-08-14 新增：金額已經填寫（有效數字），但薪資單照片尚未上傳——常見情境是公司
   // 薪資單還沒核發下來，學生先跟老師確認過金額口頭/文字填上，之後才補拍照上傳。這裡
   // 用的是 allActiveJournals（本來就只包含「這個月有交月記」的資料），所以天生就已經
@@ -5534,16 +5552,21 @@ function renderSalaryAlerts({ studentList, companyList, allActiveJournals, class
   // （見下方 el.innerHTML 組裝邏輯），不需要再被外層包一層公用的 .salary-alert-list。
   // 「公司內部落差」原本跟「薪資缺漏」共用 warn 琥珀色，改成獨立的 blue，理由見樣式表
   // .salary-alert-box.blue 上方註解。
-  const boxes = [
-    { cls:'full-width', title:'薪資缺漏／薪資單尚未上傳', html:missingSplitHtml, titleExtra:missingSalaryTitleExtra, raw:true },
+  const missingBox = { cls:'full-width', title:'薪資缺漏／薪資單尚未上傳', html:missingSplitHtml, titleExtra:missingSalaryTitleExtra, raw:true };
+  const boxes = classAvg ? [
+    missingBox,
     { cls:'blue', title:'公司內部落差', count:companyGaps.length, html:gapItems(companyGaps) || '<div class="salary-alert-note">沒有明顯落差過大的公司</div>' },
     { cls:'danger', title:'低於平均 20%', count:lowStudents.length, html:peopleItems(lowStudents, 'low') || '<div class="salary-alert-note">沒有低於門檻的學生</div>' },
     { cls:'good', title:'高於平均 30%', count:highStudents.length, html:peopleItems(highStudents, 'high') || '<div class="salary-alert-note">沒有明顯高於門檻的學生</div>' }
+  ] : [
+    // 沒有任何薪資平均值可比較時，只保留缺漏箱（仍可複製提醒），其餘三箱改成一則說明。
+    missingBox,
+    { cls:'full-width', title:'薪資比較', html:'<div class="salary-alert-note">尚無薪資資料可判斷（低於／高於平均、公司內部落差需要有人填寫薪資才能比較）</div>' }
   ];
   el.innerHTML = boxes.map(b => {
     const titleRow = b.titleExtra
       ? `<div class="salary-alert-title"><span>${b.title}</span>${b.titleExtra}</div>`
-      : `<div class="salary-alert-title"><span>${b.title}</span><span class="salary-alert-count">${b.count} 筆</span></div>`;
+      : `<div class="salary-alert-title"><span>${b.title}</span>${b.count == null ? '' : `<span class="salary-alert-count">${b.count} 筆</span>`}</div>`;
     const body = b.raw ? b.html : `<div class="salary-alert-list">${b.html}</div>`;
     return `<div class="salary-alert-box ${b.cls}">${titleRow}${body}</div>`;
   }).join('');
@@ -5601,6 +5624,9 @@ function renderSalaryStatsFromCache(cache) {
   const { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap } = cache;
   const selectedCompanies = getSelectedCompanies();
   const filteredActiveJournals = allActiveJournals.filter(j => isCompanySelected(getJournalCompany(j, stuCompanyMap), selectedCompanies));
+  // 2026-11-17 新增：該月完全沒繳月記的合成項目（見 loadSalaryStats()），一樣套用公司篩選。
+  // 舊快取（沒有這個欄位）退回空陣列，行為跟修正前一致。
+  const filteredNotSubmittedJournals = (cache.notSubmittedJournals || []).filter(j => isCompanySelected(getJournalCompany(j, stuCompanyMap), selectedCompanies));
   const journals = salaryJournals.filter(j => isCompanySelected(getJournalCompany(j, stuCompanyMap), selectedCompanies));
 
   const studentMap = {};
@@ -5674,7 +5700,7 @@ function renderSalaryStatsFromCache(cache) {
   ).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px">尚無資料</td></tr>';
 
   renderSalaryFocus(studentList, companyList);
-  renderSalaryAlerts({ studentList, companyList, allActiveJournals: filteredActiveJournals, classAvg, stuCompanyMap });
+  renderSalaryAlerts({ studentList, companyList, allActiveJournals: filteredActiveJournals, notSubmittedJournals: filteredNotSubmittedJournals, classAvg, stuCompanyMap });
   renderSalaryLineChart(journals, stuCompanyMap);
   renderSalaryBarChart(journals, stuCompanyMap);
   switchSalaryDetailTab('student');
@@ -5833,12 +5859,16 @@ async function loadSalaryStats() {
   const { start, end } = getStatsDateRange('salary-stats');
   showLoading();
   try {
-  const [snap, stuSnap] = await Promise.all([
+  // 2026-11-17 新增：一併讀取 /deadlines，用來判斷「哪些月份的截止日已過」，供下方合成
+  // 「完全沒繳月記」的薪資缺漏項目使用（見 notSubmittedJournals）。
+  const [snap, stuSnap, deadlineSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'journals')),
-    getDocs(collection(db, 'students'))
+    getDocs(collection(db, 'students')),
+    getDocs(collection(db, 'deadlines'))
   ]);
   const stuCompanyMap = {};
   const stuInfoMap = {};
+  const rosterRowMap = {};
   // 2026-07-23 補修：改用「學期＋座號」當 key（比照 loadLocationStats()／
   // loadWorkTypeStats()／fetchJournalsFromServer()／exportAllStatsExcel() 已修正的
   // 寫法），不再用裸座號合併整個 /students 集合——這是 getJournalCompany() 上方註解
@@ -5853,6 +5883,7 @@ async function loadSalaryStats() {
     if (sem) {
       stuCompanyMap[`${sem}-${sno}`] = normalizeCompanyName(s.company);
       stuInfoMap[`${sem}-${sno}`] = { seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
+      rosterRowMap[`${sem}-${sno}`] = { semester: sem, seatNo: sno, name: s.name || '', company: normalizeCompanyName(s.company) };
     }
   });
 
@@ -5865,16 +5896,43 @@ async function loadSalaryStats() {
       // 判斷分別寫在兩個地方，未來只改其中一處、忘記同步另一處。
       company: getJournalCompany(j, stuCompanyMap)
     }));
-  if (start && end) allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
+  // 2026-11-17 新增：「薪資缺漏」要涵蓋「該月完全沒繳月記」的學生。這些學生沒有月記文件，
+  // 不會出現在 allActiveJournals，原本的薪資缺漏名單（只篩已存檔月記的薪資空白）完全看不到
+  // 他們，老師也就複製不到。這裡依「名冊（/students 的 {學期}_{座號}）× 該學期已設定且截止日
+  // 已過的月份（/deadlines）」逐一檢查，凡是該生該月沒有任何月記文件的，合成一筆
+  // notSubmitted:true、salary:null 的項目。判斷基準刻意跟「已逾期未達標」一致（closeDate 已過）：
+  // 還在繳交期限內的月份不列入，避免對還來得及繳的同學過早催薪資。submittedKeys 必須在日期
+  // 範圍篩選「之前」用全部月記建立（以學期＋座號＋月份比對，跟日期篩選無關）。
+  const submittedKeys = new Set(allActiveJournals.map(j => `${j.semester}-${j.seatNo}-${j.month}`));
+  const nowForSalary = new Date();
+  let notSubmittedJournals = [];
+  deadlineSnap.docs.forEach(d => {
+    const dd = d.data();
+    const ddMonth = Number(dd.month);
+    if (!dd.semester || !ddMonth || !dd.closeDate) return;
+    const closeDt = new Date(dd.closeDate + 'T23:59:59+08:00');
+    if (isNaN(closeDt.getTime()) || closeDt >= nowForSalary) return;
+    Object.values(rosterRowMap).forEach(r => {
+      if (r.semester !== dd.semester) return;
+      if (submittedKeys.has(`${r.semester}-${r.seatNo}-${ddMonth}`)) return;
+      notSubmittedJournals.push({ semester: r.semester, seatNo: r.seatNo, month: ddMonth, studentName: r.name, company: r.company, salary: null, notSubmitted: true });
+    });
+  });
+  if (start && end) {
+    allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
+    notSubmittedJournals = notSubmittedJournals.filter(j => journalMonthInRange(j, start, end));
+  }
 
   const salaryJournals = allActiveJournals
     .filter(j => j.salary != null && j.salary !== '' && Number.isFinite(Number(j.salary)))
     .map(j => ({ ...j, salary: Number(j.salary) }));
 
   // 公司清單只從「目前日期範圍內的月記」取得，不再抓整個 students 集合（避免跨學期/已刪除學生的公司殘留）
-  const companies = allActiveJournals.map(j => getJournalCompany(j, stuCompanyMap)).filter(Boolean);
+  // 2026-11-17：同時納入範圍內「未繳月記」項目的公司，否則只有未繳學生才有的公司在篩選清單
+  // 裡沒有勾選項，這些學生會被公司篩選整筆濾掉、仍然複製不到。
+  const companies = [...allActiveJournals, ...notSubmittedJournals].map(j => getJournalCompany(j, stuCompanyMap)).filter(Boolean);
   populateCompanyFilter(companies);
-  window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap };
+  window.salary_stats_cache = { allActiveJournals, salaryJournals, stuCompanyMap, stuInfoMap, notSubmittedJournals };
   renderSalaryStatsFromCache(window.salary_stats_cache);
   } catch(e) { toast('薪資統計載入失敗：' + (e.message || '請重試') + '，請確認網路後重新整理', 'error'); } finally { hideLoading(); }
 }
