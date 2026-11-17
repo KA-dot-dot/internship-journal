@@ -1,7 +1,47 @@
 /**
  * tests/teacher.test.js
- * 老師端自動化測試 v46
+ * 老師端自動化測試 v47
  * 對應 AI_CONTEXT.md 安全性清單（截至 2026-07-02，本次測試補強對應 2026-07-06 推播子系統）
+ *
+ * v47 修正（2026-11-17）：「統計總覽→薪資統計」的「薪資缺漏」納入「該月完全沒繳月記」的學生
+ * （teacher.html 同步修改，見下方說明），並補上這次修改的專屬回歸測試。
+ * 背景：薪資缺漏清單與 📋 複製到 LINE 的文字原本只從「已存檔月記」裡挑薪資空白的，整個月都
+ * 沒繳月記的學生沒有月記文件，永遠不會出現在清單裡，也就複製不到；另外 renderSalaryAlerts()
+ * 在 classAvg=0（範圍內沒有任何人填過薪資）時會提早 return，把缺漏清單一起清空（還漏重設
+ * _salaryMissingPhotoGroups，造成殘留舊資料），「全班都沒繳」正是最需要複製提醒的情境。
+ * 修法：新增共用純函式 computeNotSubmittedSalaryJournals()（名冊 × 該學期截止日已過的月份
+ * − 已存在的月記文件，判斷基準跟主頁「已逾期未達標」一致：closeDate 當天 23:59 台灣時間已過），
+ * 畫面（loadSalaryStats()）與 Excel「薪資異常提醒」（exportAllStatsExcel()）共用同一份，避免
+ * 兩邊各自演化而不同步；畫面標「未繳月記」、複製文字在座號後加註「（未繳月記）」。
+ * 第一版只修了畫面／複製，漏了 Excel「薪資異常提醒」工作表（仍只掃已存檔月記），使用者複查
+ * 發現畫面與 Excel 口徑不一致，才補上 Excel 並抽成共用函式——這條測試的 T-SEC-86 特別驗證
+ * 兩邊都呼叫同一個函式、且「截止日已過」的判斷不得在呼叫端各自再寫一份。
+ *   T-SEC-84  真執行 computeNotSubmittedSalaryJournals()（純函式，用固定 now 參數，不受執行
+ *             當下日期影響；共用函式不存在時明確失敗而非靜默 skip，避免「尚未部署」或
+ *             「被誤刪」變成看起來通過，T-SEC-86 同）：已過期月份且沒有月記才列入；已繳／尚在期限內／沒設 closeDate／
+ *             別學期名冊皆不列入；截止日當天 10:00 不列入、隔天 00:00（台灣時間）才列入；
+ *             名冊／截止日為 null 或空陣列時安全回傳空陣列。
+ *   T-SEC-85  真執行 renderSalaryAlerts()＋copySalaryMissingList()：classAvg=0 時缺漏箱與
+ *             複製按鈕仍顯示、殘留的 _salaryMissingPhotoGroups 被重設；畫面有 3 處「未繳
+ *             月記」標籤；複製文字標註「（未繳月記）」；已交但薪資空白者只列座號不加註；
+ *             沒有未繳月記時維持原本說明句（攔截 navigator.clipboard.writeText，比照 T-SEC-40）。
+ *   T-SEC-86  真執行 exportAllStatsExcel()：暫時覆寫 firebase_funcs 三個讀取函式、
+ *             getStatsDateRange()、loadRosterStudentsForSemesters() 與 XLSX.writeFile()（不碰
+ *             真實資料、不真的下載），讀回「薪資異常提醒」工作表驗證未繳月記有被列入；另以
+ *             codeOnly() 過濾註解行後確認 loadSalaryStats()／exportAllStatsExcel() 皆呼叫共用
+ *             函式、且都沒有私有的 T23:59:59+08:00 判斷（陷阱19 的過濾做法）。
+ *   T-SEC-87  真執行 loadSalaryStats()：覆寫 firebase_funcs 讀取、getStatsDateRange()、
+ *             populateCompanyFilter()、renderSalaryStatsFromCache() 攔截資料來源輸出，驗證
+ *             依名冊合成、套用日期範圍、不混入別學期名冊、allActiveJournals 不被合成項目
+ *             污染、公司篩選清單納入只有未繳學生才有的公司。
+ * 測試資料刻意用 109 學年度（2020）／2099 的截止日，或直接傳入固定 now 參數，確保不論測試
+ * 何時執行，「已過」與「未過」的判斷結果都不會變，不引入新的時間相依間歇性失敗。
+ * 開發階段用 acorn 從修改後的 teacher.html 逐字抽出真實函式，在 Node vm 內以同一組情境驗證
+ * 過畫面、複製文字、Excel 與資料來源，並對照原始（修改前）teacher.html 確認這些情境在舊版
+ * 會正確失敗；仍屬沙盒層級驗證，待使用者本機 Step2_RunTests.bat 的真實瀏覽器執行結果確認。
+ * 具名呼叫點：99→**103**；執行時項數：106→**110**（四條皆非迴圈產生，各自 +1；99 為本檔案
+ * 目前實際的 `await test(` 行數，其中 T-03～T-10 由迴圈產生 8 條，故執行時 = 99-1+8 = 106）。
+ * `student_test.js` 本輪未異動（問題只存在於 `teacher.html`）。
  *
  * v46 修正（2026-10-23）：T-SEC-40（copyMissingList() 複製文字不含姓名）第三次修正「時好時壞」。
  * 前兩次（2026-07-18／2026-07-23）修的是「copyMissingList() 當時為 async、讀取全域資料前夾著
@@ -5149,6 +5189,313 @@ async function runTeacherTests(page, log) {
       throw new Error(`updateSelectedTermSnapshot() 應該只被呼叫 1 次，實際被呼叫 ${result.snapshotCallCount} 次——代表 students 文件與 roster 快照可能各自被兩條交錯的路徑寫入，出現短暫不一致`);
     if (result.disabledAfterBothSettle !== false)
       throw new Error('兩次呼叫都結束後，batch-import-btn.disabled 應該恢復為 false，實際仍是鎖住狀態——外層 finally 解鎖可能沒有正確執行');
+  });
+
+  // ════════════════════════════════════════
+  // T-SEC-84 ～ T-SEC-87　2026-11-17 新增：「薪資缺漏」納入「該月完全沒繳月記」的學生
+  // ════════════════════════════════════════
+  // 背景：老師端「統計總覽→薪資統計」的「薪資缺漏」清單（與 📋 複製到 LINE 的文字）原本只從
+  // 「已存檔的月記」裡挑薪資空白的；整個月都沒繳月記的學生沒有月記文件，永遠不會出現在清單
+  // 裡，也就複製不到。修法：新增共用純函式 computeNotSubmittedSalaryJournals()（名冊 ×
+  // 截止日已過的月份 − 已存在月記），畫面（loadSalaryStats()）與 Excel「薪資異常提醒」
+  // （exportAllStatsExcel()）共用同一份，renderSalaryAlerts() 併入並標「未繳月記」；同時修正
+  // renderSalaryAlerts() 在 classAvg=0（範圍內沒有任何人填過薪資）時提早 return、把缺漏清單
+  // 一起清空的問題——「全班都沒繳」正是最需要複製提醒的情境。
+  // 這四條分別對應：共用判斷函式本身(84)／畫面渲染與複製文字(85)／Excel 匯出(86)／
+  // 資料來源 loadSalaryStats()(87)，皆為真執行，不是只比對原始碼字串。
+
+  await test('T-SEC-84 computeNotSubmittedSalaryJournals() 只列入「截止日已過、在名冊內、且沒有月記文件」的月份；尚在期限內／沒設截止日／已繳／別的學期一律不列入', async () => {
+    const result = await page.evaluate(() => {
+      // 共用函式本身就是這次修法的核心：不存在時明確失敗，不比照其他測試靜默 skip——否則
+      // 「修法尚未 git push／部署」（陷阱35）或「函式被誤刪」都會變成一條看起來通過的測試
+      if (typeof computeNotSubmittedSalaryJournals !== 'function') return { skip: false, missing: true };
+      const roster = [
+        { semester: '115-1', seatNo: '96', name: '甲', company: 'A公司' },
+        { semester: '115-1', seatNo: '97', name: '乙', company: '' },
+        { semester: '114-2', seatNo: '96', name: '舊甲', company: '舊公司' },
+      ];
+      const deadlines = [
+        { semester: '115-1', month: 9, closeDate: '2026-09-30' },   // 已過
+        { semester: '115-1', month: 10, closeDate: '2026-10-31' },  // 已過
+        { semester: '115-1', month: 11, closeDate: '2026-11-30' },  // 尚未過（now=11/17）
+        { semester: '115-1', month: 12 },                            // 沒設 closeDate
+        { semester: '115-1', month: 1, closeDate: '2026-11-17' },   // 截止日當天（邊界）
+        { semester: '114-2', month: 6, closeDate: '2026-06-30' },   // 別的學期，只對 114-2 名冊生效
+      ];
+      const submitted = new Set(['115-1-96-9']);                    // 甲已繳 9 月
+      const keyOf = r => `${r.semester}-${r.seatNo}-${r.month}`;
+      const now = new Date('2026-11-17T10:00:00+08:00');
+      const list = computeNotSubmittedSalaryJournals(roster, deadlines, submitted, now);
+      // 截止日當天 23:59（台灣時間）之前不算已過；隔天 00:00 之後才算
+      const nextDay = computeNotSubmittedSalaryJournals(roster, deadlines, submitted, new Date('2026-11-18T00:00:00+08:00'));
+      let emptyOk = true;
+      try {
+        emptyOk = computeNotSubmittedSalaryJournals(null, null, null, now).length === 0
+          && computeNotSubmittedSalaryJournals([], deadlines, submitted, now).length === 0
+          && computeNotSubmittedSalaryJournals(roster, [], submitted, now).length === 0;
+      } catch (e) { emptyOk = false; }
+      const yi = list.find(r => keyOf(r) === '115-1-97-10');
+      return {
+        skip: false,
+        keys: list.map(keyOf).sort(),
+        nextDayHasJan: nextDay.some(r => r.semester === '115-1' && r.month === 1),
+        nowHasJan: list.some(r => r.semester === '115-1' && r.month === 1),
+        allFlagged: list.every(r => r.notSubmitted === true && r.salary === null && typeof r.month === 'number'),
+        yi: yi ? { name: yi.studentName, company: yi.company } : null,
+        emptyOk,
+      };
+    });
+    if (result.skip) return;
+    if (result.missing)
+      throw new Error('computeNotSubmittedSalaryJournals() 不存在——修法可能尚未 git push／部署完成（見陷阱35），或這個共用函式被誤刪');
+    const expected = ['114-2-96-6', '115-1-96-10', '115-1-97-10', '115-1-97-9'].sort();
+    if (JSON.stringify(result.keys) !== JSON.stringify(expected))
+      throw new Error(`合成的未繳月記項目應為 ${JSON.stringify(expected)}（已繳的 96-9、尚未過期的 11 月、沒設截止日的 12 月、別學期名冊都不應出現），實際 ${JSON.stringify(result.keys)}`);
+    if (result.nowHasJan)
+      throw new Error('截止日是「今天」(2026-11-17) 的月份，在今天 10:00 不應被列入（截止日當天 23:59 前還來得及繳）');
+    if (!result.nextDayHasJan)
+      throw new Error('截止日是 2026-11-17 的月份，到 2026-11-18 00:00（台灣時間）之後應被列入');
+    if (!result.allFlagged)
+      throw new Error('每一筆合成項目都應帶 notSubmitted:true、salary:null、month 為數字');
+    if (!result.yi || result.yi.name !== '乙' || result.yi.company !== '')
+      throw new Error(`合成項目的姓名／公司應帶自名冊，實際 ${JSON.stringify(result.yi)}`);
+    if (!result.emptyOk)
+      throw new Error('名冊／截止日／已繳集合為 null 或空陣列時應安全回傳空陣列，不可拋例外');
+  });
+
+  await test('T-SEC-85 renderSalaryAlerts()／copySalaryMissingList()：沒繳月記的學生併入「薪資缺漏」並可複製；全班沒有任何薪資資料(classAvg=0)時缺漏清單也不再被清空', async () => {
+    const result = await page.evaluate(async () => {
+      if (typeof renderSalaryAlerts !== 'function' || typeof copySalaryMissingList !== 'function') return { skip: true };
+      const container = document.getElementById('salary-alerts-container');
+      if (!container) return { skip: true };
+      const saved = {
+        html: container.innerHTML,
+        groups: window._salaryMissingGroups,
+        photoGroups: window._salaryMissingPhotoGroups,
+        writeText: navigator.clipboard.writeText,
+      };
+      let captured = null;
+      // 攔截剪貼簿寫入（比照 T-SEC-40）：copySalaryMissingList() 是同步呼叫 writeText(text)
+      navigator.clipboard.writeText = (text) => { captured = text; return Promise.resolve(); };
+      const copyText = () => {
+        captured = null;
+        const sel = document.getElementById('salary-missing-copy-scope');
+        if (sel) sel.value = 'all';
+        copySalaryMissingList();
+        return captured;
+      };
+      const ns = (seatNo, name, month) => ({ semester: '115-1', seatNo, month, studentName: name, company: 'A公司', salary: null, notSubmitted: true });
+      try {
+        // 情境 A：全班都沒繳（沒有任何已存檔月記 → classAvg=0）。先塞一份「殘留」的薪資單名單，
+        // 確認不會再被留在畫面外（修正前 classAvg=0 提早 return 時漏重設 _salaryMissingPhotoGroups）
+        window._salaryMissingPhotoGroups = [{ key: 'stale', semester: '115-1', month: 1, students: [{ sno: '99', name: '殘留' }] }];
+        renderSalaryAlerts({ studentList: [], companyList: [], allActiveJournals: [], notSubmittedJournals: [ns('03', '丙', 9), ns('01', '甲', 9), ns('01', '甲', 10)], classAvg: 0, stuCompanyMap: {} });
+        const htmlA = container.innerHTML;
+        const groupsA = (window._salaryMissingGroups || []).map(g => ({ month: g.month, snos: g.students.map(s => s.sno), flags: g.students.map(s => !!s.notSubmitted) }));
+        const photoLenA = (window._salaryMissingPhotoGroups || []).length;
+        const textA = copyText();
+
+        // 情境 B：混合——02 月記已交但薪資空白、03 整份月記沒繳
+        renderSalaryAlerts({ studentList: [], companyList: [], allActiveJournals: [{ semester: '115-1', seatNo: '02', month: 9, studentName: '乙', company: 'B公司', salary: null, entries: [] }], notSubmittedJournals: [ns('03', '丙', 9)], classAvg: 0, stuCompanyMap: {} });
+        const textB = copyText();
+
+        // 情境 C：沒有任何未繳月記（舊行為）——文字應維持原本的說明句
+        renderSalaryAlerts({ studentList: [], companyList: [], allActiveJournals: [{ semester: '115-1', seatNo: '02', month: 9, studentName: '乙', company: 'B公司', salary: null, entries: [] }], classAvg: 0, stuCompanyMap: {} });
+        const textC = copyText();
+
+        return { skip: false, htmlA, groupsA, photoLenA, textA, textB, textC };
+      } finally {
+        container.innerHTML = saved.html;
+        window._salaryMissingGroups = saved.groups;
+        window._salaryMissingPhotoGroups = saved.photoGroups;
+        navigator.clipboard.writeText = saved.writeText;
+      }
+    });
+    if (result.skip) return;
+    if (!result.htmlA.includes('薪資缺漏／薪資單尚未上傳') || !result.htmlA.includes('copySalaryMissingList()'))
+      throw new Error('classAvg=0（沒有任何薪資資料）時，「薪資缺漏」箱子與複製按鈕仍應顯示，實際被提早 return 清空了');
+    if ((result.htmlA.match(/未繳月記/g) || []).length !== 3)
+      throw new Error(`畫面應有 3 處「未繳月記」標籤，實際 ${(result.htmlA.match(/未繳月記/g) || []).length} 處`);
+    if (JSON.stringify(result.groupsA.map(g => g.month)) !== JSON.stringify([10, 9]))
+      throw new Error(`_salaryMissingGroups 應為 10 月、9 月兩組（新到舊），實際 ${JSON.stringify(result.groupsA)}`);
+    if (JSON.stringify(result.groupsA[1].snos) !== JSON.stringify(['01', '03']) || !result.groupsA.every(g => g.flags.every(Boolean)))
+      throw new Error(`9 月應依座號為 01、03 且皆標 notSubmitted，實際 ${JSON.stringify(result.groupsA)}`);
+    if (result.photoLenA !== 0)
+      throw new Error(`classAvg=0 時 _salaryMissingPhotoGroups 應被重設為空陣列，實際殘留 ${result.photoLenA} 組舊資料`);
+    if (!result.textA || !result.textA.includes('01（未繳月記）') || !result.textA.includes('03（未繳月記）'))
+      throw new Error(`複製文字應標註「01（未繳月記）」「03（未繳月記）」，實際：${result.textA}`);
+    if (!result.textA.includes('標註「未繳月記」者') || !result.textA.includes('【115-1　10月】'))
+      throw new Error(`複製文字缺少「未繳月記」說明句或月份標題，實際：${result.textA}`);
+    if (!result.textB || !/^02$/m.test(result.textB) || result.textB.includes('02（未繳月記）') || !result.textB.includes('03（未繳月記）'))
+      throw new Error(`混合情境：已交但薪資空白的 02 只列座號、不加註；未繳的 03 要加註，實際：${result.textB}`);
+    if (!result.textC || !result.textC.includes('以下同學的月記尚未填寫薪資，請儘速補齊：') || result.textC.includes('未繳月記'))
+      throw new Error(`沒有未繳月記時，複製文字應維持原本說明句且不含「未繳月記」，實際：${result.textC}`);
+  });
+
+  await test('T-SEC-86 exportAllStatsExcel() 的「薪資異常提醒」工作表，「薪資缺漏」也納入未繳月記，與畫面／LINE 複製口徑一致；畫面與 Excel 皆呼叫同一個共用函式、無各自私有的複本', async () => {
+    const result = await page.evaluate(async () => {
+      // XLSX 來自外部 CDN，載入不到屬環境問題才 skip；共用函式不存在則明確失敗（理由同 T-SEC-84）
+      if (typeof exportAllStatsExcel !== 'function' || typeof loadSalaryStats !== 'function' || typeof XLSX === 'undefined') return { skip: true };
+      if (typeof computeNotSubmittedSalaryJournals !== 'function') return { skip: false, missing: true };
+      // 比照陷阱19：先濾掉整行註解再搜尋，避免命中函式內解釋性文字
+      const codeOnly = str => str.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+      const excelCode = codeOnly(exportAllStatsExcel.toString());
+      const loadCode = codeOnly(loadSalaryStats.toString());
+      const staticInfo = {
+        excelUsesShared: /computeNotSubmittedSalaryJournals\s*\(/.test(excelCode),
+        screenUsesShared: /computeNotSubmittedSalaryJournals\s*\(/.test(loadCode),
+        // 「截止日當天 23:59（台灣時間）已過」的判斷只該存在共用函式裡，兩個呼叫端不得各自再寫一份
+        excelPrivateCopy: /T23:59:59\+08:00/.test(excelCode),
+        screenPrivateCopy: /T23:59:59\+08:00/.test(loadCode),
+      };
+
+      // 真執行：暫時覆寫 Firestore／名冊／日期範圍與 XLSX 輸出，不碰真實資料、不真的下載檔案。
+      // 使用 109 學年度（2020）與 2099 的截止日，不論測試何時執行都分別是「已過」與「未過」。
+      const orig = {
+        collection: firebase_funcs.collection,
+        collectionGroup: firebase_funcs.collectionGroup,
+        getDocs: firebase_funcs.getDocs,
+        getStatsDateRange: window.getStatsDateRange,
+        loadRosterStudentsForSemesters: window.loadRosterStudentsForSemesters,
+        appendSheet: XLSX.utils.book_append_sheet,
+        writeFile: XLSX.writeFile,
+      };
+      const sheets = {};
+      let writeCount = 0;
+      const mkJournal = (seatNo, name, month, salary) => ({
+        ref: { path: `users/u${seatNo}/journals/${seatNo}-109-1-${month}` },
+        id: `${seatNo}-109-1-${month}`,
+        data: () => ({ ownerUid: `u${seatNo}`, seatNo, semester: '109-1', month, salary, studentName: name, company: 'A公司', entries: [], submittedAt: '2020-09-20T10:00:00' }),
+      });
+      const mkDeadline = (month, closeDate) => ({ id: `109-1-${month}`, ref: { path: `deadlines/109-1-${month}` }, data: () => (closeDate ? { semester: '109-1', month, closeDate } : { semester: '109-1', month }) });
+      try {
+        firebase_funcs.collection = (db, name) => ({ __n: name });
+        firebase_funcs.collectionGroup = (db, name) => ({ __n: name });
+        firebase_funcs.getDocs = async (q) => {
+          if (q && q.__n === 'journals') return { docs: [mkJournal('96', '甲', 9, 6000), mkJournal('97', '乙', 9, null)] };
+          if (q && q.__n === 'deadlines') return { docs: [mkDeadline(9, '2020-09-30'), mkDeadline(10, '2020-10-31'), mkDeadline(11, '2099-11-30'), mkDeadline(12, null)] };
+          return { docs: [] };
+        };
+        window.getStatsDateRange = () => ({ start: '20200901', end: '20201130' });
+        window.loadRosterStudentsForSemesters = async () => [
+          { semester: '109-1', seatNo: '96', name: '甲', company: 'A公司' },
+          { semester: '109-1', seatNo: '97', name: '乙', company: 'A公司' },
+          { semester: '109-1', seatNo: '98', name: '丙', company: '' },
+        ];
+        XLSX.utils.book_append_sheet = (wb, ws, name) => { sheets[name] = ws; return orig.appendSheet.call(XLSX.utils, wb, ws, name); };
+        XLSX.writeFile = () => { writeCount++; };
+        await exportAllStatsExcel();
+        const ws = sheets['薪資異常提醒'];
+        const rows = ws ? XLSX.utils.sheet_to_json(ws) : null;
+        return { skip: false, staticInfo, writeCount, rows: rows ? rows.filter(r => r['類型'] === '薪資缺漏').map(r => ({ seat: String(r['座號']), note: String(r['說明']) })) : null };
+      } finally {
+        firebase_funcs.collection = orig.collection;
+        firebase_funcs.collectionGroup = orig.collectionGroup;
+        firebase_funcs.getDocs = orig.getDocs;
+        window.getStatsDateRange = orig.getStatsDateRange;
+        window.loadRosterStudentsForSemesters = orig.loadRosterStudentsForSemesters;
+        XLSX.utils.book_append_sheet = orig.appendSheet;
+        XLSX.writeFile = orig.writeFile;
+      }
+    });
+    if (result.skip) return;
+    if (result.missing)
+      throw new Error('computeNotSubmittedSalaryJournals() 不存在——修法可能尚未 git push／部署完成（見陷阱35），或這個共用函式被誤刪');
+    const si = result.staticInfo;
+    if (!si.excelUsesShared || !si.screenUsesShared)
+      throw new Error(`畫面（loadSalaryStats）與 Excel（exportAllStatsExcel）都應呼叫共用函式 computeNotSubmittedSalaryJournals()，實際 screen=${si.screenUsesShared} excel=${si.excelUsesShared}`);
+    if (si.excelPrivateCopy || si.screenPrivateCopy)
+      throw new Error('「截止日已過」的判斷（T23:59:59+08:00）只該寫在共用函式裡，loadSalaryStats()／exportAllStatsExcel() 不得各自再寫一份，否則兩邊日後會再次不同步');
+    if (result.writeCount !== 1)
+      throw new Error(`exportAllStatsExcel() 應走完並呼叫一次 XLSX.writeFile()，實際 ${result.writeCount} 次——函式可能中途拋出例外（被 toast 吞掉）`);
+    if (!result.rows)
+      throw new Error('找不到「薪資異常提醒」工作表');
+    const has = (seat, text) => result.rows.some(r => r.seat === seat && r.note.includes(text));
+    if (!has('97', '9月已交月記但薪資空白'))
+      throw new Error(`既有行為不應消失：97 已交 9 月月記但薪資空白，實際 ${JSON.stringify(result.rows)}`);
+    if (!has('98', '9月未繳月記'))
+      throw new Error(`98 的 9 月沒繳月記（截止日 2020-09-30 已過），應列入 Excel 薪資缺漏，實際 ${JSON.stringify(result.rows)}`);
+    if (!['96', '97', '98'].every(s => has(s, '10月未繳月記')))
+      throw new Error(`96／97／98 的 10 月沒人繳（截止日已過），應全部列入，實際 ${JSON.stringify(result.rows)}`);
+    if (result.rows.some(r => r.note.includes('11月') || r.note.includes('12月')))
+      throw new Error(`11 月截止日在 2099 年（尚未過）、12 月沒設截止日，皆不應列入，實際 ${JSON.stringify(result.rows)}`);
+    if (has('96', '9月') || has('97', '9月未繳'))
+      throw new Error(`已繳 9 月月記的 96、97 不應被重複列為「9月未繳月記」，實際 ${JSON.stringify(result.rows)}`);
+  });
+
+  await test('T-SEC-87 loadSalaryStats() 資料來源：依名冊與已過期截止日合成未繳月記、套用日期範圍、不混入別學期名冊，且公司篩選清單納入這些學生的公司', async () => {
+    const result = await page.evaluate(async () => {
+      if (typeof loadSalaryStats !== 'function') return { skip: true };
+      const orig = {
+        collection: firebase_funcs.collection,
+        collectionGroup: firebase_funcs.collectionGroup,
+        getDocs: firebase_funcs.getDocs,
+        getStatsDateRange: window.getStatsDateRange,
+        populateCompanyFilter: window.populateCompanyFilter,
+        renderSalaryStatsFromCache: window.renderSalaryStatsFromCache,
+        cache: window.salary_stats_cache,
+      };
+      const mkStu = (sem, seatNo, name, company) => ({ id: `${sem}_${seatNo}`, ref: { path: `students/${sem}_${seatNo}` }, data: () => ({ seatNo, semester: sem, name, company }) });
+      const mkJournal = (seatNo, month, salary) => ({ id: `${seatNo}-109-1-${month}`, ref: { path: `users/u${seatNo}/journals/${seatNo}-109-1-${month}` }, data: () => ({ ownerUid: `u${seatNo}`, seatNo, semester: '109-1', month, salary, entries: [] }) });
+      const mkDeadline = (month, closeDate) => ({ id: `109-1-${month}`, ref: { path: `deadlines/109-1-${month}` }, data: () => (closeDate ? { semester: '109-1', month, closeDate } : { semester: '109-1', month }) });
+      let range = { start: '', end: '' };
+      let capturedCache = null;
+      let capturedCompanies = null;
+      const runOnce = async (r) => {
+        range = r;
+        capturedCache = null;
+        capturedCompanies = null;
+        await loadSalaryStats();
+        return { cache: capturedCache, companies: capturedCompanies };
+      };
+      try {
+        firebase_funcs.collection = (db, name) => ({ __n: name });
+        firebase_funcs.collectionGroup = (db, name) => ({ __n: name });
+        firebase_funcs.getDocs = async (q) => {
+          if (q && q.__n === 'journals') return { docs: [mkJournal('96', 9, 6000), mkJournal('97', 9, null)] };
+          if (q && q.__n === 'students') return { docs: [mkStu('109-1', '96', '甲', 'A公司'), mkStu('109-1', '97', '乙', ''), mkStu('109-1', '98', '丙', 'C公司'), mkStu('108-2', '96', '舊甲', '舊公司')] };
+          if (q && q.__n === 'deadlines') return { docs: [mkDeadline(9, '2020-09-30'), mkDeadline(10, '2020-10-31'), mkDeadline(11, '2099-11-30'), mkDeadline(12, null)] };
+          return { docs: [] };
+        };
+        window.getStatsDateRange = () => range;
+        window.populateCompanyFilter = (list) => { capturedCompanies = list; };
+        window.renderSalaryStatsFromCache = (c) => { capturedCache = c; };
+        const all = await runOnce({ start: '', end: '' });
+        const sep = await runOnce({ start: '20200901', end: '20200930' });
+        const keyOf = r => `${r.semester}-${r.seatNo}-${r.month}`;
+        return {
+          skip: false,
+          allKeys: all.cache ? all.cache.notSubmittedJournals.map(keyOf).sort() : null,
+          allActiveCount: all.cache ? all.cache.allActiveJournals.length : null,
+          flagged: all.cache ? all.cache.notSubmittedJournals.every(r => r.notSubmitted === true && r.salary === null) : null,
+          companies: all.companies,
+          sepKeys: sep.cache ? sep.cache.notSubmittedJournals.map(keyOf).sort() : null,
+        };
+      } finally {
+        firebase_funcs.collection = orig.collection;
+        firebase_funcs.collectionGroup = orig.collectionGroup;
+        firebase_funcs.getDocs = orig.getDocs;
+        window.getStatsDateRange = orig.getStatsDateRange;
+        window.populateCompanyFilter = orig.populateCompanyFilter;
+        window.renderSalaryStatsFromCache = orig.renderSalaryStatsFromCache;
+        window.salary_stats_cache = orig.cache;
+      }
+    });
+    if (result.skip) return;
+    if (!result.allKeys)
+      throw new Error('loadSalaryStats() 沒有把結果交給 renderSalaryStatsFromCache()，可能執行中拋出例外（被 toast 吞掉）');
+    const expectedAll = ['109-1-97-10', '109-1-96-10', '109-1-98-10', '109-1-98-9'].sort();
+    if (JSON.stringify(result.allKeys) !== JSON.stringify(expectedAll))
+      throw new Error(`不限日期範圍時，未繳月記應為 ${JSON.stringify(expectedAll)}（96／97 已繳 9 月不重複列入；11 月未過期、12 月沒截止日、108-2 名冊皆不列入），實際 ${JSON.stringify(result.allKeys)}`);
+    if (!result.flagged)
+      throw new Error('合成項目應皆帶 notSubmitted:true、salary:null');
+    if (result.allActiveCount !== 2)
+      throw new Error(`allActiveJournals 應仍只含真實存檔的月記 2 筆，實際 ${result.allActiveCount} 筆（合成項目不應混進去，否則會被當成「已交月記」算進其他統計）`);
+    if (JSON.stringify(result.sepKeys) !== JSON.stringify(['109-1-98-9']))
+      throw new Error(`日期範圍只含 2020/9 時，未繳月記應只剩 98 的 9 月，實際 ${JSON.stringify(result.sepKeys)}`);
+    const companies = result.companies || [];
+    if (!companies.includes('C公司') || !companies.includes('未填寫'))
+      throw new Error(`公司篩選清單應納入只有「未繳月記學生」才有的公司（C公司、名冊公司空白的「未填寫」），否則這些學生會被公司篩選整筆濾掉，實際 ${JSON.stringify(companies)}`);
   });
 
   return results;

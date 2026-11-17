@@ -4959,6 +4959,20 @@ async function exportAllStatsExcel() {
     // 2026-07-22 修正：公司欄位改為月記優先、名冊備援，理由同上方 locationRows
     salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(s.name || j.studentName || ''), 公司:sanitizeExcelCell(j.company || s.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月已交月記但薪資空白`) });
   });
+  // 2026-11-17 新增：Excel「薪資缺漏」也要涵蓋「該月完全沒繳月記」的學生，跟畫面（統計總覽→
+  // 薪資統計）與 LINE 複製的口徑一致。原本這裡只掃 journals（已存檔月記）裡薪資空白的項目，
+  // 沒繳月記的學生沒有月記文件，永遠不會出現在這張工作表。合成邏輯與畫面共用
+  // computeNotSubmittedSalaryJournals()（名冊 × 截止日已過的月份 − 已存在月記），名冊直接沿用
+  // 上方已載入的 students，截止日沿用 deadlineMap；submittedKeys 用「全部月記」allJournals
+  // 建立（不是日期範圍篩選後的 journals），再用同一個 journalMonthInRange() 套日期範圍。
+  const salarySubmittedKeys = new Set(allJournals.map(j => `${j.semester}-${j.seatNo}-${j.month}`));
+  let salaryNotSubmitted = computeNotSubmittedSalaryJournals(students, Object.values(deadlineMap), salarySubmittedKeys, new Date());
+  if (start && end) salaryNotSubmitted = salaryNotSubmitted.filter(j => journalMonthInRange(j, start, end));
+  salaryNotSubmitted
+    .sort((a,b) => (a.semester||'').localeCompare(b.semester||'') || (a.seatNo||'').localeCompare(b.seatNo||'') || monthOrderInSemester(a.semester,a.month)-monthOrderInSemester(b.semester,b.month))
+    .forEach(j => {
+      salaryAlertRows.push({ 類型:'薪資缺漏', 座號:j.seatNo || '', 姓名:sanitizeExcelCell(j.studentName || ''), 公司:sanitizeExcelCell(j.company || ''), 月數:'', 平均薪資:'', 說明:sanitizeExcelCell(`${j.semester || ''} ${j.month || ''}月未繳月記（截止日已過，薪資未填）`) });
+    });
   salaryCompanyList.map(c => {
     const avgs = c.students.map(s => s.avg).filter(Number.isFinite);
     const max = avgs.length ? Math.max(...avgs) : 0;
@@ -5854,6 +5868,35 @@ window.toggleWorktypeDetail = function(typeName) {
 };
 
 // 薪資統計
+// 2026-11-17 新增：合成「該月完全沒繳月記」的薪資缺漏項目（純函式，不碰 Firestore／DOM）。
+// 畫面「統計總覽→薪資統計」（loadSalaryStats()）與 Excel「薪資異常提醒」工作表
+// （exportAllStatsExcel()）共用，確保兩邊口徑一致。
+//   rosterRows   名冊：[{ semester, seatNo, name, company }, ...]
+//   deadlines    /deadlines 文件資料：[{ semester, month, closeDate, ... }, ...]
+//   submittedKeys 已存在月記文件的 Set，key 為 `${semester}-${seatNo}-${month}`（呼叫端需用
+//                「全部月記」建立，不是日期範圍篩選後的）
+//   now          判斷「截止日是否已過」的基準時間
+// 判斷基準跟主頁「已逾期未達標」一致：該月有設定 closeDate、且 closeDate 當天 23:59（台灣
+// 時間）已過；尚在繳交期限內、或沒設 closeDate 的月份一律不列入，避免對還來得及繳的同學
+// 過早催薪資。回傳項目帶 notSubmitted:true、salary:null，月份欄位為數字。
+function computeNotSubmittedSalaryJournals(rosterRows, deadlines, submittedKeys, now) {
+  const result = [];
+  const nowMs = (now instanceof Date ? now : new Date()).getTime();
+  (deadlines || []).forEach(dd => {
+    if (!dd) return;
+    const ddMonth = Number(dd.month);
+    if (!dd.semester || !ddMonth || !dd.closeDate) return;
+    const closeMs = new Date(dd.closeDate + 'T23:59:59+08:00').getTime();
+    if (Number.isNaN(closeMs) || closeMs >= nowMs) return;
+    (rosterRows || []).forEach(r => {
+      if (!r || r.semester !== dd.semester) return;
+      if (submittedKeys && submittedKeys.has(`${r.semester}-${r.seatNo}-${ddMonth}`)) return;
+      result.push({ semester: r.semester, seatNo: r.seatNo, month: ddMonth, studentName: r.name || '', company: r.company || '', salary: null, notSubmitted: true });
+    });
+  });
+  return result;
+}
+
 async function loadSalaryStats() {
   const { collection, collectionGroup, getDocs } = firebase_funcs;
   const { start, end } = getStatsDateRange('salary-stats');
@@ -5898,26 +5941,16 @@ async function loadSalaryStats() {
     }));
   // 2026-11-17 新增：「薪資缺漏」要涵蓋「該月完全沒繳月記」的學生。這些學生沒有月記文件，
   // 不會出現在 allActiveJournals，原本的薪資缺漏名單（只篩已存檔月記的薪資空白）完全看不到
-  // 他們，老師也就複製不到。這裡依「名冊（/students 的 {學期}_{座號}）× 該學期已設定且截止日
-  // 已過的月份（/deadlines）」逐一檢查，凡是該生該月沒有任何月記文件的，合成一筆
-  // notSubmitted:true、salary:null 的項目。判斷基準刻意跟「已逾期未達標」一致（closeDate 已過）：
-  // 還在繳交期限內的月份不列入，避免對還來得及繳的同學過早催薪資。submittedKeys 必須在日期
-  // 範圍篩選「之前」用全部月記建立（以學期＋座號＋月份比對，跟日期篩選無關）。
+  // 他們，老師也就複製不到。合成邏輯抽成共用函式 computeNotSubmittedSalaryJournals()，
+  // 畫面（這裡）與 Excel「薪資異常提醒」（exportAllStatsExcel()）共用同一份，避免兩邊各自
+  // 演化而不同步。submittedKeys 必須在日期範圍篩選「之前」用全部月記建立。
   const submittedKeys = new Set(allActiveJournals.map(j => `${j.semester}-${j.seatNo}-${j.month}`));
-  const nowForSalary = new Date();
-  let notSubmittedJournals = [];
-  deadlineSnap.docs.forEach(d => {
-    const dd = d.data();
-    const ddMonth = Number(dd.month);
-    if (!dd.semester || !ddMonth || !dd.closeDate) return;
-    const closeDt = new Date(dd.closeDate + 'T23:59:59+08:00');
-    if (isNaN(closeDt.getTime()) || closeDt >= nowForSalary) return;
-    Object.values(rosterRowMap).forEach(r => {
-      if (r.semester !== dd.semester) return;
-      if (submittedKeys.has(`${r.semester}-${r.seatNo}-${ddMonth}`)) return;
-      notSubmittedJournals.push({ semester: r.semester, seatNo: r.seatNo, month: ddMonth, studentName: r.name, company: r.company, salary: null, notSubmitted: true });
-    });
-  });
+  let notSubmittedJournals = computeNotSubmittedSalaryJournals(
+    Object.values(rosterRowMap),
+    deadlineSnap.docs.map(d => d.data()),
+    submittedKeys,
+    new Date()
+  );
   if (start && end) {
     allActiveJournals = allActiveJournals.filter(j => journalMonthInRange(j, start, end));
     notSubmittedJournals = notSubmittedJournals.filter(j => journalMonthInRange(j, start, end));
